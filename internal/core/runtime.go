@@ -294,7 +294,7 @@ func (r *Runtime) restoreTabs(b *browser.Browser, tabs []TabRecord) {
 	initial := b.Targets()
 	restored := 0
 	for _, t := range tabs {
-		if t.URL == "" || strings.HasPrefix(t.URL, "chrome://newtab") {
+		if t.URL == "" || t.URL == "about:blank" || strings.HasPrefix(t.URL, "chrome://newtab") {
 			continue
 		}
 		tab, err := b.NewTab(ctx, browser.NewTabOptions{URL: t.URL, NewWindow: true})

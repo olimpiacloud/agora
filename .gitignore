@@ -1,8 +1,8 @@
 /bin/
 /dist/
 /web/node_modules/
-/web/dist/
 *.test
 *.out
 /bench/results/*.raw
 /.carbon/
+/web/node_modules/

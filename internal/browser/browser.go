@@ -114,8 +114,10 @@ func Launch(ctx context.Context, o LaunchOptions) (*Browser, error) {
 	args = append(args, o.ExtraArgs...)
 	if len(o.StartURLs) > 0 {
 		args = append(args, o.StartURLs...)
-	} else {
+	} else if o.Headless {
 		args = append(args, "about:blank")
+	} else {
+		args = append(args, "--no-startup-window")
 	}
 	toChrome, ourW, err := os.Pipe()
 	if err != nil {

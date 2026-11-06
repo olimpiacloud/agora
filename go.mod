@@ -3,6 +3,7 @@ module github.com/agusgarcia3007/carbon
 go 1.27.3
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/jezek/xgb v1.3.1
 	github.com/pion/interceptor v0.1.51
 	github.com/pion/rtcp v1.2.20
