@@ -54,6 +54,7 @@ type Runtime struct {
 	lastTabs  []TabRecord
 	idle      bool
 	closing   bool
+	restored  bool
 	offsets   map[string][3]int
 }
 
@@ -134,6 +135,24 @@ func (m *Manager) ensureRuntimeLocked(ctx context.Context, id string, display bo
 	if display && !cfg.Headless && r.display == nil {
 		if err := r.startDisplay(ctx, cfg); err != nil {
 			return nil, err
+		}
+	}
+	if !r.restored && (r.display != nil || cfg.Headless) {
+		r.restored = true
+		m.mu.Lock()
+		cp := w.Checkpoint
+		m.mu.Unlock()
+		if cp != nil {
+			for _, a := range cp.Apps {
+				r.launch(a)
+			}
+			if len(cp.Tabs) > 0 {
+				go func() {
+					c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+					defer cancel()
+					r.Browser(c)
+				}()
+			}
 		}
 	}
 	m.setState(id, StateActive, "runtime")

@@ -1,0 +1,19 @@
+[Unit]
+Description=Carbon agent-native desktop runtime
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/carbon serve --home /var/lib/carbon --listen 127.0.0.1:7788
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGINT
+TimeoutStopSec=45
+Delegate=yes
+LimitNOFILE=65536
+NoNewPrivileges=false
+ProtectSystem=full
+PrivateTmp=false
+
+[Install]
+WantedBy=multi-user.target

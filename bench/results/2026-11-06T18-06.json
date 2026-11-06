@@ -1,0 +1,205 @@
+{
+  "host": "Host: AMD Ryzen 5 3400G with Radeon Vega Graphics, 8 threads; Google Chrome 157.0.8103.38; carbon 0.1.0",
+  "rows": [
+    {
+      "scenario": "1 idle daemon",
+      "metric": "memory PSS",
+      "carbon": 6.654296875,
+      "baseline": 0,
+      "unit": "MB",
+      "note": "baseline has no daemon"
+    },
+    {
+      "scenario": "1 idle daemon",
+      "metric": "CPU",
+      "carbon": 0,
+      "baseline": 0,
+      "unit": "%"
+    },
+    {
+      "scenario": "2 empty desktop",
+      "metric": "memory PSS",
+      "carbon": 29.478515625,
+      "baseline": 80.0126953125,
+      "unit": "MB",
+      "note": "carbon: daemon+Xvfb+WM; baseline: Xvfb+openbox+x11vnc+websockify"
+    },
+    {
+      "scenario": "2 empty desktop",
+      "metric": "CPU idle",
+      "carbon": 0.4,
+      "baseline": 0,
+      "unit": "%"
+    },
+    {
+      "scenario": "2 empty desktop",
+      "metric": "start time",
+      "carbon": 99,
+      "baseline": 278,
+      "unit": "ms"
+    },
+    {
+      "scenario": "3 desktop + Chromium",
+      "metric": "cold start to page loaded",
+      "carbon": 481,
+      "baseline": 357,
+      "unit": "ms"
+    },
+    {
+      "scenario": "3 desktop + Chromium",
+      "metric": "memory PSS",
+      "carbon": 281.9765625,
+      "baseline": 332.1201171875,
+      "unit": "MB",
+      "note": "Chromium included on both sides"
+    },
+    {
+      "scenario": "3 desktop + Chromium",
+      "metric": "CPU idle, no viewer",
+      "carbon": 0.4,
+      "baseline": 0.2,
+      "unit": "%"
+    },
+    {
+      "scenario": "4 agent capture",
+      "metric": "full screenshot latency p50",
+      "carbon": 30.561,
+      "baseline": 33.869,
+      "unit": "ms",
+      "note": "carbon: X shm grab of whole desktop + JPEG; baseline: CDP Page.captureScreenshot"
+    },
+    {
+      "scenario": "4 agent capture",
+      "metric": "tab screenshot via API p50",
+      "carbon": 33.498,
+      "baseline": 33.869,
+      "unit": "ms",
+      "note": "carbon adds HTTP+auth+arbitration over raw CDP"
+    },
+    {
+      "scenario": "4 agent capture",
+      "metric": "semantic snapshot p50",
+      "carbon": 1.146,
+      "baseline": 0,
+      "unit": "ms",
+      "note": "no baseline equivalent; replaces screenshots for agents"
+    },
+    {
+      "scenario": "5 input",
+      "metric": "click → DOM mousedown p50 (X11 seat)",
+      "carbon": 1.14013671875,
+      "baseline": 3.75146484375,
+      "unit": "ms",
+      "note": "carbon: API→own MPX seat via XTEST; baseline: xdotool process"
+    },
+    {
+      "scenario": "5 input",
+      "metric": "click → DOM mousedown p50 (CDP)",
+      "carbon": 14.25830078125,
+      "baseline": 0,
+      "unit": "ms",
+      "note": "carbon semantic click through API"
+    },
+    {
+      "scenario": "6 five agents with a browser",
+      "metric": "new agent ready (cursor+window vs new stack)",
+      "carbon": 118,
+      "baseline": 427,
+      "unit": "ms"
+    },
+    {
+      "scenario": "6 five agents with a browser",
+      "metric": "memory PSS",
+      "carbon": 403.9482421875,
+      "baseline": 1487.9169921875,
+      "unit": "MB",
+      "note": "carbon: 1 desktop, 1 Chromium, 5 windows; baseline: 5 full stacks"
+    },
+    {
+      "scenario": "6 five agents with a browser",
+      "metric": "CPU idle, no viewer",
+      "carbon": 0.8,
+      "baseline": 1.4000000000000001,
+      "unit": "%"
+    },
+    {
+      "scenario": "7 idle cursors",
+      "metric": "memory per idle cursor",
+      "carbon": 0.38,
+      "baseline": 0,
+      "unit": "KB",
+      "note": "100 logical cursors without graphics; baseline would need a stack each"
+    },
+    {
+      "scenario": "8 animated page, no viewer",
+      "metric": "CPU",
+      "carbon": 1.6,
+      "baseline": 0,
+      "unit": "%",
+      "note": "page animation cost on both; carbon encodes nothing"
+    },
+    {
+      "scenario": "9 streaming, 1 viewer",
+      "metric": "server CPU (desktop+browser+stream)",
+      "carbon": 2.666666666666667,
+      "baseline": 5.666666666666667,
+      "unit": "%",
+      "note": "baseline client requests raw RFB through websockify (cheapest server encoding)"
+    },
+    {
+      "scenario": "9 streaming, 1 viewer",
+      "metric": "frames/s delivered",
+      "carbon": 0.2,
+      "baseline": 0.2,
+      "unit": "fps"
+    },
+    {
+      "scenario": "9 streaming, 1 viewer",
+      "metric": "bandwidth",
+      "carbon": 61.2928,
+      "baseline": 6553.625599999999,
+      "unit": "kbit/s",
+      "note": "H.264 vs raw RFB"
+    },
+    {
+      "scenario": "10 streaming, 3 viewers",
+      "metric": "server CPU",
+      "carbon": 8.333333333333332,
+      "baseline": 12,
+      "unit": "%",
+      "note": "carbon encodes once and fans out"
+    },
+    {
+      "scenario": "11 suspended workspace",
+      "metric": "memory PSS (whole carbon)",
+      "carbon": 26.861328125,
+      "baseline": 338.3779296875,
+      "unit": "MB",
+      "note": "baseline cannot suspend without losing the live session"
+    },
+    {
+      "scenario": "11 suspended workspace",
+      "metric": "suspend time",
+      "carbon": 198,
+      "baseline": 0,
+      "unit": "ms",
+      "note": "checkpoint + graceful browser close"
+    },
+    {
+      "scenario": "11 suspended workspace",
+      "metric": "resume until 5 tabs restored",
+      "carbon": 10649,
+      "baseline": 357,
+      "unit": "ms",
+      "note": "baseline: cold start of one stack"
+    },
+    {
+      "scenario": "12 teardown",
+      "metric": "destroy workspace",
+      "carbon": 220,
+      "baseline": 0,
+      "unit": "ms"
+    }
+  ],
+  "time": "2026-11-06T18:06:00.389795062-03:00"
+}

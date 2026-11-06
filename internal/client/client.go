@@ -48,17 +48,25 @@ type APIError struct {
 func (e *APIError) Error() string { return fmt.Sprintf("carbon %d: %s", e.Status, e.Body) }
 
 func (c *Client) Raw(ctx context.Context, method, path string, body any) ([]byte, string, error) {
+	b, h, err := c.RawHeader(ctx, method, path, body)
+	if err != nil {
+		return nil, "", err
+	}
+	return b, h.Get("Content-Type"), nil
+}
+
+func (c *Client) RawHeader(ctx context.Context, method, path string, body any) ([]byte, http.Header, error) {
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return nil, "", err
+			return nil, nil, err
 		}
 		rd = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.URL+path, rd)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
@@ -71,17 +79,17 @@ func (c *Client) Raw(ctx context.Context, method, path string, body any) ([]byte
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 	if resp.StatusCode >= 300 {
-		return nil, "", &APIError{Status: resp.StatusCode, Body: strings.TrimSpace(string(b))}
+		return nil, nil, &APIError{Status: resp.StatusCode, Body: strings.TrimSpace(string(b))}
 	}
-	return b, resp.Header.Get("Content-Type"), nil
+	return b, resp.Header, nil
 }
 
 func (c *Client) Do(ctx context.Context, method, path string, body, out any) error {

@@ -367,3 +367,10 @@ func (m *Manager) Clipboard(ctx context.Context, ws string, set *string) (string
 	}
 	return cb.Get(2 * time.Second)
 }
+
+func Downscale(src *image.RGBA, maxW int) *image.RGBA {
+	if src.Bounds().Dx() <= maxW {
+		return src
+	}
+	return downscale(src, maxW)
+}

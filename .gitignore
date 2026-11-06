@@ -6,3 +6,4 @@
 /bench/results/*.raw
 /.carbon/
 /web/node_modules/
+/paseo-plugin/node_modules/

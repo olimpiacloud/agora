@@ -42,7 +42,11 @@ func (s *Server) tab(ctx context.Context, a Args, body map[string]any) ([]conten
 		return nil, err
 	}
 	if img, ok := out["image"].(string); ok {
-		return []content{{Type: "image", Data: img, MimeType: fmt.Sprint(out["mime"])}}, nil
+		res := []content{{Type: "image", Data: img, MimeType: fmt.Sprint(out["mime"])}}
+		if id, ok := out["shot"].(string); ok {
+			res = append(res, content{Type: "text", Text: "carbon-shot:" + id})
+		}
+		return res, nil
 	}
 	if snap, ok := out["snapshot"].(string); ok {
 		extra := ""

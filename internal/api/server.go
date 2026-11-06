@@ -238,8 +238,19 @@ func (s *Server) routes() {
 		}
 		w.Header().Set("Content-Type", mime)
 		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Carbon-Shot", s.m.StoreShot(id, p.CursorID(), mime, b))
 		w.Write(b)
 	}))
+	m.HandleFunc("GET /v1/shots/{sid}", s.h(func(w http.ResponseWriter, r *http.Request, p *Principal) {
+		sh := s.m.GetShot(r.PathValue("sid"))
+		if sh == nil || !p.CanWorkspace(sh.Workspace) {
+			writeErr(w, core.ErrNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", sh.Mime)
+		w.Header().Set("Cache-Control", "private, max-age=86400")
+		w.Write(sh.Data)
+	}, false))
 	m.HandleFunc("POST /v1/workspaces/{id}/input", s.ws(func(w http.ResponseWriter, r *http.Request, p *Principal, id string) {
 		var req core.InputReq
 		if err := decode(r, &req); err != nil {
@@ -339,6 +350,7 @@ func (s *Server) routes() {
 	}))
 	m.HandleFunc("GET /v1/workspaces/{id}/stream/ws", s.h(s.streamWS, true))
 	m.HandleFunc("POST /v1/workspaces/{id}/stream/webrtc", s.h(s.streamRTC, true))
+	m.HandleFunc("GET /v1/workspaces/{id}/stream/jpeg", s.h(s.streamJPEG, true))
 
 	m.HandleFunc("POST /v1/cursors", s.h(s.createCursor, false))
 	m.HandleFunc("GET /v1/cursors", s.h(func(w http.ResponseWriter, r *http.Request, p *Principal) {

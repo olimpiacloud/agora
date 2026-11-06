@@ -272,28 +272,8 @@ func (m *Manager) suspendLocked(ctx context.Context, id, reason string) error {
 }
 
 func (m *Manager) Resume(ctx context.Context, id string) error {
-	l := m.wsLock(id)
-	l.Lock()
-	defer l.Unlock()
-	w, err := m.GetWorkspace(id)
-	if err != nil {
+	if _, err := m.ensureRuntime(ctx, id, true); err != nil {
 		return err
-	}
-	r, err := m.ensureRuntimeLocked(ctx, id, true)
-	if err != nil {
-		return err
-	}
-	if w.Checkpoint != nil {
-		for _, a := range w.Checkpoint.Apps {
-			r.launch(a)
-		}
-		if len(w.Checkpoint.Tabs) > 0 {
-			go func() {
-				c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-				defer cancel()
-				r.Browser(c)
-			}()
-		}
 	}
 	m.Bus.Publish("workspace.resumed", id, "", nil)
 	return nil

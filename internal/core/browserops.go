@@ -220,6 +220,7 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 		if err == nil {
 			res["image"] = base64.StdEncoding.EncodeToString(b)
 			res["mime"] = "image/" + defStr(a.Format, "jpeg")
+			res["shot"] = m.StoreShot(ws, cursorID, "image/"+defStr(a.Format, "jpeg"), b)
 		}
 	case "click":
 		if a.Ref != "" {

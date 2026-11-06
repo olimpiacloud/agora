@@ -232,11 +232,15 @@ func (s *Server) call(ctx context.Context, method, path string, body any) ([]con
 }
 
 func (s *Server) image(ctx context.Context, path string) ([]content, error) {
-	b, mime, err := s.c.Raw(ctx, "GET", path, nil)
+	b, h, err := s.c.RawHeader(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err
 	}
-	return []content{{Type: "image", Data: base64.StdEncoding.EncodeToString(b), MimeType: mime}}, nil
+	out := []content{{Type: "image", Data: base64.StdEncoding.EncodeToString(b), MimeType: h.Get("Content-Type")}}
+	if id := h.Get("X-Carbon-Shot"); id != "" {
+		out = append(out, content{Type: "text", Text: "carbon-shot:" + id})
+	}
+	return out, nil
 }
 
 func q(kv ...string) string {
