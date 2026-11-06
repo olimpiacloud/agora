@@ -21,15 +21,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/agusgarcia3007/carbon/internal/client"
-	"github.com/agusgarcia3007/carbon/internal/core"
 	"github.com/coder/websocket"
+	"github.com/olimpiacloud/agora/internal/client"
+	"github.com/olimpiacloud/agora/internal/core"
 )
 
 type Row struct {
 	Scenario string  `json:"scenario"`
 	Metric   string  `json:"metric"`
-	Carbon   float64 `json:"carbon"`
+	Agora    float64 `json:"agora"`
 	Baseline float64 `json:"baseline"`
 	Unit     string  `json:"unit"`
 	Note     string  `json:"note,omitempty"`
@@ -39,7 +39,7 @@ var rows []Row
 
 func add(s, m string, c, b float64, unit, note string) {
 	rows = append(rows, Row{s, m, c, b, unit, note})
-	log.Printf("%-28s %-34s carbon=%-10.2f baseline=%-10.2f %s %s", s, m, c, b, unit, note)
+	log.Printf("%-28s %-34s agora=%-10.2f baseline=%-10.2f %s %s", s, m, c, b, unit, note)
 }
 
 type tree []int
@@ -85,7 +85,7 @@ func (t tree) cpu(d time.Duration) float64 {
 var (
 	uid, gid int
 	home     string
-	carbonC  *client.Client
+	agoraC   *client.Client
 	daemon   *exec.Cmd
 	site     *httptest.Server
 	window   = 10 * time.Second
@@ -97,8 +97,8 @@ func must(err error) {
 	}
 }
 
-func startCarbon(bin string) {
-	home, _ = os.MkdirTemp("/tmp", "carbon-bench-")
+func startAgora(bin string) {
+	home, _ = os.MkdirTemp("/tmp", "agora-bench-")
 	os.Chmod(home, 0711)
 	daemon = exec.Command(bin, "serve", "--home", home, "--listen", "127.0.0.1:7791")
 	daemon.Stdout, daemon.Stderr = os.Stderr, os.Stderr
@@ -112,12 +112,12 @@ func startCarbon(bin string) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	tok, _ := os.ReadFile(filepath.Join(home, "admin.token"))
-	carbonC = &client.Client{URL: "http://127.0.0.1:7791", Token: strings.TrimSpace(string(tok)), HTTP: &http.Client{Timeout: 2 * time.Minute}}
+	agoraC = &client.Client{URL: "http://127.0.0.1:7791", Token: strings.TrimSpace(string(tok)), HTTP: &http.Client{Timeout: 2 * time.Minute}}
 }
 
 func cdo(method, path string, body any) map[string]any {
 	var out map[string]any
-	must(carbonC.Do(context.Background(), method, path, body, &out))
+	must(agoraC.Do(context.Background(), method, path, body, &out))
 	return out
 }
 
@@ -300,11 +300,11 @@ func rfbConsume(port int, d time.Duration) (frames int, bytes int64) {
 	return
 }
 
-func carbonConsume(ws string, d time.Duration) (frames int, bytes int64) {
-	return carbonConsumeOpt(ws, d, false)
+func agoraConsume(ws string, d time.Duration) (frames int, bytes int64) {
+	return agoraConsumeOpt(ws, d, false)
 }
 
-func carbonConsumeOpt(ws string, d time.Duration, interact bool) (frames int, bytes int64) {
+func agoraConsumeOpt(ws string, d time.Duration, interact bool) (frames int, bytes int64) {
 	vt := cdo("POST", "/v1/viewer-tokens", map[string]any{"workspace": ws, "control": interact})["token"].(string)
 	ctx, cancel := context.WithTimeout(context.Background(), d+5*time.Second)
 	defer cancel()
@@ -346,14 +346,14 @@ func xvfbOf(ws string) int {
 	return p
 }
 
-func carbonTree() tree {
+func agoraTree() tree {
 	return tree{daemon.Process.Pid}
 }
 
 const animHTML = `<title>anim</title><body style="margin:0;font:40px sans-serif"><div id=d></div><canvas id=c width=600 height=300></canvas><script>const x=c.getContext('2d');let i=0;setInterval(()=>{d.textContent=Date.now();x.fillStyle='hsl('+(i++%360)+',70%,50%)';x.fillRect((i*7)%560,(i*3)%260,40,40)},33)</script>`
 
 func main() {
-	bin := flag.String("carbon", "./bin/carbon", "carbon binary")
+	bin := flag.String("agora", "./bin/agora", "agora binary")
 	out := flag.String("out", "bench/results", "output directory")
 	quick := flag.Bool("quick", false, "shorter windows")
 	flag.Parse()
@@ -361,7 +361,7 @@ func main() {
 		window = 5 * time.Second
 	}
 	if os.Getuid() == 0 {
-		u, err := user.Lookup("carbon")
+		u, err := user.Lookup("agora")
 		must(err)
 		uid, _ = strconv.Atoi(u.Uid)
 		gid, _ = strconv.Atoi(u.Gid)
@@ -375,7 +375,7 @@ func main() {
 		fmt.Fprintf(w, "<title>bench</title><h1 id=h>bench page</h1><input id=i><script>document.addEventListener('mousedown',e=>{window.__md=performance.timeOrigin+performance.now()},true)</script>")
 	}))
 	defer site.Close()
-	startCarbon(*bin)
+	startAgora(*bin)
 	defer func() {
 		syscall.Kill(-daemon.Process.Pid, syscall.SIGINT)
 		daemon.Wait()
@@ -383,20 +383,20 @@ func main() {
 	}()
 	time.Sleep(time.Second)
 
-	add("1 idle daemon", "memory PSS", carbonTree().pssMB(), 0, "MB", "baseline has no daemon")
-	add("1 idle daemon", "CPU", carbonTree().cpu(window), 0, "%", "")
+	add("1 idle daemon", "memory PSS", agoraTree().pssMB(), 0, "MB", "baseline has no daemon")
+	add("1 idle daemon", "CPU", agoraTree().cpu(window), 0, "%", "")
 
 	t0 := time.Now()
 	w := cdo("POST", "/v1/workspaces", map[string]any{"name": "empty", "start": true})
 	wsEmpty := w["id"].(string)
-	carbonEmpty := time.Since(t0)
+	agoraEmpty := time.Since(t0)
 	time.Sleep(time.Second)
-	cm := carbonTree().pssMB()
+	cm := agoraTree().pssMB()
 	b := startBaselineNoChrome()
 	time.Sleep(time.Second)
-	add("2 empty desktop", "memory PSS", cm, b.roots().pssMB(), "MB", "carbon: daemon+Xvfb+WM; baseline: Xvfb+openbox+x11vnc+websockify")
-	add("2 empty desktop", "CPU idle", carbonTree().cpu(window), b.roots().cpu(window), "%", "")
-	add("2 empty desktop", "start time", float64(carbonEmpty.Milliseconds()), float64(b.startMs), "ms", "")
+	add("2 empty desktop", "memory PSS", cm, b.roots().pssMB(), "MB", "agora: daemon+Xvfb+WM; baseline: Xvfb+openbox+x11vnc+websockify")
+	add("2 empty desktop", "CPU idle", agoraTree().cpu(window), b.roots().cpu(window), "%", "")
+	add("2 empty desktop", "start time", float64(agoraEmpty.Milliseconds()), float64(b.startMs), "ms", "")
 	b.stop()
 	cdo("DELETE", "/v1/workspaces/"+wsEmpty+"?purge=1", nil)
 
@@ -404,7 +404,7 @@ func main() {
 	w = cdo("POST", "/v1/workspaces", map[string]any{"name": "chrome", "start": true})
 	ws := w["id"].(string)
 	cr := cdo("POST", "/v1/cursors", map[string]any{"name": "a0", "workspace": ws})
-	agent := &client.Client{URL: carbonC.URL, Token: cr["token"].(string), HTTP: carbonC.HTTP}
+	agent := &client.Client{URL: agoraC.URL, Token: cr["token"].(string), HTTP: agoraC.HTTP}
 	var tab map[string]any
 	must(agent.Do(context.Background(), "POST", "/v1/workspaces/"+ws+"/tabs", map[string]any{"url": site.URL}, &tab))
 	target := tab["target"].(string)
@@ -416,15 +416,15 @@ func main() {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	carbonStart := time.Since(t0)
+	agoraStart := time.Since(t0)
 	t0 = time.Now()
 	bs := startBaseline(site.URL)
 	bs.pageLoaded(strings.TrimPrefix(site.URL, "http://"), 30*time.Second)
 	baseStart := time.Since(t0)
 	time.Sleep(3 * time.Second)
-	add("3 desktop + Chromium", "cold start to page loaded", float64(carbonStart.Milliseconds()), float64(baseStart.Milliseconds()), "ms", "")
-	add("3 desktop + Chromium", "memory PSS", carbonTree().pssMB(), bs.roots().pssMB(), "MB", "Chromium included on both sides")
-	add("3 desktop + Chromium", "CPU idle, no viewer", carbonTree().cpu(window), bs.roots().cpu(window), "%", "")
+	add("3 desktop + Chromium", "cold start to page loaded", float64(agoraStart.Milliseconds()), float64(baseStart.Milliseconds()), "ms", "")
+	add("3 desktop + Chromium", "memory PSS", agoraTree().pssMB(), bs.roots().pssMB(), "MB", "Chromium included on both sides")
+	add("3 desktop + Chromium", "CPU idle, no viewer", agoraTree().cpu(window), bs.roots().cpu(window), "%", "")
 
 	lat := func(f func()) float64 {
 		var ds []float64
@@ -437,17 +437,17 @@ func main() {
 		return ds[len(ds)/2]
 	}
 	shot := lat(func() {
-		_, _, err := carbonC.Raw(context.Background(), "GET", "/v1/workspaces/"+ws+"/screenshot?format=jpeg", nil)
+		_, _, err := agoraC.Raw(context.Background(), "GET", "/v1/workspaces/"+ws+"/screenshot?format=jpeg", nil)
 		must(err)
 	})
 	bcdp := newCDP(bs.cdpPort)
 	bshot := lat(func() { bcdp.call("Page.captureScreenshot", map[string]any{"format": "jpeg", "quality": 75}) })
-	add("4 agent capture", "full screenshot latency p50", shot, bshot, "ms", "carbon: X shm grab of whole desktop + JPEG; baseline: CDP Page.captureScreenshot")
+	add("4 agent capture", "full screenshot latency p50", shot, bshot, "ms", "agora: X shm grab of whole desktop + JPEG; baseline: CDP Page.captureScreenshot")
 	tshot := lat(func() {
 		var o map[string]any
 		must(agent.Do(context.Background(), "POST", "/v1/workspaces/"+ws+"/tabs/"+target, map[string]any{"action": "screenshot"}, &o))
 	})
-	add("4 agent capture", "tab screenshot via API p50", tshot, bshot, "ms", "carbon adds HTTP+auth+arbitration over raw CDP")
+	add("4 agent capture", "tab screenshot via API p50", tshot, bshot, "ms", "agora adds HTTP+auth+arbitration over raw CDP")
 	semantic := lat(func() {
 		var o map[string]any
 		must(agent.Do(context.Background(), "POST", "/v1/workspaces/"+ws+"/tabs/"+target, map[string]any{"action": "snapshot"}, &o))
@@ -476,7 +476,7 @@ func main() {
 		return ds[len(ds)/2]
 	}
 	wins := []map[string]any{}
-	must(carbonC.Do(context.Background(), "GET", "/v1/workspaces/"+ws+"/windows", nil, &wins))
+	must(agoraC.Do(context.Background(), "GET", "/v1/workspaces/"+ws+"/windows", nil, &wins))
 	cx, cy := 640.0, 500.0
 	if len(wins) > 0 {
 		cx = wins[0]["x"].(float64) + wins[0]["width"].(float64)/2
@@ -494,14 +494,14 @@ func main() {
 		c.Env = append(os.Environ(), "DISPLAY="+v["display"].(string), "XAUTHORITY="+filepath.Join(home, "workspaces", ws, "run", "xauth-"+strings.TrimPrefix(v["display"].(string), ":")))
 		c.Run()
 	})
-	add("5 input", "click → DOM mousedown p50 (X11 seat)", seat, xdo, "ms", "carbon: API→own MPX seat via XTEST; baseline: xdotool process")
-	add("5 input", "click → DOM mousedown p50 (CDP)", cdpClick, 0, "ms", "carbon semantic click through API")
+	add("5 input", "click → DOM mousedown p50 (X11 seat)", seat, xdo, "ms", "agora: API→own MPX seat via XTEST; baseline: xdotool process")
+	add("5 input", "click → DOM mousedown p50 (CDP)", cdpClick, 0, "ms", "agora semantic click through API")
 
 	t0 = time.Now()
 	var subTabs []string
 	for i := 1; i < 5; i++ {
 		r := cdo("POST", "/v1/cursors", map[string]any{"name": fmt.Sprintf("a%d", i), "workspace": ws})
-		ac := &client.Client{URL: carbonC.URL, Token: r["token"].(string), HTTP: carbonC.HTTP}
+		ac := &client.Client{URL: agoraC.URL, Token: r["token"].(string), HTTP: agoraC.HTTP}
 		var tb map[string]any
 		must(ac.Do(context.Background(), "POST", "/v1/workspaces/"+ws+"/tabs", map[string]any{"url": site.URL}, &tb))
 		subTabs = append(subTabs, tb["target"].(string))
@@ -521,20 +521,20 @@ func main() {
 		allBase = append(allBase, s.roots()...)
 	}
 	add("6 five agents with a browser", "new agent ready (cursor+window vs new stack)", float64(perCursor.Milliseconds()), float64(perStack.Milliseconds()), "ms", "")
-	add("6 five agents with a browser", "memory PSS", carbonTree().pssMB(), allBase.pssMB(), "MB", "carbon: 1 desktop, 1 Chromium, 5 windows; baseline: 5 full stacks")
-	add("6 five agents with a browser", "CPU idle, no viewer", carbonTree().cpu(window), allBase.cpu(window), "%", "")
+	add("6 five agents with a browser", "memory PSS", agoraTree().pssMB(), allBase.pssMB(), "MB", "agora: 1 desktop, 1 Chromium, 5 windows; baseline: 5 full stacks")
+	add("6 five agents with a browser", "CPU idle, no viewer", agoraTree().cpu(window), allBase.cpu(window), "%", "")
 	for _, s := range extra {
 		s.stop()
 	}
 
-	before := carbonTree().pssMB()
+	before := agoraTree().pssMB()
 	var ids []string
 	for i := 0; i < 100; i++ {
 		r := cdo("POST", "/v1/cursors", map[string]any{"name": fmt.Sprintf("idle-%d", i), "workspace": ws})
 		ids = append(ids, r["cursor"].(map[string]any)["id"].(string))
 	}
 	time.Sleep(time.Second)
-	after := carbonTree().pssMB()
+	after := agoraTree().pssMB()
 	add("7 idle cursors", "memory per idle cursor", (after-before)*1024/100, 0, "KB", "100 logical cursors without graphics; baseline would need a stack each")
 	for _, id := range ids {
 		cdo("DELETE", "/v1/cursors/"+id, nil)
@@ -544,14 +544,14 @@ func main() {
 	_ = sv
 	bcdp.call("Page.navigate", map[string]any{"url": site.URL + "/anim"})
 	time.Sleep(2 * time.Second)
-	add("8 animated page, no viewer", "CPU", carbonTree().cpu(window), bs.roots().cpu(window), "%", "page animation cost on both; carbon encodes nothing")
+	add("8 animated page, no viewer", "CPU", agoraTree().cpu(window), bs.roots().cpu(window), "%", "page animation cost on both; agora encodes nothing")
 	stopC := make(chan [2]float64)
 	go func() {
-		f, by := carbonConsume(ws, window)
+		f, by := agoraConsume(ws, window)
 		stopC <- [2]float64{float64(f), float64(by)}
 	}()
 	time.Sleep(time.Second)
-	ccpu := carbonTree().cpu(window - 2*time.Second)
+	ccpu := agoraTree().cpu(window - 2*time.Second)
 	cres := <-stopC
 	go func() {
 		f, by := rfbConsume(bs.wsPort, window)
@@ -564,11 +564,11 @@ func main() {
 	add("9 streaming, 1 viewer", "frames/s delivered", cres[0]/window.Seconds(), bres[0]/window.Seconds(), "fps", "")
 	add("9 streaming, 1 viewer", "bandwidth", cres[1]*8/1000/window.Seconds(), bres[1]*8/1000/window.Seconds(), "kbit/s", "H.264 vs raw RFB")
 	go func() {
-		f, by := carbonConsumeOpt(ws, window, true)
+		f, by := agoraConsumeOpt(ws, window, true)
 		stopC <- [2]float64{float64(f), float64(by)}
 	}()
 	time.Sleep(time.Second)
-	icpu := carbonTree().cpu(window - 2*time.Second)
+	icpu := agoraTree().cpu(window - 2*time.Second)
 	ires := <-stopC
 	add("9b streaming, viewer interacting", "server CPU", icpu, bcpu, "%", "viewer sends pointer moves every 100 ms; baseline row repeats scenario 9")
 	add("9b streaming, viewer interacting", "frames/s delivered", ires[0]/window.Seconds(), bres[0]/window.Seconds(), "fps", "")
@@ -588,11 +588,11 @@ func main() {
 	var ccpu3, bcpu3 float64
 	done := make(chan bool)
 	go func() {
-		multi(3, func() [2]float64 { f, b := carbonConsume(ws, window); return [2]float64{float64(f), float64(b)} })
+		multi(3, func() [2]float64 { f, b := agoraConsume(ws, window); return [2]float64{float64(f), float64(b)} })
 		done <- true
 	}()
 	time.Sleep(time.Second)
-	ccpu3 = carbonTree().cpu(window - 2*time.Second)
+	ccpu3 = agoraTree().cpu(window - 2*time.Second)
 	<-done
 	go func() {
 		multi(3, func() [2]float64 { f, b := rfbConsume(bs.wsPort, window); return [2]float64{float64(f), float64(b)} })
@@ -601,7 +601,7 @@ func main() {
 	time.Sleep(time.Second)
 	bcpu3 = bs.roots().cpu(window - 2*time.Second)
 	<-done
-	add("10 streaming, 3 viewers", "server CPU", ccpu3, bcpu3, "%", "carbon encodes once and fans out")
+	add("10 streaming, 3 viewers", "server CPU", ccpu3, bcpu3, "%", "agora encodes once and fans out")
 
 	cdo("POST", "/v1/workspaces/"+ws+"/tabs/"+target, map[string]any{"action": "navigate", "url": site.URL})
 	time.Sleep(time.Second)
@@ -609,13 +609,13 @@ func main() {
 	cdo("POST", "/v1/workspaces/"+ws+"/suspend", nil)
 	suspendMs := time.Since(t0).Milliseconds()
 	time.Sleep(time.Second)
-	add("11 suspended workspace", "memory PSS (whole carbon)", carbonTree().pssMB(), bs.roots().pssMB(), "MB", "baseline cannot suspend without losing the live session")
+	add("11 suspended workspace", "memory PSS (whole agora)", agoraTree().pssMB(), bs.roots().pssMB(), "MB", "baseline cannot suspend without losing the live session")
 	add("11 suspended workspace", "suspend time", float64(suspendMs), 0, "ms", "checkpoint + graceful browser close")
 	t0 = time.Now()
 	cdo("POST", "/v1/workspaces/"+ws+"/resume", nil)
 	for k := 0; k < 400; k++ {
 		var tabs []map[string]any
-		carbonC.Do(context.Background(), "GET", "/v1/workspaces/"+ws+"/tabs", nil, &tabs)
+		agoraC.Do(context.Background(), "GET", "/v1/workspaces/"+ws+"/tabs", nil, &tabs)
 		ok := 0
 		for _, t := range tabs {
 			if t["title"] == "bench" {
@@ -638,13 +638,13 @@ func main() {
 	jb, _ := json.MarshalIndent(map[string]any{"time": time.Now(), "host": hostInfo(), "rows": rows}, "", "  ")
 	os.WriteFile(filepath.Join(*out, stamp+".json"), jb, 0644)
 	var md strings.Builder
-	fmt.Fprintf(&md, "# Carbon vs Xvfb+x11vnc+noVNC+Chrome\n\n%s\n\nWindow per CPU sample: %v. PSS sums every process of each stack (Chromium included).\n\n| Scenario | Metric | Carbon | Baseline | Unit | Notes |\n|---|---|---:|---:|---|---|\n", hostInfo(), window)
+	fmt.Fprintf(&md, "# Agora vs Xvfb+x11vnc+noVNC+Chrome\n\n%s\n\nWindow per CPU sample: %v. PSS sums every process of each stack (Chromium included).\n\n| Scenario | Metric | Agora | Baseline | Unit | Notes |\n|---|---|---:|---:|---|---|\n", hostInfo(), window)
 	for _, r := range rows {
 		b := fmt.Sprintf("%.1f", r.Baseline)
 		if r.Baseline == 0 {
 			b = "—"
 		}
-		fmt.Fprintf(&md, "| %s | %s | %.1f | %s | %s | %s |\n", r.Scenario, r.Metric, r.Carbon, b, r.Unit, r.Note)
+		fmt.Fprintf(&md, "| %s | %s | %.1f | %s | %s | %s |\n", r.Scenario, r.Metric, r.Agora, b, r.Unit, r.Note)
 	}
 	os.WriteFile(filepath.Join(*out, stamp+".md"), []byte(md.String()), 0644)
 	os.WriteFile(filepath.Join(*out, "latest.md"), []byte(md.String()), 0644)
@@ -690,7 +690,7 @@ func hostInfo() string {
 		}
 	}
 	ver, _ := exec.Command("google-chrome", "--version").Output()
-	return fmt.Sprintf("Host: %s, %d threads; %s; carbon %s", cpu, numCPU(), strings.TrimSpace(string(ver)), core.Version)
+	return fmt.Sprintf("Host: %s, %d threads; %s; agora %s", cpu, numCPU(), strings.TrimSpace(string(ver)), core.Version)
 }
 
 func numCPU() int {

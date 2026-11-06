@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/agusgarcia3007/carbon/internal/core"
-	"github.com/agusgarcia3007/carbon/internal/stream"
 	"github.com/coder/websocket"
+	"github.com/olimpiacloud/agora/internal/core"
+	"github.com/olimpiacloud/agora/internal/stream"
 )
 
 func (s *Server) viewerAccess(r *http.Request, p *Principal, ws string) (bool, error) {

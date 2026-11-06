@@ -1,4 +1,4 @@
-import { call, wsURL } from "./carbon";
+import { call, wsURL } from "./agora";
 
 interface LiveEvent {
   type: string;
@@ -54,7 +54,7 @@ async function open(h: Hub, workspace: string, maxWidth: number, fps: number) {
     wake(h);
   };
   sock.onerror = () => {
-    h.status = "connection to Carbon failed";
+    h.status = "connection to Agora failed";
   };
   sock.onclose = () => {
     if (h.sock === sock) h.sock = null;

@@ -12,7 +12,7 @@ import (
 
 const snapshotJS = `(() => {
 const VO = %t;
-const R = window.__carbon || (window.__carbon = {n: 0, m: new Map(), w: new WeakMap()});
+const R = window.__agora || (window.__agora = {n: 0, m: new Map(), w: new WeakMap()});
 const out = [];
 const vw = innerWidth, vh = innerHeight;
 const interactiveRoles = new Set(['button','link','textbox','checkbox','radio','combobox','listbox','option','menuitem','menuitemcheckbox','menuitemradio','tab','switch','slider','searchbox','spinbutton','treeitem','gridcell']);
@@ -150,7 +150,7 @@ type box struct {
 }
 
 func (t *Tab) refBox(ctx context.Context, ref string) (float64, float64, error) {
-	js := fmt.Sprintf(`(async () => { const R = window.__carbon; const w = R && R.m.get(%q); const el = w && w.deref(); if (!el || !el.isConnected) return {Found:false};
+	js := fmt.Sprintf(`(async () => { const R = window.__agora; const w = R && R.m.get(%q); const el = w && w.deref(); if (!el || !el.isConnected) return {Found:false};
 el.scrollIntoView({block:'center', inline:'center', behavior:'instant'}); await new Promise(r => requestAnimationFrame(() => r()));
 let r = el.getBoundingClientRect(); let ox = 0, oy = 0; let win = el.ownerDocument.defaultView;
 while (win && win !== window && win.frameElement) { const fr = win.frameElement.getBoundingClientRect(); ox += fr.x; oy += fr.y; win = win.parent; }
@@ -186,7 +186,7 @@ func (t *Tab) HoverRef(ctx context.Context, ref string) error {
 }
 
 func (t *Tab) FillRef(ctx context.Context, ref, text string, submit bool) error {
-	js := fmt.Sprintf(`(() => { const w = window.__carbon && window.__carbon.m.get(%q); const el = w && w.deref(); if (!el) return false; el.focus();
+	js := fmt.Sprintf(`(() => { const w = window.__agora && window.__agora.m.get(%q); const el = w && w.deref(); if (!el) return false; el.focus();
 if ('value' in el && el.tagName !== 'SELECT') { el.select && el.select(); } else if (el.isContentEditable) { const s = getSelection(); const r = document.createRange(); r.selectNodeContents(el); s.removeAllRanges(); s.addRange(r); } return true; })()`, ref)
 	var ok bool
 	if err := t.Eval(ctx, js, &ok); err != nil {
@@ -210,7 +210,7 @@ if ('value' in el && el.tagName !== 'SELECT') { el.select && el.select(); } else
 
 func (t *Tab) SelectRef(ctx context.Context, ref string, values []string) error {
 	b, _ := json.Marshal(values)
-	js := fmt.Sprintf(`(() => { const w = window.__carbon && window.__carbon.m.get(%q); const el = w && w.deref(); if (!el || el.tagName !== 'SELECT') return false; const vals = %s;
+	js := fmt.Sprintf(`(() => { const w = window.__agora && window.__agora.m.get(%q); const el = w && w.deref(); if (!el || el.tagName !== 'SELECT') return false; const vals = %s;
 for (const o of el.options) o.selected = vals.includes(o.value) || vals.includes(o.label) || vals.includes(o.text);
 el.dispatchEvent(new Event('input', {bubbles:true})); el.dispatchEvent(new Event('change', {bubbles:true})); return true; })()`, ref, b)
 	var ok bool
@@ -238,7 +238,7 @@ func (t *Tab) SetFiles(ctx context.Context, ref string, files []string) error {
 			ObjectID string `json:"objectId"`
 		} `json:"result"`
 	}
-	if err := t.call(ctx, "Runtime.evaluate", map[string]any{"expression": fmt.Sprintf(`(() => { const w = window.__carbon && window.__carbon.m.get(%q); return w && w.deref(); })()`, ref)}, &r); err != nil {
+	if err := t.call(ctx, "Runtime.evaluate", map[string]any{"expression": fmt.Sprintf(`(() => { const w = window.__agora && window.__agora.m.get(%q); return w && w.deref(); })()`, ref)}, &r); err != nil {
 		return err
 	}
 	if r.Result.ObjectID == "" {

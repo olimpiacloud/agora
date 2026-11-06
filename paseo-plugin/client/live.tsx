@@ -2,7 +2,7 @@ import { type PluginWorkspacePanelProps, useRpc, useTabState, useWorkspace } fro
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Image, type LayoutChangeEvent, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { z } from "zod";
-import { control, ensureWorkspace, listCursors, listWorkspaces, liveFrame, sendInput } from "../shared/carbon";
+import { control, ensureWorkspace, listCursors, listWorkspaces, liveFrame, sendInput } from "../shared/agora";
 
 type Frame = { w: number; h: number; sw: number; sh: number; uri: string };
 type Cur = { id: string; name: string; status: string; detail: string; color: string; x: number; y: number; goal: string; parent: string };
@@ -151,8 +151,8 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
         )}
         <Chip label="↻" onPress={() => void refreshList()} />
       </View>
-      {err && <Text style={[styles.danger, { padding: 10 }]}>Carbon: {err}</Text>}
-      {!ws && !err && <Text style={[styles.muted, { padding: 16 }]}>Pick a Carbon workspace. Agents in this Paseo workspace get one linked automatically (★).</Text>}
+      {err && <Text style={[styles.danger, { padding: 10 }]}>Agora: {err}</Text>}
+      {!ws && !err && <Text style={[styles.muted, { padding: 16 }]}>Pick an Agora workspace. Agents in this Paseo workspace get one linked automatically (★).</Text>}
       {ws && (
         <>
           {needsHuman && !iHold && (

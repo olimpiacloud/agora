@@ -142,7 +142,7 @@ type Cgroups struct {
 }
 
 func DetectCgroups() *Cgroups {
-	if os.Getenv("CARBON_CGROUPS") == "off" {
+	if os.Getenv("AGORA_CGROUPS") == "off" {
 		return nil
 	}
 	b, err := os.ReadFile("/proc/self/cgroup")
@@ -155,7 +155,7 @@ func DetectCgroups() *Cgroups {
 			rel = strings.TrimPrefix(l, "0::")
 		}
 	}
-	if rel == "" || !strings.HasSuffix(rel, "carbon.service") && !strings.HasSuffix(rel, "carbon.service/daemon") {
+	if rel == "" || !strings.HasSuffix(rel, "agora.service") && !strings.HasSuffix(rel, "agora.service/daemon") {
 		return nil
 	}
 	rel = strings.TrimSuffix(rel, "/daemon")

@@ -85,7 +85,7 @@ func (r *RTC) Answer(ctx context.Context, id string, mode Mode, offer string, h 
 	if err != nil {
 		return nil, "", err
 	}
-	track, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"}, "video", "carbon")
+	track, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"}, "video", "agora")
 	if err != nil {
 		pc.Close()
 		return nil, "", err

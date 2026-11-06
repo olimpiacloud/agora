@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "carbon-web",
+      "name": "agora-web",
       "dependencies": {
         "react": "^19.3.1",
         "react-dom": "^19.3.1",

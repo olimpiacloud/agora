@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agusgarcia3007/carbon/internal/api"
-	"github.com/agusgarcia3007/carbon/internal/client"
-	"github.com/agusgarcia3007/carbon/internal/core"
-	"github.com/agusgarcia3007/carbon/internal/stream"
+	"github.com/olimpiacloud/agora/internal/api"
+	"github.com/olimpiacloud/agora/internal/client"
+	"github.com/olimpiacloud/agora/internal/core"
+	"github.com/olimpiacloud/agora/internal/stream"
 )
 
 type H struct {
@@ -39,14 +39,14 @@ func need(t *testing.T) {
 
 func newH(t *testing.T) *H {
 	need(t)
-	home, err := os.MkdirTemp("/tmp", "carbon-e2e-")
+	home, err := os.MkdirTemp("/tmp", "agora-e2e-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	os.Chmod(home, 0711)
 	appsUser := ""
 	if os.Getuid() == 0 {
-		appsUser = "carbon"
+		appsUser = "agora"
 	}
 	m, err := core.NewManager(core.Config{Home: home, AppsUser: appsUser, IdleAfter: time.Hour, RTC: stream.RTCOptions{IncludeLoop: true}})
 	if err != nil {
@@ -64,7 +64,7 @@ func newH(t *testing.T) *H {
 		m.Shutdown()
 		srv.Close()
 		h.site.Close()
-		if os.Getenv("CARBON_KEEP") == "" {
+		if os.Getenv("AGORA_KEEP") == "" {
 			os.RemoveAll(home)
 		}
 	})
@@ -185,7 +185,7 @@ func testSite() http.Handler {
 		}
 		page(w, "Me:"+who, fmt.Sprintf(`<h1 id=who>%s</h1><script>
 localStorage.setItem('ls', localStorage.getItem('ls') || 'v-'+Date.now());
-const rq = indexedDB.open('carbon', 1); rq.onupgradeneeded = () => rq.result.createObjectStore('kv');
+const rq = indexedDB.open('agora', 1); rq.onupgradeneeded = () => rq.result.createObjectStore('kv');
 rq.onsuccess = () => { const db = rq.result; const tx = db.transaction('kv', 'readwrite'); const st = tx.objectStore('kv'); const g = st.get('k'); g.onsuccess = () => { if (!g.result) st.put('idb-'+Date.now(), 'k'); }; };
 </script>`, who))
 	})
@@ -212,7 +212,7 @@ rq.onsuccess = () => { const db = rq.result; const tx = db.transaction('kv', 're
 	})
 	mux.HandleFunc("/download", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", "attachment; filename=report.txt")
-		w.Write([]byte("carbon download ok"))
+		w.Write([]byte("agora download ok"))
 	})
 	mux.HandleFunc("/dnd", func(w http.ResponseWriter, r *http.Request) {
 		page(w, "DnD", `<div id=src draggable=true style="width:80px;height:80px;background:#4af">drag</div><div id=dst style="margin-top:60px;width:200px;height:120px;border:2px dashed #999">drop</div>

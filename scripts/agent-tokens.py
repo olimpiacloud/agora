@@ -15,7 +15,7 @@ def analyze(path):
                 inp+=u.get("input_tokens",0); out+=u.get("output_tokens",0); cw+=u.get("cache_creation_input_tokens",0); cr+=u.get("cache_read_input_tokens",0)
                 if first is None: first=u
             for c in m.get("content",[]):
-                if c.get("type")=="tool_use": tools[c["name"].replace("mcp__carbon__","")]+=1
+                if c.get("type")=="tool_use": tools[c["name"].replace("mcp__agora__","")]+=1
         if e.get("type")=="user" and isinstance(m,dict):
             for c in m.get("content",[]) if isinstance(m.get("content"),list) else []:
                 if c.get("type")=="tool_result":

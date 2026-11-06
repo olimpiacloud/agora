@@ -1,7 +1,7 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 
-export const carbonWorkspace = z.object({
+export const agoraWorkspace = z.object({
   id: z.string(),
   name: z.string(),
   state: z.string(),
@@ -11,25 +11,25 @@ export const carbonWorkspace = z.object({
 });
 
 export const listWorkspaces = defineRpc({
-  name: "carbon.workspaces",
+  name: "agora.workspaces",
   input: z.object({ paseoWorkspaceId: z.string().optional() }),
-  output: z.object({ items: z.array(carbonWorkspace), linked: z.string().nullable(), error: z.string().nullable() }),
+  output: z.object({ items: z.array(agoraWorkspace), linked: z.string().nullable(), error: z.string().nullable() }),
 });
 
 export const ensureWorkspace = defineRpc({
-  name: "carbon.ensure_workspace",
+  name: "agora.ensure_workspace",
   input: z.object({ paseoWorkspaceId: z.string(), name: z.string() }),
   output: z.object({ id: z.string() }),
 });
 
 export const getShot = defineRpc({
-  name: "carbon.shot",
+  name: "agora.shot",
   input: z.object({ id: z.string() }),
   output: z.object({ mime: z.string(), base64: z.string() }),
 });
 
 export const sendInput = defineRpc({
-  name: "carbon.input",
+  name: "agora.input",
   input: z.object({
     workspace: z.string(),
     action: z.enum(["click", "double_click", "right_click", "type", "key", "scroll", "move"]),
@@ -43,12 +43,12 @@ export const sendInput = defineRpc({
 });
 
 export const control = defineRpc({
-  name: "carbon.control",
+  name: "agora.control",
   input: z.object({ workspace: z.string(), op: z.enum(["control-take", "control-return", "resume", "suspend"]) }),
   output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
 });
 
-export const carbonCursor = z.object({
+export const agoraCursor = z.object({
   id: z.string(),
   name: z.string(),
   status: z.string(),
@@ -61,9 +61,9 @@ export const carbonCursor = z.object({
 });
 
 export const listCursors = defineRpc({
-  name: "carbon.cursors",
+  name: "agora.cursors",
   input: z.object({ workspace: z.string() }),
-  output: z.object({ items: z.array(carbonCursor), locked: z.string().nullable() }),
+  output: z.object({ items: z.array(agoraCursor), locked: z.string().nullable() }),
 });
 
 export const liveEvent = z.object({
@@ -73,7 +73,7 @@ export const liveEvent = z.object({
 });
 
 export const liveFrame = defineRpc({
-  name: "carbon.live_frame",
+  name: "agora.live_frame",
   input: z.object({ workspace: z.string(), maxWidth: z.number(), fps: z.number(), after: z.number(), eventsAfter: z.number() }),
   output: z.object({
     seq: z.number(),
@@ -88,4 +88,4 @@ export const liveFrame = defineRpc({
   }),
 });
 
-export const SHOT_RE = /carbon-shot:(shot_[0-9a-f]+)/;
+export const SHOT_RE = /agora-shot:(shot_[0-9a-f]+)/;

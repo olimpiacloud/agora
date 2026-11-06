@@ -1,10 +1,10 @@
 {
-  "host": "Host: AMD Ryzen 5 3400G with Radeon Vega Graphics, 8 threads; Google Chrome 157.0.8103.38; carbon 0.1.0",
+  "host": "Host: AMD Ryzen 5 3400G with Radeon Vega Graphics, 8 threads; Google Chrome 157.0.8103.38; agora 0.1.0",
   "rows": [
     {
       "scenario": "1 idle daemon",
       "metric": "memory PSS",
-      "carbon": 12.056640625,
+      "agora": 12.056640625,
       "baseline": 0,
       "unit": "MB",
       "note": "baseline has no daemon"
@@ -12,43 +12,43 @@
     {
       "scenario": "1 idle daemon",
       "metric": "CPU",
-      "carbon": 0,
+      "agora": 0,
       "baseline": 0,
       "unit": "%"
     },
     {
       "scenario": "2 empty desktop",
       "metric": "memory PSS",
-      "carbon": 49.1083984375,
+      "agora": 49.1083984375,
       "baseline": 89.2783203125,
       "unit": "MB",
-      "note": "carbon: daemon+Xvfb+WM; baseline: Xvfb+openbox+x11vnc+websockify"
+      "note": "agora: daemon+Xvfb+WM; baseline: Xvfb+openbox+x11vnc+websockify"
     },
     {
       "scenario": "2 empty desktop",
       "metric": "CPU idle",
-      "carbon": 0.1,
+      "agora": 0.1,
       "baseline": 0.1,
       "unit": "%"
     },
     {
       "scenario": "2 empty desktop",
       "metric": "start time",
-      "carbon": 103,
+      "agora": 103,
       "baseline": 307,
       "unit": "ms"
     },
     {
       "scenario": "3 desktop + Chromium",
       "metric": "cold start to page loaded",
-      "carbon": 588,
+      "agora": 588,
       "baseline": 453,
       "unit": "ms"
     },
     {
       "scenario": "3 desktop + Chromium",
       "metric": "memory PSS",
-      "carbon": 314.9970703125,
+      "agora": 314.9970703125,
       "baseline": 361.8193359375,
       "unit": "MB",
       "note": "Chromium included on both sides"
@@ -56,30 +56,30 @@
     {
       "scenario": "3 desktop + Chromium",
       "metric": "CPU idle, no viewer",
-      "carbon": 0.4,
+      "agora": 0.4,
       "baseline": 0.1,
       "unit": "%"
     },
     {
       "scenario": "4 agent capture",
       "metric": "full screenshot latency p50",
-      "carbon": 34.676,
+      "agora": 34.676,
       "baseline": 34.872,
       "unit": "ms",
-      "note": "carbon: X shm grab of whole desktop + JPEG; baseline: CDP Page.captureScreenshot"
+      "note": "agora: X shm grab of whole desktop + JPEG; baseline: CDP Page.captureScreenshot"
     },
     {
       "scenario": "4 agent capture",
       "metric": "tab screenshot via API p50",
-      "carbon": 35.489,
+      "agora": 35.489,
       "baseline": 34.872,
       "unit": "ms",
-      "note": "carbon adds HTTP+auth+arbitration over raw CDP"
+      "note": "agora adds HTTP+auth+arbitration over raw CDP"
     },
     {
       "scenario": "4 agent capture",
       "metric": "semantic snapshot p50",
-      "carbon": 1.101,
+      "agora": 1.101,
       "baseline": 0,
       "unit": "ms",
       "note": "no baseline equivalent; replaces screenshots for agents"
@@ -87,45 +87,45 @@
     {
       "scenario": "5 input",
       "metric": "click → DOM mousedown p50 (X11 seat)",
-      "carbon": 1.162353515625,
+      "agora": 1.162353515625,
       "baseline": 3.784912109375,
       "unit": "ms",
-      "note": "carbon: API→own MPX seat via XTEST; baseline: xdotool process"
+      "note": "agora: API→own MPX seat via XTEST; baseline: xdotool process"
     },
     {
       "scenario": "5 input",
       "metric": "click → DOM mousedown p50 (CDP)",
-      "carbon": 12.603271484375,
+      "agora": 12.603271484375,
       "baseline": 0,
       "unit": "ms",
-      "note": "carbon semantic click through API"
+      "note": "agora semantic click through API"
     },
     {
       "scenario": "6 five agents with a browser",
       "metric": "new agent ready (cursor+window vs new stack)",
-      "carbon": 100,
+      "agora": 100,
       "baseline": 482,
       "unit": "ms"
     },
     {
       "scenario": "6 five agents with a browser",
       "metric": "memory PSS",
-      "carbon": 314.23046875,
+      "agora": 314.23046875,
       "baseline": 1503.599609375,
       "unit": "MB",
-      "note": "carbon: 1 desktop, 1 Chromium, 5 windows; baseline: 5 full stacks"
+      "note": "agora: 1 desktop, 1 Chromium, 5 windows; baseline: 5 full stacks"
     },
     {
       "scenario": "6 five agents with a browser",
       "metric": "CPU idle, no viewer",
-      "carbon": 0.2,
+      "agora": 0.2,
       "baseline": 0.4,
       "unit": "%"
     },
     {
       "scenario": "7 idle cursors",
       "metric": "memory per idle cursor",
-      "carbon": 1.4,
+      "agora": 1.4,
       "baseline": 0,
       "unit": "KB",
       "note": "100 logical cursors without graphics; baseline would need a stack each"
@@ -133,15 +133,15 @@
     {
       "scenario": "8 animated page, no viewer",
       "metric": "CPU",
-      "carbon": 14.6,
+      "agora": 14.6,
       "baseline": 12.9,
       "unit": "%",
-      "note": "page animation cost on both; carbon encodes nothing"
+      "note": "page animation cost on both; agora encodes nothing"
     },
     {
       "scenario": "9 streaming, 1 viewer",
       "metric": "server CPU (desktop+browser+stream)",
-      "carbon": 30.375000000000004,
+      "agora": 30.375000000000004,
       "baseline": 14.124999999999998,
       "unit": "%",
       "note": "baseline client requests raw RFB through websockify (cheapest server encoding)"
@@ -149,14 +149,14 @@
     {
       "scenario": "9 streaming, 1 viewer",
       "metric": "frames/s delivered",
-      "carbon": 29.2,
+      "agora": 29.2,
       "baseline": 15.5,
       "unit": "fps"
     },
     {
       "scenario": "9 streaming, 1 viewer",
       "metric": "bandwidth",
-      "carbon": 424.024,
+      "agora": 424.024,
       "baseline": 5870.6624,
       "unit": "kbit/s",
       "note": "H.264 vs raw RFB"
@@ -164,15 +164,15 @@
     {
       "scenario": "10 streaming, 3 viewers",
       "metric": "server CPU",
-      "carbon": 31.25,
+      "agora": 31.25,
       "baseline": 19,
       "unit": "%",
-      "note": "carbon encodes once and fans out"
+      "note": "agora encodes once and fans out"
     },
     {
       "scenario": "11 suspended workspace",
-      "metric": "memory PSS (whole carbon)",
-      "carbon": 41.521484375,
+      "metric": "memory PSS (whole agora)",
+      "agora": 41.521484375,
       "baseline": 393.078125,
       "unit": "MB",
       "note": "baseline cannot suspend without losing the live session"
@@ -180,7 +180,7 @@
     {
       "scenario": "11 suspended workspace",
       "metric": "suspend time",
-      "carbon": 185,
+      "agora": 185,
       "baseline": 0,
       "unit": "ms",
       "note": "checkpoint + graceful browser close"
@@ -188,7 +188,7 @@
     {
       "scenario": "11 suspended workspace",
       "metric": "resume until 5 tabs restored",
-      "carbon": 1026,
+      "agora": 1026,
       "baseline": 453,
       "unit": "ms",
       "note": "baseline: cold start of one stack"
@@ -196,7 +196,7 @@
     {
       "scenario": "12 teardown",
       "metric": "destroy workspace",
-      "carbon": 216,
+      "agora": 216,
       "baseline": 0,
       "unit": "ms"
     }

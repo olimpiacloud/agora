@@ -62,7 +62,7 @@ func freeDisplay(min int) (int, *os.File, error) {
 		if _, err := os.Stat(socketPath(n)); err == nil {
 			continue
 		}
-		f, err := os.OpenFile(lock+".carbon", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		f, err := os.OpenFile(lock+".agora", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 		if err != nil {
 			continue
 		}

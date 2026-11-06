@@ -18,14 +18,14 @@ Auditoría real (landing de olimpia.dev, mismo prompt): $0,927 → $0,299, 21 �
 Qué cambió:
 
 - Lanzador lean de Claude Code: `--strict-mcp-config`, `--disable-slash-commands`, `--tools ""`, `--setting-sources ""` y un prompt de sistema propio. Esto saca el prompt por defecto, las skills, otros MCP, el CLAUDE.md global y las herramientas de sistema.
-- Perfiles de herramientas MCP según permisos (`CARBON_TOOLS`), descripciones cortas (`CARBON_LEAN`), sin el parámetro `workspace` para cursores. Las herramientas pasan de 5,7k a 2,9k tokens.
+- Perfiles de herramientas MCP según permisos (`AGORA_TOOLS`), descripciones cortas (`AGORA_LEAN`), sin el parámetro `workspace` para cursores. Las herramientas pasan de 5,7k a 2,9k tokens.
 - Observación incremental tras cada acción (`open`, `navigate`, `click`, `fill`, `press`, `select`, `scroll`): solo lo visible y solo lo que cambió desde la vista anterior de esa pestaña.
 - Capturas para agentes a 1024 px y JPEG 60 por defecto.
 - Uso real por cursor (`--output-format json`): tokens, turnos, costo y duración en `cursor.usage`.
 
 ## Runtime
 
-`go run ./cmd/carbon-bench` con el binario anterior (`0e804b1`) y el nuevo, misma máquina. Resultados completos en `runtime-before/` y `runtime-after/`.
+`go run ./cmd/agora-bench` con el binario anterior (`0e804b1`) y el nuevo, misma máquina. Resultados completos en `runtime-before/` y `runtime-after/`.
 
 | Escenario | Antes | Después | noVNC |
 |---|---:|---:|---:|

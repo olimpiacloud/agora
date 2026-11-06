@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/agusgarcia3007/carbon/internal/browser"
-	"github.com/agusgarcia3007/carbon/internal/stream"
-	"github.com/agusgarcia3007/carbon/internal/x11"
+	"github.com/olimpiacloud/agora/internal/browser"
+	"github.com/olimpiacloud/agora/internal/stream"
+	"github.com/olimpiacloud/agora/internal/x11"
 )
 
 type Proc struct {
@@ -223,7 +223,7 @@ func (r *Runtime) appEnv() []string {
 		"LANG=en_US.UTF-8",
 		"DBUS_SESSION_BUS_ADDRESS=disabled:",
 		"XDG_RUNTIME_DIR=" + filepath.Join(home, ".xdg-run"),
-		"CARBON_WORKSPACE=" + r.id,
+		"AGORA_WORKSPACE=" + r.id,
 	}
 	if r.display != nil {
 		env = append(env, r.display.Env()...)

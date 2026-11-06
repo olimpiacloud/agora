@@ -75,7 +75,7 @@ export interface Cursor {
   usage?: { input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number; cost_usd: number; turns: number; duration_ms: number }
 }
 
-export interface CarbonEvent {
+export interface AgoraEvent {
   seq: number
   time: string
   type: string
@@ -104,7 +104,7 @@ export interface SystemInfo {
   loadavg: string
 }
 
-const KEY = 'carbon.token'
+const KEY = 'agora.token'
 
 export function getToken(): string {
   return localStorage.getItem(KEY) || ''
@@ -145,7 +145,7 @@ export async function mintViewer(ws: string, control = true): Promise<string> {
   return r.token
 }
 
-export function subscribe(params: Record<string, string>, onEvent: (e: CarbonEvent) => void, token = getToken()): () => void {
+export function subscribe(params: Record<string, string>, onEvent: (e: AgoraEvent) => void, token = getToken()): () => void {
   const ctl = new AbortController()
   const qs = new URLSearchParams(params).toString()
   let stopped = false

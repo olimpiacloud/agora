@@ -1,7 +1,7 @@
 import json, subprocess, sys, time, os, glob, re
-sys.path.insert(0, "/projects/carbon/scripts")
+sys.path.insert(0, "/projects/agora/scripts")
 import importlib.util
-spec = importlib.util.spec_from_file_location("at", "/projects/carbon/scripts/agent-tokens.py")
+spec = importlib.util.spec_from_file_location("at", "/projects/agora/scripts/agent-tokens.py")
 at = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(at)
 
@@ -22,7 +22,7 @@ TASKS = {
 
 
 def api(method, path, body=None):
-    args = ["carbon", "api", method, path] + ([json.dumps(body)] if body is not None else [])
+    args = ["agora", "api", method, path] + ([json.dumps(body)] if body is not None else [])
     r = subprocess.run(args, capture_output=True, text=True)
     if r.returncode:
         raise RuntimeError(r.stderr)
@@ -38,7 +38,7 @@ def run(task, model, label, effort=""):
     dt = time.time() - t0
     cur = w["cursors"][0]
     result = cur.get("result")
-    d = "/root/.claude/projects/-var-lib-carbon-agents-" + c["id"].replace("_", "-")
+    d = "/root/.claude/projects/-var-lib-agora-agents-" + c["id"].replace("_", "-")
     files = sorted(glob.glob(d + "/*.jsonl"))
     tok = at.analyze(files[-1]) if files else {}
     cost = at.cost(tok) if files else 0
@@ -59,5 +59,5 @@ if __name__ == "__main__":
             r = run(t, model, label, effort)
             out.append(r)
             print(json.dumps({k: r[k] for k in r if k != "result"}, ensure_ascii=False), flush=True)
-    os.makedirs("/projects/carbon/bench/results", exist_ok=True)
-    json.dump(out, open(f"/projects/carbon/bench/results/agents-{label}.json", "w"), indent=1, ensure_ascii=False)
+    os.makedirs("/projects/agora/bench/results", exist_ok=True)
+    json.dump(out, open(f"/projects/agora/bench/results/agents-{label}.json", "w"), indent=1, ensure_ascii=False)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ago, api, ApiError, getToken, mintViewer, setToken, subscribe, type CarbonEvent, type Cursor, type SystemInfo, type Tab, type Workspace } from './api'
+import { ago, api, ApiError, getToken, mintViewer, setToken, subscribe, type AgoraEvent, type Cursor, type SystemInfo, type Tab, type Workspace } from './api'
 import { Viewer } from './Viewer'
 
 function useRoute() {
@@ -57,8 +57,8 @@ function Login({ onOk }: { onOk: () => void }) {
           }
         }}
       >
-        <div className="logo big">carbon</div>
-        <p className="muted">Paste the admin token (<code>carbon token</code>).</p>
+        <div className="logo big">agora</div>
+        <p className="muted">Paste the admin token (<code>agora token</code>).</p>
         <input type="password" value={t} onChange={(e) => setT(e.target.value)} placeholder="token" autoFocus />
         <button className="primary">Enter</button>
         {err && <div className="err">{err}</div>}
@@ -72,7 +72,7 @@ function Dashboard({ path, go }: { path: string; go: (p: string) => void }) {
   const [wss, setWss] = useState<Workspace[]>([])
   const [cursors, setCursors] = useState<Cursor[]>([])
   const [sys, setSys] = useState<SystemInfo | null>(null)
-  const [events, setEvents] = useState<CarbonEvent[]>([])
+  const [events, setEvents] = useState<AgoraEvent[]>([])
   const [err, setErr] = useState('')
 
   const refresh = useCallback(async () => {
@@ -120,7 +120,7 @@ function Dashboard({ path, go }: { path: string; go: (p: string) => void }) {
   return (
     <div className="app">
       <aside>
-        <div className="logo" onClick={() => go('/')}>carbon</div>
+        <div className="logo" onClick={() => go('/')}>agora</div>
         <nav>
           <a className={view === 'workspaces' ? 'on' : ''} onClick={() => go('/workspaces')}>Workspaces</a>
           <a className={view === 'agents' ? 'on' : ''} onClick={() => go('/agents')}>Agents</a>
@@ -221,7 +221,7 @@ function WorkspaceList({ wss, go, refresh }: { wss: Workspace[]; go: (p: string)
 
 const statusClass = (s: string) => (['done'].includes(s) ? 'ok' : ['failed', 'cancelled'].includes(s) ? 'bad' : ['needs_human', 'blocked'].includes(s) ? 'warn' : s === 'paused' ? 'muted' : 'run')
 
-function WorkspaceView({ ws, id, cursors, events, refresh, go }: { ws?: Workspace; id: string; cursors: Cursor[]; events: CarbonEvent[]; refresh: () => void; go: (p: string) => void }) {
+function WorkspaceView({ ws, id, cursors, events, refresh, go }: { ws?: Workspace; id: string; cursors: Cursor[]; events: AgoraEvent[]; refresh: () => void; go: (p: string) => void }) {
   const [vt, setVt] = useState('')
   const [tabs, setTabs] = useState<Tab[]>([])
   const [show, setShow] = useState(true)
@@ -421,7 +421,7 @@ function AgentTree({ cursors, wss, go, refresh }: { cursors: Cursor[]; wss: Work
   )
 }
 
-function EventList({ events, compact }: { events: CarbonEvent[]; compact?: boolean }) {
+function EventList({ events, compact }: { events: AgoraEvent[]; compact?: boolean }) {
   const [filter, setFilter] = useState('')
   const list = events.filter((e) => !filter || e.type.includes(filter) || (e.cursor || '').includes(filter))
   return (

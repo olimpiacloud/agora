@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/agusgarcia3007/carbon/internal/core"
-	"github.com/agusgarcia3007/carbon/internal/x11"
 	"github.com/coder/websocket"
+	"github.com/olimpiacloud/agora/internal/core"
+	"github.com/olimpiacloud/agora/internal/x11"
 )
 
 func (s *Server) streamJPEG(w http.ResponseWriter, r *http.Request, p *Principal) {

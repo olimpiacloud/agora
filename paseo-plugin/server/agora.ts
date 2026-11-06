@@ -2,12 +2,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
-const URL_BASE = process.env.CARBON_URL || "http://127.0.0.1:7788";
-const HOME = process.env.CARBON_HOME || "/var/lib/carbon";
-const STATE_DIR = join(homedir(), ".carbon-paseo");
+const URL_BASE = process.env.AGORA_URL || "http://127.0.0.1:7788";
+const HOME = process.env.AGORA_HOME || "/var/lib/agora";
+const STATE_DIR = join(homedir(), ".agora-paseo");
 const STATE_FILE = join(STATE_DIR, "state.json");
 
-export const CARBON_BIN = ["/usr/local/bin/carbon", "/projects/carbon/bin/carbon"].find((p) => existsSync(p)) || "carbon";
+export const AGORA_BIN = ["/usr/local/bin/agora", "/projects/agora/bin/agora"].find((p) => existsSync(p)) || "agora";
 
 interface State {
   workspaces: Record<string, string>;
@@ -31,7 +31,7 @@ export function adminToken(): string {
   return readFileSync(join(HOME, "admin.token"), "utf8").trim();
 }
 
-export class CarbonError extends Error {
+export class AgoraError extends Error {
   status: number;
   constructor(status: number, message: string) {
     super(message);
@@ -51,14 +51,14 @@ export async function call<T = any>(method: string, path: string, body?: unknown
     try {
       msg = JSON.parse(text).error || text;
     } catch {}
-    throw new CarbonError(r.status, msg);
+    throw new AgoraError(r.status, msg);
   }
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export async function bytes(path: string): Promise<{ mime: string; data: Buffer }> {
   const r = await fetch(URL_BASE + path, { headers: { Authorization: `Bearer ${adminToken()}` } });
-  if (!r.ok) throw new CarbonError(r.status, await r.text());
+  if (!r.ok) throw new AgoraError(r.status, await r.text());
   return { mime: r.headers.get("content-type") || "image/jpeg", data: Buffer.from(await r.arrayBuffer()) };
 }
 

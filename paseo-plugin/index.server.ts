@@ -1,6 +1,6 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { agentCursor, bytes, call, CARBON_BIN, linkedWorkspace, nameFromCwd } from "./server/carbon";
-import { control, ensureWorkspace, getShot, listCursors, listWorkspaces, liveFrame, sendInput } from "./shared/carbon";
+import { agentCursor, bytes, call, AGORA_BIN, linkedWorkspace, nameFromCwd } from "./server/agora";
+import { control, ensureWorkspace, getShot, listCursors, listWorkspaces, liveFrame, sendInput } from "./shared/agora";
 import { pollFrame } from "./server/live";
 
 const MCP_PROVIDERS = ["claude", "codex"];
@@ -70,7 +70,7 @@ export default function contribute(server: PluginServerContext) {
   server.addHook("agent.open.before", async ({ request }) => {
     if (request.purpose === "history") return;
     if (!MCP_PROVIDERS.some((p) => request.provider === p || request.provider.startsWith(p + "/"))) return;
-    if (request.labels?.["carbon/enabled"] === "false" || !request.workspaceId) return;
+    if (request.labels?.["agora/enabled"] === "false" || !request.workspaceId) return;
     try {
       const ws = await linkedWorkspace(request.workspaceId, nameFromCwd(request.cwd), true);
       if (!ws) return;
@@ -79,16 +79,16 @@ export default function contribute(server: PluginServerContext) {
         ...request,
         mcpServers: {
           ...request.mcpServers,
-          carbon: {
+          agora: {
             type: "stdio" as const,
-            command: CARBON_BIN,
+            command: AGORA_BIN,
             args: ["mcp"],
-            env: { CARBON_URL: process.env.CARBON_URL || "http://127.0.0.1:7788", CARBON_TOKEN: cur.token, CARBON_WORKSPACE: ws },
+            env: { AGORA_URL: process.env.AGORA_URL || "http://127.0.0.1:7788", AGORA_TOKEN: cur.token, AGORA_WORKSPACE: ws },
           },
         },
       };
     } catch (e) {
-      console.error("carbon: could not attach MCP server:", errText(e));
+      console.error("agora: could not attach MCP server:", errText(e));
       return;
     }
   });

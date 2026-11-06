@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/agusgarcia3007/carbon/internal/client"
+	"github.com/olimpiacloud/agora/internal/client"
 )
 
 type rpcReq struct {
@@ -102,7 +102,7 @@ func (s *Server) identity(ctx context.Context) {
 			}
 		}
 		if s.ws == "" {
-			s.ws = os.Getenv("CARBON_WORKSPACE")
+			s.ws = os.Getenv("AGORA_WORKSPACE")
 		}
 	})
 }
@@ -172,15 +172,15 @@ func (s *Server) handle(ctx context.Context, req rpcReq) (any, map[string]any) {
 		return map[string]any{
 			"protocolVersion": pv,
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
-			"serverInfo":      map[string]any{"name": "carbon", "version": "0.1.0"},
-			"instructions":    "Carbon gives you a real Linux desktop with Chromium. Prefer browser_* tools (semantic, refs from browser_snapshot) for web pages; use desktop_* tools (pixels + real mouse/keyboard on your own input seat) for anything else. Spawn subagents with cursor_spawn, wait with cursor_wait, and report with cursor_report/cursor_complete. If a CAPTCHA or login needs a person, call human_request and then events_wait for control.returned.",
+			"serverInfo":      map[string]any{"name": "agora", "version": "0.1.0"},
+			"instructions":    "Agora gives you a real Linux desktop with Chromium. Prefer browser_* tools (semantic, refs from browser_snapshot) for web pages; use desktop_* tools (pixels + real mouse/keyboard on your own input seat) for anything else. Spawn subagents with cursor_spawn, wait with cursor_wait, and report with cursor_report/cursor_complete. If a CAPTCHA or login needs a person, call human_request and then events_wait for control.returned.",
 		}, nil
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":
 		s.identity(ctx)
-		groups := toolGroups(os.Getenv("CARBON_TOOLS"))
-		lean := os.Getenv("CARBON_LEAN") == "1"
+		groups := toolGroups(os.Getenv("AGORA_TOOLS"))
+		lean := os.Getenv("AGORA_LEAN") == "1"
 		list := make([]map[string]any, 0, len(s.tools))
 		for _, t := range s.tools {
 			if !groupAllowed(t.Name, groups) {
@@ -253,8 +253,8 @@ func (s *Server) image(ctx context.Context, path string) ([]content, error) {
 		return nil, err
 	}
 	out := []content{{Type: "image", Data: base64.StdEncoding.EncodeToString(b), MimeType: h.Get("Content-Type")}}
-	if id := h.Get("X-Carbon-Shot"); id != "" {
-		out = append(out, content{Type: "text", Text: "carbon-shot:" + id})
+	if id := h.Get("X-Agora-Shot"); id != "" {
+		out = append(out, content{Type: "text", Text: "agora-shot:" + id})
 	}
 	return out, nil
 }

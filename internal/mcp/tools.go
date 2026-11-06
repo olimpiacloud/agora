@@ -51,7 +51,7 @@ func (s *Server) tab(ctx context.Context, a Args, body map[string]any) ([]conten
 	if img, ok := out["image"].(string); ok {
 		res := []content{{Type: "image", Data: img, MimeType: fmt.Sprint(out["mime"])}}
 		if id, ok := out["shot"].(string); ok {
-			res = append(res, content{Type: "text", Text: "carbon-shot:" + id})
+			res = append(res, content{Type: "text", Text: "agora-shot:" + id})
 		}
 		return res, nil
 	}
@@ -266,7 +266,7 @@ func tools() []Tool {
 				b["action"] = "select"
 				return s.tab(ctx, a, b)
 			}},
-		{Name: "browser_upload", Desc: "Set files on a file input (by ref) or on the file chooser that just opened (no ref). Paths are on the Carbon host.", Props: tabProp(map[string]any{"ref": str("File input ref"), "files": strs("Absolute paths")}), Required: []string{"target", "files"},
+		{Name: "browser_upload", Desc: "Set files on a file input (by ref) or on the file chooser that just opened (no ref). Paths are on the Agora host.", Props: tabProp(map[string]any{"ref": str("File input ref"), "files": strs("Absolute paths")}), Required: []string{"target", "files"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				b := pick(a, "ref", "files")
 				b["action"] = "upload"
@@ -308,7 +308,7 @@ func tools() []Tool {
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				return s.tab(ctx, a, pick(a, "action", "accept", "text"))
 			}},
-		{Name: "cursor_spawn", Desc: "Create a subagent cursor under you. With launch.adapter = claude | codex | command Carbon starts the agent process with its own scoped token; otherwise you get the token to hand to an agent yourself.", Props: map[string]any{"name": str("Name"), "goal": str("Task for the subagent"), "workspace": str("Workspace (default yours)"), "permissions": strs("Subset of: desktop, browser, process, spawn, message, workspace"), "launch": anyv("{adapter: 'claude'|'codex'|'command', prompt?, command?: [..], model?, effort?: low|medium|high, tools?: [browser|browserx|desktop|spawn|workspace|process], profile?: lean|full}"), "worktree": anyv("{repo, branch?, base?} to give it its own git worktree and port range"), "max_children": num("Max direct children it may spawn")}, Required: []string{"goal"},
+		{Name: "cursor_spawn", Desc: "Create a subagent cursor under you. With launch.adapter = claude | codex | command Agora starts the agent process with its own scoped token; otherwise you get the token to hand to an agent yourself.", Props: map[string]any{"name": str("Name"), "goal": str("Task for the subagent"), "workspace": str("Workspace (default yours)"), "permissions": strs("Subset of: desktop, browser, process, spawn, message, workspace"), "launch": anyv("{adapter: 'claude'|'codex'|'command', prompt?, command?: [..], model?, effort?: low|medium|high, tools?: [browser|browserx|desktop|spawn|workspace|process], profile?: lean|full}"), "worktree": anyv("{repo, branch?, base?} to give it its own git worktree and port range"), "max_children": num("Max direct children it may spawn")}, Required: []string{"goal"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				body := pick(a, "name", "goal", "workspace", "permissions", "launch", "worktree")
 				if n := a.N("max_children"); n > 0 {

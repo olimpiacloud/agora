@@ -35,7 +35,7 @@ func TestA_SessionPersistence(t *testing.T) {
 	h.waitEval(c, ws, tab, "document.title", "Me:user-agus", 10*time.Second)
 	time.Sleep(500 * time.Millisecond)
 	ls := h.eval(c, ws, tab, "localStorage.getItem('ls')")
-	idb := h.eval(c, ws, tab, "new Promise(r=>{const q=indexedDB.open('carbon',1);q.onsuccess=()=>{const g=q.result.transaction('kv').objectStore('kv').get('k');g.onsuccess=()=>r(g.result||null)}})")
+	idb := h.eval(c, ws, tab, "new Promise(r=>{const q=indexedDB.open('agora',1);q.onsuccess=()=>{const g=q.result.transaction('kv').objectStore('kv').get('k');g.onsuccess=()=>r(g.result||null)}})")
 	t.Logf("logged in; localStorage=%v indexedDB=%v", ls, idb)
 
 	ev := h.do(h.admin, "GET", "/v1/events?workspace="+ws+"&limit=500", nil)
@@ -81,7 +81,7 @@ func TestA_SessionPersistence(t *testing.T) {
 	}
 	h.waitEval(c, ws, restored, "document.getElementById('who')&&document.getElementById('who').textContent", "user-agus", 10*time.Second)
 	h.waitEval(c, ws, restored, "localStorage.getItem('ls')", ls, 5*time.Second)
-	h.waitEval(c, ws, restored, "new Promise(r=>{const q=indexedDB.open('carbon',1);q.onsuccess=()=>{const g=q.result.transaction('kv').objectStore('kv').get('k');g.onsuccess=()=>r(g.result||null)}})", idb, 5*time.Second)
+	h.waitEval(c, ws, restored, "new Promise(r=>{const q=indexedDB.open('agora',1);q.onsuccess=()=>{const g=q.result.transaction('kv').objectStore('kv').get('k');g.onsuccess=()=>r(g.result||null)}})", idb, 5*time.Second)
 	t.Log("PASS A: cookie, localStorage and IndexedDB survive browser restart and suspend/resume; tab restored to owner; no secrets in logs")
 }
 
@@ -434,7 +434,7 @@ func TestUploadDownloadDialogDnD(t *testing.T) {
 	ws := h.workspace("compat")
 	_, c := h.cursor(h.admin, map[string]any{"name": "compat", "workspace": ws})
 	tab := h.tab(c, ws, h.site.URL+"/upload")
-	f := "/tmp/carbon-upload-" + ws + ".txt"
+	f := "/tmp/agora-upload-" + ws + ".txt"
 	os.WriteFile(f, []byte("hello upload"), 0644)
 	os.Chmod(f, 0644)
 	defer os.Remove(f)

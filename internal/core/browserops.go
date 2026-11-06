@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agusgarcia3007/carbon/internal/browser"
-	"github.com/agusgarcia3007/carbon/internal/x11"
 	"github.com/jezek/xgb/xproto"
+	"github.com/olimpiacloud/agora/internal/browser"
+	"github.com/olimpiacloud/agora/internal/x11"
 )
 
 func xwin(id uint32) xproto.Window { return xproto.Window(id) }

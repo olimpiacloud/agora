@@ -1,4 +1,4 @@
-module github.com/agusgarcia3007/carbon
+module github.com/olimpiacloud/agora
 
 go 1.27.3
 

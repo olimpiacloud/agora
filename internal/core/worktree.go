@@ -59,7 +59,7 @@ func (m *Manager) CreateWorktree(ctx context.Context, req WorktreeReq, cursor, w
 	repo = strings.TrimSpace(string(top))
 	id := NewID("wt")
 	if req.Branch == "" {
-		req.Branch = "carbon/" + strings.TrimPrefix(id, "wt_")
+		req.Branch = "agora/" + strings.TrimPrefix(id, "wt_")
 	}
 	if !branchRe.MatchString(req.Branch) || strings.Contains(req.Branch, "..") || strings.HasPrefix(req.Branch, "-") {
 		return nil, fmt.Errorf("invalid branch name")

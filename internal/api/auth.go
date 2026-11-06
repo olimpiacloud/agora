@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agusgarcia3007/carbon/internal/core"
+	"github.com/olimpiacloud/agora/internal/core"
 )
 
 type Principal struct {
@@ -111,7 +111,7 @@ func (a *Auth) Resolve(r *http.Request, allowQuery bool) (*Principal, error) {
 	}
 	if subtle.ConstantTimeCompare([]byte(tok), []byte(a.admin)) == 1 {
 		p := &Principal{Admin: true}
-		if cid := r.Header.Get("X-Carbon-Cursor"); cid != "" {
+		if cid := r.Header.Get("X-Agora-Cursor"); cid != "" {
 			c, err := a.m.GetCursor(cid)
 			if err != nil {
 				return nil, err

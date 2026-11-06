@@ -5,8 +5,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/agusgarcia3007/carbon/internal/media"
-	"github.com/agusgarcia3007/carbon/internal/x11"
+	"github.com/olimpiacloud/agora/internal/media"
+	"github.com/olimpiacloud/agora/internal/x11"
 )
 
 type Mode string

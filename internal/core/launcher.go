@@ -61,15 +61,15 @@ func (t *tailBuf) String() string {
 
 func (m *Manager) agentCommand(c *Cursor, tok string) ([]string, []string, error) {
 	l := c.Launch
-	bin := m.cfg.CarbonBinary
+	bin := m.cfg.AgoraBinary
 	if bin == "" {
 		bin, _ = os.Executable()
 	}
 	env := []string{
-		"CARBON_URL=" + m.cfg.ListenURL,
-		"CARBON_TOKEN=" + tok,
-		"CARBON_CURSOR=" + c.ID,
-		"CARBON_WORKSPACE=" + c.Workspace,
+		"AGORA_URL=" + m.cfg.ListenURL,
+		"AGORA_TOKEN=" + tok,
+		"AGORA_CURSOR=" + c.ID,
+		"AGORA_WORKSPACE=" + c.Workspace,
 	}
 	prompt := l.Prompt
 	if prompt == "" {
@@ -85,14 +85,14 @@ func (m *Manager) agentCommand(c *Cursor, tok string) ([]string, []string, error
 			groups = append(groups, perm)
 		}
 	}
-	mcpEnv := map[string]string{"CARBON_URL": m.cfg.ListenURL, "CARBON_TOKEN": tok}
+	mcpEnv := map[string]string{"AGORA_URL": m.cfg.ListenURL, "AGORA_TOKEN": tok}
 	if !full {
-		mcpEnv["CARBON_TOOLS"] = strings.Join(groups, ",")
-		mcpEnv["CARBON_LEAN"] = "1"
+		mcpEnv["AGORA_TOOLS"] = strings.Join(groups, ",")
+		mcpEnv["AGORA_LEAN"] = "1"
 	}
-	mcpCfg := map[string]any{"mcpServers": map[string]any{"carbon": map[string]any{"command": bin, "args": []string{"mcp"}, "env": mcpEnv}}}
-	sys := fmt.Sprintf("You are Carbon cursor %s (%q) working in Carbon workspace %s. Use the carbon MCP tools to see and control the desktop and browser. Report progress with cursor_report and finish by calling cursor_complete with a concise structured result (or cursor_fail). If a CAPTCHA or login needs a human, call cursor_status with status needs_human and wait_events for control.returned.", c.ID, c.Name, c.Workspace)
-	lean := fmt.Sprintf(`You are an autonomous agent (Carbon cursor %s, %q) working on a shared Linux desktop with Chromium. You act only through the carbon tools. Be fast and economical:
+	mcpCfg := map[string]any{"mcpServers": map[string]any{"agora": map[string]any{"command": bin, "args": []string{"mcp"}, "env": mcpEnv}}}
+	sys := fmt.Sprintf("You are Agora cursor %s (%q) working in Agora workspace %s. Use the agora MCP tools to see and control the desktop and browser. Report progress with cursor_report and finish by calling cursor_complete with a concise structured result (or cursor_fail). If a CAPTCHA or login needs a human, call cursor_status with status needs_human and wait_events for control.returned.", c.ID, c.Name, c.Workspace)
+	lean := fmt.Sprintf(`You are an autonomous agent (Agora cursor %s, %q) working on a shared Linux desktop with Chromium. You act only through the agora tools. Be fast and economical:
 - Open your own tab with browser_open and keep using its target.
 - Action tools (navigate, click, fill, type, press, select) already return what is visible afterwards. Do not call browser_snapshot after them unless you need offscreen content.
 - Prefer element refs over coordinates. Use browser_screenshot only when visual appearance matters.
@@ -105,9 +105,9 @@ func (m *Manager) agentCommand(c *Cursor, tok string) ([]string, []string, error
 		mb, _ := json.Marshal(mcpCfg)
 		var args []string
 		if full {
-			args = []string{"claude", "-p", prompt, "--mcp-config", string(mb), "--append-system-prompt", sys, "--allowedTools", "mcp__carbon__*", "--output-format", "json"}
+			args = []string{"claude", "-p", prompt, "--mcp-config", string(mb), "--append-system-prompt", sys, "--allowedTools", "mcp__agora__*", "--output-format", "json"}
 		} else {
-			args = []string{"claude", "-p", prompt, "--mcp-config", string(mb), "--strict-mcp-config", "--disable-slash-commands", "--tools", "", "--setting-sources", "", "--system-prompt", lean, "--allowedTools", "mcp__carbon__*", "--output-format", "json"}
+			args = []string{"claude", "-p", prompt, "--mcp-config", string(mb), "--strict-mcp-config", "--disable-slash-commands", "--tools", "", "--setting-sources", "", "--system-prompt", lean, "--allowedTools", "mcp__agora__*", "--output-format", "json"}
 		}
 		if l.Model != "" {
 			args = append(args, "--model", l.Model)
@@ -118,9 +118,9 @@ func (m *Manager) agentCommand(c *Cursor, tok string) ([]string, []string, error
 		return args, env, nil
 	case "codex":
 		args := []string{"codex", "exec", "--skip-git-repo-check",
-			"-c", fmt.Sprintf("mcp_servers.carbon.command=%q", bin),
-			"-c", `mcp_servers.carbon.args=["mcp"]`,
-			"-c", fmt.Sprintf("mcp_servers.carbon.env={CARBON_URL=%q,CARBON_TOKEN=%q}", m.cfg.ListenURL, tok),
+			"-c", fmt.Sprintf("mcp_servers.agora.command=%q", bin),
+			"-c", `mcp_servers.agora.args=["mcp"]`,
+			"-c", fmt.Sprintf("mcp_servers.agora.env={AGORA_URL=%q,AGORA_TOKEN=%q}", m.cfg.ListenURL, tok),
 		}
 		if l.Model != "" {
 			args = append(args, "-m", l.Model)
@@ -131,7 +131,7 @@ func (m *Manager) agentCommand(c *Cursor, tok string) ([]string, []string, error
 		if len(l.Command) == 0 {
 			return nil, nil, fmt.Errorf("launch.command required")
 		}
-		return l.Command, append(env, "CARBON_GOAL="+prompt), nil
+		return l.Command, append(env, "AGORA_GOAL="+prompt), nil
 	}
 	return nil, nil, fmt.Errorf("unknown adapter %q", l.Adapter)
 }
@@ -148,7 +148,7 @@ func (m *Manager) launchAgent(id, tok string) error {
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Env = append(os.Environ(), env...)
 	for k, v := range c.Launch.Env {
-		if !strings.HasPrefix(k, "CARBON_") {
+		if !strings.HasPrefix(k, "AGORA_") {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
 	}
@@ -159,7 +159,7 @@ func (m *Manager) launchAgent(id, tok string) error {
 		m.mu.Lock()
 		if wt := m.worktrees[c.Worktree]; wt != nil {
 			cmd.Dir = wt.Path
-			cmd.Env = append(cmd.Env, fmt.Sprintf("PORT=%d", wt.PortBase), fmt.Sprintf("CARBON_PORT_BASE=%d", wt.PortBase), fmt.Sprintf("CARBON_PORTS=%d", wt.Ports))
+			cmd.Env = append(cmd.Env, fmt.Sprintf("PORT=%d", wt.PortBase), fmt.Sprintf("AGORA_PORT_BASE=%d", wt.PortBase), fmt.Sprintf("AGORA_PORTS=%d", wt.Ports))
 		}
 		m.mu.Unlock()
 	}

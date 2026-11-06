@@ -1,6 +1,6 @@
 {
-  "id": "carbon",
-  "name": "Carbon",
+  "id": "agora",
+  "name": "Agora",
   "media": [],
   "requirements": {
     "paseo": ">=0.15.2"

@@ -4,6 +4,6 @@
 *.test
 *.out
 /bench/results/*.raw
-/.carbon/
+/.agora/
 /web/node_modules/
 /paseo-plugin/node_modules/

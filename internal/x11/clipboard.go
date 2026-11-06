@@ -36,7 +36,7 @@ func (d *Display) NewClipboard() (*Clipboard, error) {
 		c.Close()
 		return nil, err
 	}
-	cb := &Clipboard{d: d, c: c, win: w, clip: atom(c, "CLIPBOARD"), primary: xproto.AtomPrimary, utf8: atom(c, "UTF8_STRING"), targets: atom(c, "TARGETS"), prop: atom(c, "CARBON_SEL"), text: atom(c, "TEXT"), reply: make(chan string, 1)}
+	cb := &Clipboard{d: d, c: c, win: w, clip: atom(c, "CLIPBOARD"), primary: xproto.AtomPrimary, utf8: atom(c, "UTF8_STRING"), targets: atom(c, "TARGETS"), prop: atom(c, "AGORA_SEL"), text: atom(c, "TEXT"), reply: make(chan string, 1)}
 	go cb.loop()
 	return cb, nil
 }

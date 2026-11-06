@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agusgarcia3007/carbon/internal/core"
+	"github.com/olimpiacloud/agora/internal/core"
 )
 
 type Server struct {
@@ -241,7 +241,7 @@ func (s *Server) routes() {
 		}
 		w.Header().Set("Content-Type", mime)
 		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("X-Carbon-Shot", s.m.StoreShot(id, p.CursorID(), mime, b))
+		w.Header().Set("X-Agora-Shot", s.m.StoreShot(id, p.CursorID(), mime, b))
 		w.Write(b)
 	}))
 	m.HandleFunc("GET /v1/shots/{sid}", s.h(func(w http.ResponseWriter, r *http.Request, p *Principal) {

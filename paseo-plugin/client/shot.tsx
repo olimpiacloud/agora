@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { Image, Pressable, Text, View } from "react-native";
 import { z } from "zod";
-import { getShot } from "../shared/carbon";
+import { getShot } from "../shared/agora";
 
 export const shotSchema = z.object({
   shot: z.string().nullable(),
@@ -19,7 +19,7 @@ export function makeShotCard(client: PluginClientContext) {
     const workspaceId = useAgent(agentId, (a) => a.workspaceId);
     const { shot, inline, mime, tool, status } = item.data;
     const q = useQuery({
-      queryKey: ["carbon-shot", shot],
+      queryKey: ["agora-shot", shot],
       queryFn: () => fetchShot({ id: shot! }),
       enabled: !!shot && !inline,
       staleTime: Infinity,
@@ -40,10 +40,10 @@ export function makeShotCard(client: PluginClientContext) {
       <View style={styles.card}>
         <View style={styles.head}>
           <Text style={styles.title} numberOfLines={1}>
-            {tool.replace(/^mcp__carbon__/, "carbon · ")}
+            {tool.replace(/^mcp__agora__/, "agora · ")}
           </Text>
           {workspaceId && (
-            <Pressable accessibilityRole="button" accessibilityLabel="Open Carbon live view" onPress={() => client.openPanel("live", { workspaceId })}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Open Agora live view" onPress={() => client.openPanel("live", { workspaceId })}>
               <Text style={styles.link}>Live view ↗</Text>
             </Pressable>
           )}
@@ -51,7 +51,7 @@ export function makeShotCard(client: PluginClientContext) {
         {uri ? (
           <Image source={{ uri }} style={{ width: "100%", aspectRatio: 16 / 10 }} resizeMode="contain" />
         ) : (
-          <Text style={[styles.muted, { padding: 10 }]}>{status === "running" ? "capturing…" : q.isError ? "screenshot expired from Carbon's cache" : "loading…"}</Text>
+          <Text style={[styles.muted, { padding: 10 }]}>{status === "running" ? "capturing…" : q.isError ? "screenshot expired from Agora's cache" : "loading…"}</Text>
         )}
       </View>
     );

@@ -1,12 +1,12 @@
 [Unit]
-Description=Carbon agent-native desktop runtime
+Description=Agora agent-native desktop runtime
 After=network.target
 
 [Service]
 Type=simple
 Environment=HOME=/root
 Environment=PATH=/root/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin
-ExecStart=/usr/local/bin/carbon serve --home /var/lib/carbon --listen 127.0.0.1:7788
+ExecStart=/usr/local/bin/agora serve --home /var/lib/agora --listen 127.0.0.1:7788
 Restart=on-failure
 RestartSec=2
 KillSignal=SIGINT

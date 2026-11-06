@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/agusgarcia3007/carbon/internal/stream"
+	"github.com/olimpiacloud/agora/internal/stream"
 )
 
 type Config struct {
@@ -27,7 +27,7 @@ type Config struct {
 	IdleAfter    time.Duration
 	SuspendAfter time.Duration
 	RTC          stream.RTCOptions
-	CarbonBinary string
+	AgoraBinary  string
 	ListenURL    string
 }
 
@@ -98,7 +98,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	if os.Getuid() == 0 && cfg.AppsUser != "" {
 		u, err := user.Lookup(cfg.AppsUser)
 		if err != nil {
-			return nil, fmt.Errorf("apps user %q: %w (create it with: useradd --system --create-home --home-dir /var/lib/carbon-apps --shell /usr/sbin/nologin %s)", cfg.AppsUser, err, cfg.AppsUser)
+			return nil, fmt.Errorf("apps user %q: %w (create it with: useradd --system --create-home --home-dir /var/lib/agora-apps --shell /usr/sbin/nologin %s)", cfg.AppsUser, err, cfg.AppsUser)
 		}
 		m.uid, _ = strconv.Atoi(u.Uid)
 		m.gid, _ = strconv.Atoi(u.Gid)

@@ -31,7 +31,7 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
   const [overlays, setOverlays] = useState<Record<string, Overlay>>({})
   const [locks, setLocks] = useState<Lock[]>([])
   const [viewerId, setViewerId] = useState('')
-  const [transport, setTransport] = useState<Transport | 'auto'>((localStorage.getItem('carbon.transport') as Transport) || 'auto')
+  const [transport, setTransport] = useState<Transport | 'auto'>((localStorage.getItem('agora.transport') as Transport) || 'auto')
   const [mode, setMode] = useState<Mode>('interactive')
   const [stats, setStats] = useState(sessStatsInit)
   const [needHuman, setNeedHuman] = useState<{ cursor?: string; reason: string } | null>(null)
@@ -77,7 +77,7 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
             setNeedHuman({ cursor: e.cursor, reason: (d.reason as string) || 'needs a human' })
           } else if (e.type.startsWith('control.')) {
             s.send({ t: 'noop' })
-            fetch(`/v1/workspaces/${ws}/locks`, { headers: { Authorization: `Bearer ${localStorage.getItem('carbon.token') || ''}` } })
+            fetch(`/v1/workspaces/${ws}/locks`, { headers: { Authorization: `Bearer ${localStorage.getItem('agora.token') || ''}` } })
               .then((r) => (r.ok ? r.json() : null))
               .then((l) => l && setLocks(l))
               .catch(() => {})
@@ -138,7 +138,7 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
             <option value="interactive">interactive</option>
             <option value="observation">observation</option>
           </select>
-          <select value={transport} onChange={(e) => { const t = e.target.value as Transport | 'auto'; localStorage.setItem('carbon.transport', t); setTransport(t) }}>
+          <select value={transport} onChange={(e) => { const t = e.target.value as Transport | 'auto'; localStorage.setItem('agora.transport', t); setTransport(t) }}>
             <option value="auto">auto</option>
             <option value="webrtc">webrtc</option>
             <option value="ws">websocket</option>

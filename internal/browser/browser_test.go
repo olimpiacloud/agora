@@ -9,16 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agusgarcia3007/carbon/internal/x11"
+	"github.com/olimpiacloud/agora/internal/x11"
 )
 
 func appUser(t *testing.T) (uint32, uint32) {
 	if os.Getuid() != 0 {
 		return 0, 0
 	}
-	u, err := user.Lookup("carbon")
+	u, err := user.Lookup("agora")
 	if err != nil {
-		t.Skip("no carbon user")
+		t.Skip("no agora user")
 	}
 	uid, _ := strconv.Atoi(u.Uid)
 	gid, _ := strconv.Atoi(u.Gid)
@@ -27,7 +27,7 @@ func appUser(t *testing.T) (uint32, uint32) {
 
 func TestBrowserSemantic(t *testing.T) {
 	uid, gid := appUser(t)
-	dir, _ := os.MkdirTemp("/tmp", "carbon-bt-")
+	dir, _ := os.MkdirTemp("/tmp", "agora-bt-")
 	defer os.RemoveAll(dir)
 	os.Chown(dir, int(uid), int(gid))
 	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 1280, Height: 800, RunDir: dir + "/run", AuthUid: int(uid), AuthGid: int(gid)})
@@ -101,7 +101,7 @@ func TestBrowserSemantic(t *testing.T) {
 	if err != nil || len(png) < 1000 {
 		t.Fatalf("screenshot %d %v", len(png), err)
 	}
-	restore, err := tab2.WindowTitleMarker(ctx, "carbon-marker-xyz")
+	restore, err := tab2.WindowTitleMarker(ctx, "agora-marker-xyz")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestBrowserSemantic(t *testing.T) {
 	ws, _ = d.Windows()
 	found := false
 	for _, w := range ws {
-		if strings.Contains(w.Title, "carbon-marker-xyz") {
+		if strings.Contains(w.Title, "agora-marker-xyz") {
 			found = true
 		}
 	}

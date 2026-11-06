@@ -21,13 +21,13 @@ type Client struct {
 }
 
 func FromEnv() *Client {
-	u := os.Getenv("CARBON_URL")
+	u := os.Getenv("AGORA_URL")
 	if u == "" {
 		u = "http://127.0.0.1:7788"
 	}
-	tok := os.Getenv("CARBON_TOKEN")
+	tok := os.Getenv("AGORA_TOKEN")
 	if tok == "" {
-		for _, p := range []string{os.Getenv("CARBON_HOME"), "/var/lib/carbon", filepath.Join(os.Getenv("HOME"), ".carbon")} {
+		for _, p := range []string{os.Getenv("AGORA_HOME"), "/var/lib/agora", filepath.Join(os.Getenv("HOME"), ".agora")} {
 			if p == "" {
 				continue
 			}
@@ -37,7 +37,7 @@ func FromEnv() *Client {
 			}
 		}
 	}
-	return &Client{URL: strings.TrimRight(u, "/"), Token: tok, Cursor: os.Getenv("CARBON_ACT_AS"), HTTP: &http.Client{Timeout: 11 * time.Minute}}
+	return &Client{URL: strings.TrimRight(u, "/"), Token: tok, Cursor: os.Getenv("AGORA_ACT_AS"), HTTP: &http.Client{Timeout: 11 * time.Minute}}
 }
 
 type APIError struct {
@@ -45,7 +45,7 @@ type APIError struct {
 	Body   string
 }
 
-func (e *APIError) Error() string { return fmt.Sprintf("carbon %d: %s", e.Status, e.Body) }
+func (e *APIError) Error() string { return fmt.Sprintf("agora %d: %s", e.Status, e.Body) }
 
 func (c *Client) Raw(ctx context.Context, method, path string, body any) ([]byte, string, error) {
 	b, h, err := c.RawHeader(ctx, method, path, body)
@@ -72,7 +72,7 @@ func (c *Client) RawHeader(ctx context.Context, method, path string, body any) (
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 	if c.Cursor != "" {
-		req.Header.Set("X-Carbon-Cursor", c.Cursor)
+		req.Header.Set("X-Agora-Cursor", c.Cursor)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

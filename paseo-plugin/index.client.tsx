@@ -1,7 +1,7 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { LivePanel } from "./client/live";
 import { makeShotCard, shotSchema } from "./client/shot";
-import { SHOT_RE } from "./shared/carbon";
+import { SHOT_RE } from "./shared/agora";
 
 function findInline(v: unknown, depth = 0): { data: string; mime: string } | null {
   if (!v || depth > 6) return null;
@@ -26,10 +26,10 @@ function findInline(v: unknown, depth = 0): { data: string; mime: string } | nul
 }
 
 export default function contribute(client: PluginClientContext) {
-  client.addWorkspacePanel({ id: "live", title: "Carbon", icon: "MonitorPlay", Component: LivePanel });
+  client.addWorkspacePanel({ id: "live", title: "Agora", icon: "MonitorPlay", Component: LivePanel });
   client.addCommandCenterItem({
     id: "open-live",
-    title: "Carbon: open live desktop",
+    title: "Agora: open live desktop",
     icon: "MonitorPlay",
     context: "workspace",
     onSelect({ openPanel }) {
@@ -37,11 +37,11 @@ export default function contribute(client: PluginClientContext) {
     },
   });
   client.addTimelineTransformer({
-    id: "carbon-screenshots",
+    id: "agora-screenshots",
     query: { itemType: "tool_call" },
     transform({ item }) {
       const name = item.name || "";
-      if (!/carbon/i.test(name) || !/screenshot/i.test(name)) return undefined;
+      if (!/agora/i.test(name) || !/screenshot/i.test(name)) return undefined;
       let raw = "";
       try {
         raw = JSON.stringify(item.detail ?? null);
@@ -53,7 +53,7 @@ export default function contribute(client: PluginClientContext) {
         items: [
           {
             type: "plugin",
-            kind: "carbon-shot",
+            kind: "agora-shot",
             version: 1,
             data: { shot: m ? m[1] : null, tool: name, status: item.status, inline: inline?.data ?? null, mime: inline?.mime ?? null },
           },
@@ -61,6 +61,6 @@ export default function contribute(client: PluginClientContext) {
       };
     },
   });
-  client.addTimelineRenderer({ kind: "carbon-shot", version: 1, schema: shotSchema, Component: makeShotCard(client) });
+  client.addTimelineRenderer({ kind: "agora-shot", version: 1, schema: shotSchema, Component: makeShotCard(client) });
   return () => {};
 }

@@ -59,7 +59,7 @@ func (d *Display) StartWM(layout Layout) (*WM, error) {
 	xproto.CreateWindow(c, 0, w.check, d.root, -1, -1, 1, 1, 0, xproto.WindowClassInputOnly, 0, 0, nil)
 	w.setWindowProp(d.root, "_NET_SUPPORTING_WM_CHECK", []uint32{uint32(w.check)})
 	w.setWindowProp(w.check, "_NET_SUPPORTING_WM_CHECK", []uint32{uint32(w.check)})
-	name := "carbon"
+	name := "agora"
 	xproto.ChangeProperty(c, xproto.PropModeReplace, w.check, w.atoms["_NET_WM_NAME"], w.atoms["UTF8_STRING"], 8, uint32(len(name)), []byte(name))
 	sup := []uint32{}
 	for _, n := range []string{"_NET_SUPPORTED", "_NET_SUPPORTING_WM_CHECK", "_NET_CLIENT_LIST", "_NET_ACTIVE_WINDOW", "_NET_WM_STATE", "_NET_WM_STATE_FULLSCREEN", "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ", "_NET_CLOSE_WINDOW", "_NET_WM_NAME", "_NET_WORKAREA", "_NET_FRAME_EXTENTS", "_NET_REQUEST_FRAME_EXTENTS"} {

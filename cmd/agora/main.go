@@ -15,22 +15,22 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/agusgarcia3007/carbon/internal/api"
-	"github.com/agusgarcia3007/carbon/internal/client"
-	"github.com/agusgarcia3007/carbon/internal/core"
-	"github.com/agusgarcia3007/carbon/internal/mcp"
-	"github.com/agusgarcia3007/carbon/internal/stream"
-	"github.com/agusgarcia3007/carbon/web"
+	"github.com/olimpiacloud/agora/internal/api"
+	"github.com/olimpiacloud/agora/internal/client"
+	"github.com/olimpiacloud/agora/internal/core"
+	"github.com/olimpiacloud/agora/internal/mcp"
+	"github.com/olimpiacloud/agora/internal/stream"
+	"github.com/olimpiacloud/agora/web"
 )
 
 func defaultHome() string {
-	if h := os.Getenv("CARBON_HOME"); h != "" {
+	if h := os.Getenv("AGORA_HOME"); h != "" {
 		return h
 	}
 	if os.Getuid() == 0 {
-		return "/var/lib/carbon"
+		return "/var/lib/agora"
 	}
-	return filepath.Join(os.Getenv("HOME"), ".carbon")
+	return filepath.Join(os.Getenv("HOME"), ".agora")
 }
 
 func main() {
@@ -65,20 +65,20 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `carbon — agent-native desktop runtime
+	fmt.Fprintln(os.Stderr, `agora — agent-native desktop runtime
 
-  carbon serve [--listen 127.0.0.1:7788] [--home DIR] [--apps-user carbon] [--rtc-port 0]
-  carbon mcp                      MCP stdio server (CARBON_URL, CARBON_TOKEN)
-  carbon token                    print the admin token
-  carbon open <workspace> [--control] [--base URL]   print a viewer URL with a short-lived token
-  carbon api METHOD PATH [JSON]   call the HTTP API`)
+  agora serve [--listen 127.0.0.1:7788] [--home DIR] [--apps-user agora] [--rtc-port 0]
+  agora mcp                      MCP stdio server (AGORA_URL, AGORA_TOKEN)
+  agora token                    print the admin token
+  agora open <workspace> [--control] [--base URL]   print a viewer URL with a short-lived token
+  agora api METHOD PATH [JSON]   call the HTTP API`)
 }
 
 func serve(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	listen := fs.String("listen", "127.0.0.1:7788", "HTTP listen address")
 	home := fs.String("home", defaultHome(), "state directory")
-	appsUser := fs.String("apps-user", "carbon", "unprivileged user for apps and browsers (when running as root)")
+	appsUser := fs.String("apps-user", "agora", "unprivileged user for apps and browsers (when running as root)")
 	chrome := fs.String("chrome", "", "Chrome/Chromium binary")
 	rtcPort := fs.Int("rtc-port", 0, "single UDP port for WebRTC (0 = ephemeral)")
 	rtcIfaces := fs.String("rtc-interfaces", "", "comma-separated interfaces for WebRTC candidates")
@@ -87,8 +87,8 @@ func serve(args []string) {
 	suspend := fs.Duration("suspend-after", 0, "suspend idle workspaces after (0 = never by default)")
 	fs.Parse(args)
 	host, _, _ := net.SplitHostPort(*listen)
-	if host != "127.0.0.1" && host != "localhost" && host != "::1" && os.Getenv("CARBON_ALLOW_PUBLIC") != "1" {
-		log.Fatalf("refusing to listen on %s: bind to 127.0.0.1 and expose through an authenticated tunnel (set CARBON_ALLOW_PUBLIC=1 to override)", *listen)
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" && os.Getenv("AGORA_ALLOW_PUBLIC") != "1" {
+		log.Fatalf("refusing to listen on %s: bind to 127.0.0.1 and expose through an authenticated tunnel (set AGORA_ALLOW_PUBLIC=1 to override)", *listen)
 	}
 	var ifaces []string
 	if *rtcIfaces != "" {
@@ -98,8 +98,8 @@ func serve(args []string) {
 	m, err := core.NewManager(core.Config{
 		Home: *home, AppsUser: *appsUser, ChromeBinary: *chrome,
 		IdleAfter: *idle, SuspendAfter: *suspend,
-		RTC:          stream.RTCOptions{UDPPort: *rtcPort, IncludeLoop: *rtcLoop, Interfaces: ifaces},
-		CarbonBinary: exe, ListenURL: "http://" + *listen,
+		RTC:         stream.RTCOptions{UDPPort: *rtcPort, IncludeLoop: *rtcLoop, Interfaces: ifaces},
+		AgoraBinary: exe, ListenURL: "http://" + *listen,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -113,7 +113,7 @@ func serve(args []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("carbon %s listening on http://%s (home %s, cgroups %v)", core.Version, *listen, *home, m.Cgroups())
+	log.Printf("agora %s listening on http://%s (home %s, cgroups %v)", core.Version, *listen, *home, m.Cgroups())
 	go srv.Serve(ln)
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
@@ -128,7 +128,7 @@ func serve(args []string) {
 func openURL(args []string) {
 	fs := flag.NewFlagSet("open", flag.ExitOnError)
 	control := fs.Bool("control", true, "allow input")
-	base := fs.String("base", "", "public base URL (default CARBON_URL)")
+	base := fs.String("base", "", "public base URL (default AGORA_URL)")
 	ttl := fs.Int("ttl", 3600, "seconds")
 	fs.Parse(args)
 	if fs.NArg() < 1 {
@@ -150,7 +150,7 @@ func openURL(args []string) {
 
 func apiCmd(args []string) {
 	if len(args) < 2 {
-		log.Fatal("usage: carbon api METHOD PATH [JSON]")
+		log.Fatal("usage: agora api METHOD PATH [JSON]")
 	}
 	c := client.FromEnv()
 	var body any

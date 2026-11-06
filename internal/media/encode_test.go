@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agusgarcia3007/carbon/internal/x11"
+	"github.com/olimpiacloud/agora/internal/x11"
 )
 
 func TestCaptureEncode(t *testing.T) {
