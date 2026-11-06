@@ -334,8 +334,6 @@ type SystemInfo struct {
 	LoadAvg    string                     `json:"loadavg"`
 }
 
-var Version = "0.1.0"
-
 func (m *Manager) System() *SystemInfo {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)

@@ -56,8 +56,8 @@ func main() {
 		openURL(os.Args[2:])
 	case "api":
 		apiCmd(os.Args[2:])
-	case "version":
-		fmt.Println(core.Version)
+	case "version", "--version", "-v":
+		fmt.Printf("agora %s (commit %s, built %s)\n", core.Version, core.Commit, core.Date)
 	default:
 		usage()
 		os.Exit(2)
@@ -71,7 +71,8 @@ func usage() {
   agora mcp                      MCP stdio server (AGORA_URL, AGORA_TOKEN)
   agora token                    print the admin token
   agora open <workspace> [--control] [--base URL]   print a viewer URL with a short-lived token
-  agora api METHOD PATH [JSON]   call the HTTP API`)
+  agora api METHOD PATH [JSON]   call the HTTP API
+  agora version                  print version, commit and build date`)
 }
 
 func serve(args []string) {
