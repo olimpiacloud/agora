@@ -258,10 +258,20 @@ func tools() []Tool {
 				b["action"] = "wait"
 				return s.tab(ctx, a, b)
 			}},
-		{Name: "browser_screenshot", Desc: "Screenshot of a tab's viewport (or full page).", Props: tabProp(map[string]any{"full_page": boo("Full page"), "format": str("jpeg|png")}), Required: []string{"target"},
+		{Name: "browser_screenshot", Desc: "Screenshot of a tab's viewport (or full page). Use max_width (e.g. 800) to save tokens.", Props: tabProp(map[string]any{"full_page": boo("Full page"), "format": str("jpeg|png"), "max_width": num("Downscale to this width"), "quality": num("JPEG quality")}), Required: []string{"target"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
-				b := pick(a, "full_page", "format")
+				b := pick(a, "full_page", "format", "max_width", "quality")
 				b["action"] = "screenshot"
+				return s.tab(ctx, a, b)
+			}},
+		{Name: "browser_audit", Desc: "One-call UI/quality audit of the current page: horizontal overflow, low-contrast text, tiny text, small tap targets, unnamed controls, unlabeled inputs, images without alt, headings outline, meta/SEO tags, performance (TTFB, LCP, CLS, bytes by type, third parties, fonts), running animations, reduced-motion support and broken internal links. Prefer it over many screenshots.", Props: tabProp(map[string]any{}), Required: []string{"target"},
+			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
+				return s.tab(ctx, a, map[string]any{"action": "audit", "timeout_ms": 30000})
+			}},
+		{Name: "browser_emulate", Desc: "Emulate a device viewport in the tab (layout at width x height, optional mobile + touch). Call with width=0 to reset.", Props: tabProp(map[string]any{"width": num("CSS width (e.g. 390 or 1440)"), "height": num("CSS height"), "scale": num("device pixel ratio"), "mobile": boo("mobile viewport + touch")}), Required: []string{"target", "width", "height"},
+			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
+				b := pick(a, "width", "height", "scale", "mobile")
+				b["action"] = "emulate"
 				return s.tab(ctx, a, b)
 			}},
 		{Name: "browser_action", Desc: "Other tab actions: back | forward | reload | dialog (accept, text) | challenge (detect CAPTCHA) | focus | info | close.", Props: tabProp(map[string]any{"action": str("Action"), "accept": boo("dialog: accept"), "text": str("dialog prompt text")}), Required: []string{"target", "action"},

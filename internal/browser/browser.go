@@ -78,6 +78,7 @@ func Launch(ctx context.Context, o LaunchOptions) (*Browser, error) {
 	if o.Uid != 0 {
 		os.Chown(o.UserDataDir, int(o.Uid), int(o.Gid))
 	}
+	disableTranslate(o.UserDataDir, o.Uid, o.Gid)
 	if lock, err := os.Readlink(filepath.Join(o.UserDataDir, "SingletonLock")); err == nil {
 		parts := strings.Split(lock, "-")
 		if len(parts) > 1 {
@@ -462,4 +463,32 @@ func (b *Browser) checkChallenge(targetID string) {
 			b.emit("browser.challenge.detected", map[string]any{"target": targetID, "kind": c.Kind, "url": c.URL, "box": c.Box})
 		}
 	}()
+}
+
+func disableTranslate(dir string, uid, gid uint32) {
+	p := filepath.Join(dir, "Default", "Preferences")
+	prefs := map[string]any{}
+	if b, err := os.ReadFile(p); err == nil {
+		if json.Unmarshal(b, &prefs) != nil {
+			return
+		}
+	}
+	tr, _ := prefs["translate"].(map[string]any)
+	if tr == nil {
+		tr = map[string]any{}
+	}
+	if v, ok := tr["enabled"].(bool); ok && !v {
+		return
+	}
+	tr["enabled"] = false
+	prefs["translate"] = tr
+	b, err := json.Marshal(prefs)
+	if err != nil {
+		return
+	}
+	os.MkdirAll(filepath.Dir(p), 0700)
+	if os.WriteFile(p, b, 0600) == nil && uid != 0 {
+		os.Chown(filepath.Dir(p), int(uid), int(gid))
+		os.Chown(p, int(uid), int(gid))
+	}
 }

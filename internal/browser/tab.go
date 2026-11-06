@@ -27,6 +27,8 @@ type Tab struct {
 	chooser     map[string]any
 	closed      bool
 	dragCh      chan json.RawMessage
+	emulated    bool
+	toolbar     int
 }
 
 func (t *Tab) touch() {
@@ -208,10 +210,24 @@ func (t *Tab) Eval(ctx context.Context, expr string, out any) error {
 }
 
 func (t *Tab) Screenshot(ctx context.Context, format string, quality int, full bool) ([]byte, error) {
+	return t.ScreenshotScaled(ctx, format, quality, full, 0)
+}
+
+func (t *Tab) ScreenshotScaled(ctx context.Context, format string, quality int, full bool, maxWidth int) ([]byte, error) {
 	if format == "" {
 		format = "png"
 	}
 	p := map[string]any{"format": format, "captureBeyondViewport": full}
+	if maxWidth > 0 {
+		var dim [2]float64
+		expr := "[innerWidth, innerHeight]"
+		if full {
+			expr = "[document.documentElement.scrollWidth, document.documentElement.scrollHeight]"
+		}
+		if err := t.Eval(ctx, expr, &dim); err == nil && dim[0] > float64(maxWidth) {
+			p["clip"] = map[string]any{"x": 0, "y": 0, "width": dim[0], "height": dim[1], "scale": float64(maxWidth) / dim[0]}
+		}
+	}
 	if format == "jpeg" || format == "webp" {
 		if quality == 0 {
 			quality = 70
@@ -431,4 +447,65 @@ func (t *Tab) WindowTitleMarker(ctx context.Context, marker string) (func(), err
 		b, _ := json.Marshal(prev)
 		t.Eval(c, fmt.Sprintf("document.title=%s", b), nil)
 	}, nil
+}
+
+func (t *Tab) Emulate(ctx context.Context, w, h int, scale float64, mobile bool) error {
+	if w == 0 || h == 0 {
+		t.mu.Lock()
+		t.emulated = false
+		t.mu.Unlock()
+		t.call(ctx, "Emulation.setTouchEmulationEnabled", map[string]any{"enabled": false}, nil)
+		return t.call(ctx, "Emulation.clearDeviceMetricsOverride", nil, nil)
+	}
+	if scale == 0 {
+		scale = 1
+	}
+	t.mu.Lock()
+	t.emulated = true
+	t.mu.Unlock()
+	if err := t.call(ctx, "Emulation.setDeviceMetricsOverride", map[string]any{"width": w, "height": h, "deviceScaleFactor": scale, "mobile": mobile}, nil); err != nil {
+		return err
+	}
+	return t.call(ctx, "Emulation.setTouchEmulationEnabled", map[string]any{"enabled": mobile, "maxTouchPoints": 5}, nil)
+}
+
+func (t *Tab) ScreenPoint(ctx context.Context, x, y float64) (int, int, bool) {
+	var o [4]float64
+	if err := t.Eval(ctx, "[screenX, screenY, outerHeight - innerHeight, outerWidth]", &o); err != nil {
+		return 0, 0, false
+	}
+	t.mu.Lock()
+	emu := t.emulated
+	if !emu && o[2] > 0 && o[2] < 200 {
+		t.toolbar = int(o[2])
+	}
+	tb := t.toolbar
+	t.mu.Unlock()
+	if !emu {
+		return int(o[0] + x), int(o[1] + o[2] + y), true
+	}
+	if tb == 0 {
+		tb = 87
+	}
+	var win struct {
+		Bounds struct {
+			Left   int `json:"left"`
+			Top    int `json:"top"`
+			Width  int `json:"width"`
+			Height int `json:"height"`
+		} `json:"bounds"`
+	}
+	if err := t.b.cdp.Call(ctx, "", "Browser.getWindowForTarget", map[string]any{"targetId": t.TargetID}, &win); err != nil {
+		return 0, 0, false
+	}
+	bx := win.Bounds
+	px := int(x)
+	if px > bx.Width-12 {
+		px = bx.Width - 12
+	}
+	py := int(y)
+	if py > bx.Height-tb-12 {
+		py = bx.Height - tb - 12
+	}
+	return bx.Left + px, bx.Top + tb + py, true
 }

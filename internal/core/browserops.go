@@ -164,9 +164,14 @@ type TabAction struct {
 	Full      bool     `json:"full_page,omitempty"`
 	MaxText   int      `json:"max_text,omitempty"`
 	TimeoutMs int      `json:"timeout_ms,omitempty"`
+	Width     int      `json:"width,omitempty"`
+	Height    int      `json:"height,omitempty"`
+	Scale     float64  `json:"scale,omitempty"`
+	Mobile    bool     `json:"mobile,omitempty"`
+	MaxWidth  int      `json:"max_width,omitempty"`
 }
 
-var readOnlyTab = map[string]bool{"snapshot": true, "screenshot": true, "info": true, "challenge": true, "wait": true}
+var readOnlyTab = map[string]bool{"snapshot": true, "screenshot": true, "info": true, "challenge": true, "wait": true, "audit": true}
 
 func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabAction) (map[string]any, error) {
 	c, err := m.actor(cursorID, "browser")
@@ -192,6 +197,14 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 	timeout := time.Duration(a.TimeoutMs) * time.Millisecond
 	res := map[string]any{"ok": true}
 	px, py := -1.0, -1.0
+	if a.Ref != "" && c != nil {
+		switch a.Action {
+		case "click", "hover", "fill", "type", "select", "upload":
+			if x, y, e := tab.RefPoint(ctx, a.Ref); e == nil {
+				px, py = x, y
+			}
+		}
+	}
 	switch a.Action {
 	case "navigate":
 		err = tab.Navigate(ctx, a.URL, a.Wait, timeout)
@@ -217,7 +230,7 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 		}
 	case "screenshot":
 		var b []byte
-		b, err = tab.Screenshot(ctx, defStr(a.Format, "jpeg"), a.Quality, a.Full)
+		b, err = tab.ScreenshotScaled(ctx, defStr(a.Format, "jpeg"), a.Quality, a.Full, a.MaxWidth)
 		if err == nil {
 			res["image"] = base64.StdEncoding.EncodeToString(b)
 			res["mime"] = "image/" + defStr(a.Format, "jpeg")
@@ -259,6 +272,7 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 			x, y = 200, 200
 		}
 		err = tab.Scroll(ctx, x, y, a.DX, a.DY)
+		px, py = x, y
 	case "select":
 		err = tab.SelectRef(ctx, a.Ref, a.Values)
 	case "upload":
@@ -279,6 +293,12 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 		var ch *browser.Challenge
 		ch, err = tab.DetectChallenge(ctx)
 		res["challenge"] = ch
+	case "audit":
+		var r map[string]any
+		r, err = tab.Audit(ctx)
+		res["audit"] = r
+	case "emulate":
+		err = tab.Emulate(ctx, a.Width, a.Height, a.Scale, a.Mobile)
 	case "focus":
 		err = tab.Focus(ctx)
 	case "info":
@@ -315,11 +335,11 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 }
 
 func (m *Manager) tabToScreen(ctx context.Context, r *Runtime, tab *browser.Tab, x, y float64) (int, int) {
-	var o [3]int
-	if err := tab.Eval(ctx, "[screenX, screenY, outerHeight - innerHeight]", &o); err != nil {
+	sx, sy, ok := tab.ScreenPoint(ctx, x, y)
+	if !ok {
 		return -1, -1
 	}
-	return o[0] + int(x), o[1] + o[2] + int(y)
+	return sx, sy
 }
 
 func defStr(s, d string) string {

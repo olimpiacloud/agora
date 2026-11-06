@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,7 +67,7 @@ function walk(root, ox, oy, depth) {
 }
 walk(document, 0, 0, 0);
 const text = (document.body ? document.body.innerText : '').replace(/\n{3,}/g, '\n\n').slice(0, %d);
-return {url: location.href, title: document.title, viewport: [vw, vh], scroll: [scrollX, scrollY, document.documentElement.scrollHeight], elements: out.slice(0, %d), text};
+return {url: location.href, title: document.title, viewport: [vw, vh], scroll: [scrollX, scrollY, (document.documentElement || {}).scrollHeight || 0], elements: out.slice(0, %d), text};
 })()`
 
 type Element struct {
@@ -120,10 +121,14 @@ func (t *Tab) Snapshot(ctx context.Context, maxText, maxElements int) (*Snapshot
 		maxElements = 400
 	}
 	var s Snapshot
-	if err := t.Eval(ctx, fmt.Sprintf(snapshotJS, maxText, maxElements), &s); err != nil {
-		return nil, err
+	var err error
+	for i := 0; i < 3; i++ {
+		if err = t.Eval(ctx, fmt.Sprintf(snapshotJS, maxText, maxElements), &s); err == nil {
+			return &s, nil
+		}
+		t.waitReady(ctx, 5*time.Second, "interactive")
 	}
-	return &s, nil
+	return nil, err
 }
 
 type box struct {
@@ -145,6 +150,10 @@ return {Found:true, X:r.x+ox, Y:r.y+oy, W:r.width, H:r.height}; })()`, ref)
 		return 0, 0, fmt.Errorf("element %s not found (take a new snapshot)", ref)
 	}
 	return b.X + b.W/2, b.Y + b.H/2, nil
+}
+
+func (t *Tab) RefPoint(ctx context.Context, ref string) (float64, float64, error) {
+	return t.refBox(ctx, ref)
 }
 
 func (t *Tab) ClickRef(ctx context.Context, ref string, button string, clicks int) error {
@@ -273,4 +282,15 @@ func (t *Tab) DetectChallenge(ctx context.Context) (*Challenge, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+//go:embed audit.js
+var auditJS string
+
+func (t *Tab) Audit(ctx context.Context) (map[string]any, error) {
+	var out map[string]any
+	if err := t.Eval(ctx, auditJS, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
