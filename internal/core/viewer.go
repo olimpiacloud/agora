@@ -234,7 +234,7 @@ func (v *Viewer) Input(raw []byte) {
 	held := m.Arb.List(v.Workspace)
 	mine := false
 	for _, l := range held {
-		if l.Surface == "workspace" && l.Holder == "human:"+v.ID && l.Expires.IsZero() {
+		if l.Surface == "workspace" && l.Holder == "human:"+v.ID && l.Expires == nil {
 			mine = true
 		}
 	}

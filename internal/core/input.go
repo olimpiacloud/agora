@@ -99,9 +99,9 @@ func (m *Manager) DesktopInput(ctx context.Context, ws, cursorID string, req Inp
 		return nil, errors.New("workspace has no display (headless)")
 	}
 	var seat *x11.Seat
-	holder := "admin"
+	holder, prio := "admin", PrioAdmin
 	if c != nil {
-		holder = c.ID
+		holder, prio = c.ID, PrioAgent
 		seat, err = r.seatFor(c.ID)
 	} else {
 		r.mu.Lock()
@@ -125,7 +125,7 @@ func (m *Manager) DesktopInput(ctx context.Context, ws, cursorID string, req Inp
 	if win != 0 {
 		surface = fmt.Sprintf("win:%d", win)
 	}
-	if err := m.Arb.Check(ws, surface, holder, PrioAgent); err != nil {
+	if err := m.Arb.Check(ws, surface, holder, prio); err != nil {
 		return nil, err
 	}
 	focus := func() {
@@ -315,11 +315,11 @@ func (m *Manager) WindowOp(ctx context.Context, ws, cursorID string, win uint32,
 	if err != nil {
 		return err
 	}
-	holder := "admin"
+	holder, prio := "admin", PrioAdmin
 	if c != nil {
-		holder = c.ID
+		holder, prio = c.ID, PrioAgent
 	}
-	if err := m.Arb.Check(ws, fmt.Sprintf("win:%d", win), holder, PrioAgent); err != nil {
+	if err := m.Arb.Check(ws, fmt.Sprintf("win:%d", win), holder, prio); err != nil {
 		return err
 	}
 	r, err := m.ensureRuntime(ctx, ws, true)

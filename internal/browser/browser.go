@@ -170,7 +170,7 @@ func Launch(ctx context.Context, o LaunchOptions) (*Browser, error) {
 		return nil, err
 	}
 	if o.DownloadDir != "" {
-		b.cdp.Call(cctx, "", "Browser.setDownloadBehavior", map[string]any{"behavior": "allowAndName", "downloadPath": o.DownloadDir, "eventsEnabled": true}, nil)
+		b.cdp.Call(cctx, "", "Browser.setDownloadBehavior", map[string]any{"behavior": "allow", "downloadPath": o.DownloadDir, "eventsEnabled": true}, nil)
 	}
 	var tl struct {
 		TargetInfos []TargetInfo `json:"targetInfos"`

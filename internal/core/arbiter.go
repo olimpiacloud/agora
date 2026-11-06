@@ -9,15 +9,16 @@ import (
 const (
 	PrioAgent = 10
 	PrioHuman = 100
+	PrioAdmin = 1000
 )
 
 type Lock struct {
-	Surface  string    `json:"surface"`
-	Holder   string    `json:"holder"`
-	Priority int       `json:"priority"`
-	Reason   string    `json:"reason,omitempty"`
-	Since    time.Time `json:"since"`
-	Expires  time.Time `json:"expires,omitempty"`
+	Surface  string     `json:"surface"`
+	Holder   string     `json:"holder"`
+	Priority int        `json:"priority"`
+	Reason   string     `json:"reason,omitempty"`
+	Since    time.Time  `json:"since"`
+	Expires  *time.Time `json:"expires,omitempty"`
 }
 
 type ConflictError struct {
@@ -44,7 +45,7 @@ func (a *Arbiter) get(ws, surface string) *Lock {
 		return nil
 	}
 	l := m[surface]
-	if l != nil && !l.Expires.IsZero() && time.Now().After(l.Expires) {
+	if l != nil && l.Expires != nil && time.Now().After(*l.Expires) {
 		delete(m, surface)
 		return nil
 	}
@@ -66,7 +67,8 @@ func (a *Arbiter) Acquire(ws, surface, holder string, prio int, ttl time.Duratio
 	}
 	l := &Lock{Surface: surface, Holder: holder, Priority: prio, Reason: reason, Since: time.Now()}
 	if ttl > 0 {
-		l.Expires = time.Now().Add(ttl)
+		e := time.Now().Add(ttl)
+		l.Expires = &e
 	}
 	if a.locks[ws] == nil {
 		a.locks[ws] = map[string]*Lock{}

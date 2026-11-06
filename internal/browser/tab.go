@@ -26,6 +26,7 @@ type Tab struct {
 	dialog      map[string]any
 	chooser     map[string]any
 	closed      bool
+	dragCh      chan json.RawMessage
 }
 
 func (t *Tab) touch() {
@@ -78,6 +79,16 @@ func (t *Tab) onEvent(ev Event) {
 		t.dialog = nil
 		t.mu.Unlock()
 		t.b.emit("browser.dialog.closed", map[string]any{"target": t.TargetID})
+	case "Input.dragIntercepted":
+		t.mu.Lock()
+		ch := t.dragCh
+		t.mu.Unlock()
+		if ch != nil {
+			select {
+			case ch <- ev.Params:
+			default:
+			}
+		}
 	case "Page.fileChooserOpened":
 		var p map[string]any
 		json.Unmarshal(ev.Params, &p)
@@ -254,6 +265,19 @@ func (t *Tab) Drag(ctx context.Context, x0, y0, x1, y1 float64, steps int) error
 	if steps < 2 {
 		steps = 12
 	}
+	ch := make(chan json.RawMessage, 1)
+	t.mu.Lock()
+	t.dragCh = ch
+	t.mu.Unlock()
+	defer func() {
+		t.mu.Lock()
+		t.dragCh = nil
+		t.mu.Unlock()
+	}()
+	if err := t.call(ctx, "Input.setInterceptDrags", map[string]any{"enabled": true}, nil); err != nil {
+		return err
+	}
+	defer t.call(context.Background(), "Input.setInterceptDrags", map[string]any{"enabled": false}, nil)
 	if err := t.mouse(ctx, "mouseMoved", x0, y0, "", 0, 0); err != nil {
 		return err
 	}
@@ -266,6 +290,20 @@ func (t *Tab) Drag(ctx context.Context, x0, y0, x1, y1 float64, steps int) error
 		p := map[string]any{"type": "mouseMoved", "x": x, "y": y, "button": "left", "buttons": 1}
 		if err := t.call(ctx, "Input.dispatchMouseEvent", p, nil); err != nil {
 			return err
+		}
+		select {
+		case raw := <-ch:
+			var d struct {
+				Data json.RawMessage `json:"data"`
+			}
+			json.Unmarshal(raw, &d)
+			for _, typ := range []string{"dragEnter", "dragOver", "drop"} {
+				if err := t.call(ctx, "Input.dispatchDragEvent", map[string]any{"type": typ, "x": x1, "y": y1, "data": d.Data}, nil); err != nil {
+					return err
+				}
+			}
+			return t.mouse(ctx, "mouseReleased", x1, y1, "left", 1, 0)
+		default:
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

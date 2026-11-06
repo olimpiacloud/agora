@@ -175,12 +175,12 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 	if c != nil && c.Workspace != ws {
 		return nil, fmt.Errorf("%w: cursor belongs to workspace %s", ErrForbidden, c.Workspace)
 	}
-	holder := "admin"
+	holder, prio := "admin", PrioAdmin
 	if c != nil {
-		holder = c.ID
+		holder, prio = c.ID, PrioAgent
 	}
 	if !readOnlyTab[a.Action] {
-		if err := m.Arb.Check(ws, "tab:"+target, holder, PrioAgent); err != nil {
+		if err := m.Arb.Check(ws, "tab:"+target, holder, prio); err != nil {
 			return nil, err
 		}
 	}
