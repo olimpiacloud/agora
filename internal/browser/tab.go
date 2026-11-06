@@ -218,6 +218,21 @@ func (t *Tab) ScreenshotScaled(ctx context.Context, format string, quality int, 
 		format = "png"
 	}
 	p := map[string]any{"format": format, "captureBeyondViewport": full}
+	t.mu.Lock()
+	emu := t.emulated
+	t.mu.Unlock()
+	if emu && !full {
+		var v [4]float64
+		if err := t.Eval(ctx, "[scrollX, scrollY, innerWidth, innerHeight]", &v); err == nil && v[2] > 0 {
+			scale := 1.0
+			if maxWidth > 0 && v[2] > float64(maxWidth) {
+				scale = float64(maxWidth) / v[2]
+			}
+			p["captureBeyondViewport"] = true
+			p["clip"] = map[string]any{"x": v[0], "y": v[1], "width": v[2], "height": v[3], "scale": scale}
+			maxWidth = 0
+		}
+	}
 	if maxWidth > 0 {
 		var dim [2]float64
 		expr := "[innerWidth, innerHeight]"
@@ -508,4 +523,13 @@ func (t *Tab) ScreenPoint(ctx context.Context, x, y float64) (int, int, bool) {
 		py = bx.Height - tb - 12
 	}
 	return bx.Left + px, bx.Top + tb + py, true
+}
+
+func (t *Tab) Settle(ctx context.Context) {
+	select {
+	case <-time.After(120 * time.Millisecond):
+	case <-ctx.Done():
+		return
+	}
+	t.waitReady(ctx, 4*time.Second, "interactive")
 }

@@ -48,24 +48,25 @@ type Stats struct {
 }
 
 type Engine struct {
-	d       *x11.Display
-	mu      sync.Mutex
-	sinks   map[string]Sink
-	running bool
-	stop    chan struct{}
-	done    chan struct{}
-	keyReq  atomic.Bool
-	wake    chan struct{}
-	frames  atomic.Int64
-	bytes   atomic.Int64
-	keys    atomic.Int64
-	starts  atomic.Int64
-	encNs   atomic.Int64
-	capNs   atomic.Int64
-	lastFPS atomic.Int64
-	OnState func(running bool)
-	mode    Mode
-	w, h    int
+	d        *x11.Display
+	mu       sync.Mutex
+	sinks    map[string]Sink
+	running  bool
+	stop     chan struct{}
+	done     chan struct{}
+	keyReq   atomic.Bool
+	wake     chan struct{}
+	frames   atomic.Int64
+	bytes    atomic.Int64
+	keys     atomic.Int64
+	starts   atomic.Int64
+	encNs    atomic.Int64
+	capNs    atomic.Int64
+	lastFPS  atomic.Int64
+	OnState  func(running bool)
+	interact atomic.Int64
+	mode     Mode
+	w, h     int
 }
 
 func NewEngine(d *x11.Display) *Engine {
@@ -138,6 +139,12 @@ func (e *Engine) RequestKeyframe() {
 
 func (e *Engine) Damage() { e.poke() }
 
+func (e *Engine) Interact() { e.interact.Store(time.Now().UnixNano()) }
+
+func (e *Engine) recentInput() bool {
+	return time.Since(time.Unix(0, e.interact.Load())) < 2*time.Second
+}
+
 func (e *Engine) Stats() Stats {
 	e.mu.Lock()
 	n := len(e.sinks)
@@ -169,9 +176,12 @@ func (e *Engine) snapshotSinks() ([]Sink, Mode) {
 	return out, mode
 }
 
-func params(m Mode) (fps, crf, kbps int) {
+func params(m Mode, active bool) (fps, crf, kbps int) {
 	if m == Interactive {
-		return 30, 23, 8000
+		if active {
+			return 30, 23, 8000
+		}
+		return 15, 23, 8000
 	}
 	return 8, 28, 2000
 }
@@ -213,7 +223,7 @@ func (e *Engine) loop(stop, done chan struct{}) {
 		if len(sinks) == 0 {
 			continue
 		}
-		fps, crf, kbps := params(mode)
+		fps, crf, kbps := params(mode, e.recentInput())
 		minGap := time.Second / time.Duration(fps)
 		if wait := minGap - time.Since(last); wait > 0 {
 			select {

@@ -178,17 +178,33 @@ func (s *Server) handle(ctx context.Context, req rpcReq) (any, map[string]any) {
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":
+		s.identity(ctx)
+		groups := toolGroups(os.Getenv("CARBON_TOOLS"))
+		lean := os.Getenv("CARBON_LEAN") == "1"
 		list := make([]map[string]any, 0, len(s.tools))
 		for _, t := range s.tools {
+			if !groupAllowed(t.Name, groups) {
+				continue
+			}
 			props := map[string]any{}
 			for k, v := range t.Props {
+				if k == "workspace" && !s.admin && s.ws != "" && t.Name != "cursor_spawn" && t.Name != "cursor_list" {
+					continue
+				}
+				if lean && k == "target" {
+					v = str("Tab target id")
+				}
 				props[k] = v
 			}
 			schema := map[string]any{"type": "object", "properties": props}
 			if len(t.Required) > 0 {
 				schema["required"] = t.Required
 			}
-			list = append(list, map[string]any{"name": t.Name, "description": t.Desc, "inputSchema": schema})
+			desc := t.Desc
+			if lean {
+				desc = firstSentence(desc)
+			}
+			list = append(list, map[string]any{"name": t.Name, "description": desc, "inputSchema": schema})
 		}
 		return map[string]any{"tools": list}, nil
 	case "tools/call":
@@ -254,4 +270,43 @@ func q(kv ...string) string {
 		return ""
 	}
 	return "?" + v.Encode()
+}
+
+var groupOf = map[string]string{
+	"cursor_status": "self", "cursor_report": "self", "cursor_complete": "self", "cursor_fail": "self", "human_request": "self", "events_wait": "self", "cursor_inbox": "self",
+	"cursor_spawn": "spawn", "cursor_list": "spawn", "cursor_get": "spawn", "cursor_wait": "spawn", "cursor_control": "spawn", "cursor_message": "spawn",
+	"control_surface": "desktop", "system_info": "workspace", "worktree_create": "process",
+	"browser_drag": "browserx", "browser_hover": "browserx", "browser_upload": "browserx", "browser_tabs": "browserx", "browser_wait": "browserx", "browser_emulate": "browserx", "browser_audit": "browserx",
+}
+
+func toolGroup(name string) string {
+	if g, ok := groupOf[name]; ok {
+		return g
+	}
+	if i := strings.IndexByte(name, '_'); i > 0 {
+		return name[:i]
+	}
+	return name
+}
+
+func toolGroups(env string) map[string]bool {
+	if strings.TrimSpace(env) == "" || env == "all" {
+		return nil
+	}
+	m := map[string]bool{"self": true}
+	for _, g := range strings.Split(env, ",") {
+		m[strings.TrimSpace(g)] = true
+	}
+	return m
+}
+
+func groupAllowed(name string, groups map[string]bool) bool {
+	return groups == nil || groups[toolGroup(name)]
+}
+
+func firstSentence(d string) string {
+	if i := strings.Index(d, ". "); i > 0 && i < len(d)-2 {
+		return d[:i+1]
+	}
+	return d
 }

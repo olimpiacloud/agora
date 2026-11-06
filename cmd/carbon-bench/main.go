@@ -301,7 +301,11 @@ func rfbConsume(port int, d time.Duration) (frames int, bytes int64) {
 }
 
 func carbonConsume(ws string, d time.Duration) (frames int, bytes int64) {
-	vt := cdo("POST", "/v1/viewer-tokens", map[string]any{"workspace": ws, "control": false})["token"].(string)
+	return carbonConsumeOpt(ws, d, false)
+}
+
+func carbonConsumeOpt(ws string, d time.Duration, interact bool) (frames int, bytes int64) {
+	vt := cdo("POST", "/v1/viewer-tokens", map[string]any{"workspace": ws, "control": interact})["token"].(string)
 	ctx, cancel := context.WithTimeout(context.Background(), d+5*time.Second)
 	defer cancel()
 	c, _, err := websocket.Dial(ctx, "ws://127.0.0.1:7791/v1/workspaces/"+ws+"/stream/ws?token="+vt, nil)
@@ -309,6 +313,16 @@ func carbonConsume(ws string, d time.Duration) (frames int, bytes int64) {
 	c.SetReadLimit(64 << 20)
 	defer c.CloseNow()
 	end := time.Now().Add(d)
+	if interact {
+		go func() {
+			i := 0
+			for time.Now().Before(end) {
+				i++
+				c.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"t":"move","x":%d,"y":%d}`, 1900-(i%40), 1180-(i%30))))
+				time.Sleep(100 * time.Millisecond)
+			}
+		}()
+	}
 	for time.Now().Before(end) {
 		rc, cc := context.WithDeadline(ctx, end)
 		typ, b, err := c.Read(rc)
@@ -549,6 +563,15 @@ func main() {
 	add("9 streaming, 1 viewer", "server CPU (desktop+browser+stream)", ccpu, bcpu, "%", "baseline client requests raw RFB through websockify (cheapest server encoding)")
 	add("9 streaming, 1 viewer", "frames/s delivered", cres[0]/window.Seconds(), bres[0]/window.Seconds(), "fps", "")
 	add("9 streaming, 1 viewer", "bandwidth", cres[1]*8/1000/window.Seconds(), bres[1]*8/1000/window.Seconds(), "kbit/s", "H.264 vs raw RFB")
+	go func() {
+		f, by := carbonConsumeOpt(ws, window, true)
+		stopC <- [2]float64{float64(f), float64(by)}
+	}()
+	time.Sleep(time.Second)
+	icpu := carbonTree().cpu(window - 2*time.Second)
+	ires := <-stopC
+	add("9b streaming, viewer interacting", "server CPU", icpu, bcpu, "%", "viewer sends pointer moves every 100 ms; baseline row repeats scenario 9")
+	add("9b streaming, viewer interacting", "frames/s delivered", ires[0]/window.Seconds(), bres[0]/window.Seconds(), "fps", "")
 	multi := func(n int, f func() [2]float64) [2]float64 {
 		ch := make(chan [2]float64, n)
 		for i := 0; i < n; i++ {

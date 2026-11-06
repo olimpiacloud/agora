@@ -1,0 +1,220 @@
+{
+  "host": "Host: AMD Ryzen 5 3400G with Radeon Vega Graphics, 8 threads; Google Chrome 157.0.8103.38; carbon 0.1.0",
+  "rows": [
+    {
+      "scenario": "1 idle daemon",
+      "metric": "memory PSS",
+      "carbon": 11.732421875,
+      "baseline": 0,
+      "unit": "MB",
+      "note": "baseline has no daemon"
+    },
+    {
+      "scenario": "1 idle daemon",
+      "metric": "CPU",
+      "carbon": 0,
+      "baseline": 0,
+      "unit": "%"
+    },
+    {
+      "scenario": "2 empty desktop",
+      "metric": "memory PSS",
+      "carbon": 36.6650390625,
+      "baseline": 81.2763671875,
+      "unit": "MB",
+      "note": "carbon: daemon+Xvfb+WM; baseline: Xvfb+openbox+x11vnc+websockify"
+    },
+    {
+      "scenario": "2 empty desktop",
+      "metric": "CPU idle",
+      "carbon": 0.2,
+      "baseline": 0,
+      "unit": "%"
+    },
+    {
+      "scenario": "2 empty desktop",
+      "metric": "start time",
+      "carbon": 113,
+      "baseline": 308,
+      "unit": "ms"
+    },
+    {
+      "scenario": "3 desktop + Chromium",
+      "metric": "cold start to page loaded",
+      "carbon": 623,
+      "baseline": 486,
+      "unit": "ms"
+    },
+    {
+      "scenario": "3 desktop + Chromium",
+      "metric": "memory PSS",
+      "carbon": 284.4990234375,
+      "baseline": 326.91015625,
+      "unit": "MB",
+      "note": "Chromium included on both sides"
+    },
+    {
+      "scenario": "3 desktop + Chromium",
+      "metric": "CPU idle, no viewer",
+      "carbon": 0.3,
+      "baseline": 0,
+      "unit": "%"
+    },
+    {
+      "scenario": "4 agent capture",
+      "metric": "full screenshot latency p50",
+      "carbon": 30.178,
+      "baseline": 33.875,
+      "unit": "ms",
+      "note": "carbon: X shm grab of whole desktop + JPEG; baseline: CDP Page.captureScreenshot"
+    },
+    {
+      "scenario": "4 agent capture",
+      "metric": "tab screenshot via API p50",
+      "carbon": 44.325,
+      "baseline": 33.875,
+      "unit": "ms",
+      "note": "carbon adds HTTP+auth+arbitration over raw CDP"
+    },
+    {
+      "scenario": "4 agent capture",
+      "metric": "semantic snapshot p50",
+      "carbon": 1.181,
+      "baseline": 0,
+      "unit": "ms",
+      "note": "no baseline equivalent; replaces screenshots for agents"
+    },
+    {
+      "scenario": "5 input",
+      "metric": "click → DOM mousedown p50 (X11 seat)",
+      "carbon": 1.177734375,
+      "baseline": 3.669921875,
+      "unit": "ms",
+      "note": "carbon: API→own MPX seat via XTEST; baseline: xdotool process"
+    },
+    {
+      "scenario": "5 input",
+      "metric": "click → DOM mousedown p50 (CDP)",
+      "carbon": 13.584228515625,
+      "baseline": 0,
+      "unit": "ms",
+      "note": "carbon semantic click through API"
+    },
+    {
+      "scenario": "6 five agents with a browser",
+      "metric": "new agent ready (cursor+window vs new stack)",
+      "carbon": 125,
+      "baseline": 503,
+      "unit": "ms"
+    },
+    {
+      "scenario": "6 five agents with a browser",
+      "metric": "memory PSS",
+      "carbon": 326.80078125,
+      "baseline": 1437.7880859375,
+      "unit": "MB",
+      "note": "carbon: 1 desktop, 1 Chromium, 5 windows; baseline: 5 full stacks"
+    },
+    {
+      "scenario": "6 five agents with a browser",
+      "metric": "CPU idle, no viewer",
+      "carbon": 0.4,
+      "baseline": 0.1,
+      "unit": "%"
+    },
+    {
+      "scenario": "7 idle cursors",
+      "metric": "memory per idle cursor",
+      "carbon": 2.2,
+      "baseline": 0,
+      "unit": "KB",
+      "note": "100 logical cursors without graphics; baseline would need a stack each"
+    },
+    {
+      "scenario": "8 animated page, no viewer",
+      "metric": "CPU",
+      "carbon": 17.2,
+      "baseline": 13,
+      "unit": "%",
+      "note": "page animation cost on both; carbon encodes nothing"
+    },
+    {
+      "scenario": "9 streaming, 1 viewer",
+      "metric": "server CPU (desktop+browser+stream)",
+      "carbon": 30.375000000000004,
+      "baseline": 15.125,
+      "unit": "%",
+      "note": "baseline client requests raw RFB through websockify (cheapest server encoding)"
+    },
+    {
+      "scenario": "9 streaming, 1 viewer",
+      "metric": "frames/s delivered",
+      "carbon": 29.2,
+      "baseline": 15.8,
+      "unit": "fps"
+    },
+    {
+      "scenario": "9 streaming, 1 viewer",
+      "metric": "bandwidth",
+      "carbon": 425.1432,
+      "baseline": 5865.033600000001,
+      "unit": "kbit/s",
+      "note": "H.264 vs raw RFB"
+    },
+    {
+      "scenario": "9b streaming, viewer interacting",
+      "metric": "server CPU",
+      "carbon": 32.5,
+      "baseline": 15.125,
+      "unit": "%",
+      "note": "viewer sends pointer moves every 100 ms; baseline row repeats scenario 9"
+    },
+    {
+      "scenario": "9b streaming, viewer interacting",
+      "metric": "frames/s delivered",
+      "carbon": 29.3,
+      "baseline": 15.8,
+      "unit": "fps"
+    },
+    {
+      "scenario": "10 streaming, 3 viewers",
+      "metric": "server CPU",
+      "carbon": 31.874999999999996,
+      "baseline": 20.75,
+      "unit": "%",
+      "note": "carbon encodes once and fans out"
+    },
+    {
+      "scenario": "11 suspended workspace",
+      "metric": "memory PSS (whole carbon)",
+      "carbon": 43.2138671875,
+      "baseline": 328.8525390625,
+      "unit": "MB",
+      "note": "baseline cannot suspend without losing the live session"
+    },
+    {
+      "scenario": "11 suspended workspace",
+      "metric": "suspend time",
+      "carbon": 195,
+      "baseline": 0,
+      "unit": "ms",
+      "note": "checkpoint + graceful browser close"
+    },
+    {
+      "scenario": "11 suspended workspace",
+      "metric": "resume until 5 tabs restored",
+      "carbon": 1020,
+      "baseline": 486,
+      "unit": "ms",
+      "note": "baseline: cold start of one stack"
+    },
+    {
+      "scenario": "12 teardown",
+      "metric": "destroy workspace",
+      "carbon": 255,
+      "baseline": 0,
+      "unit": "ms"
+    }
+  ],
+  "time": "2026-11-06T19:49:31.404749217-03:00"
+}

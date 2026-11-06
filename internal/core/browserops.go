@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/agusgarcia3007/carbon/internal/browser"
@@ -17,6 +18,7 @@ func xwin(id uint32) xproto.Window { return xproto.Window(id) }
 func x11Layout(s string) x11.Layout { return x11.Layout(s) }
 
 type OpenTabReq struct {
+	Observe    bool   `json:"observe,omitempty"`
 	URL        string `json:"url"`
 	Isolated   bool   `json:"isolated,omitempty"`
 	SameWindow bool   `json:"same_window,omitempty"`
@@ -76,7 +78,14 @@ func (m *Manager) OpenTab(ctx context.Context, ws, cursorID string, req OpenTabR
 		m.mu.Unlock()
 	}
 	m.Bus.Publish("browser.tab.opened", ws, owner, map[string]any{"target": tab.TargetID, "url": req.URL, "isolated": req.Isolated})
-	return map[string]any{"target": tab.TargetID, "url": req.URL, "context": tab.ContextID}, nil
+	res := map[string]any{"target": tab.TargetID, "url": req.URL, "context": tab.ContextID}
+	if req.Observe {
+		tab.Settle(ctx)
+		if s, e := tab.Observe(ctx, 900); e == nil {
+			res["observation"] = r.observeDiff(tab.TargetID, s.Compact())
+		}
+	}
+	return res, nil
 }
 
 func (m *Manager) ListTabs(ctx context.Context, ws string) ([]map[string]any, error) {
@@ -169,6 +178,7 @@ type TabAction struct {
 	Scale     float64  `json:"scale,omitempty"`
 	Mobile    bool     `json:"mobile,omitempty"`
 	MaxWidth  int      `json:"max_width,omitempty"`
+	Observe   bool     `json:"observe,omitempty"`
 }
 
 var readOnlyTab = map[string]bool{"snapshot": true, "screenshot": true, "info": true, "challenge": true, "wait": true, "audit": true}
@@ -314,6 +324,15 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 	if err != nil {
 		return nil, err
 	}
+	if a.Observe && !readOnlyTab[a.Action] && a.Action != "close" {
+		tab.Settle(ctx)
+		if s, e := tab.Observe(ctx, 900); e == nil {
+			res["observation"] = r.observeDiff(target, s.Compact())
+			if ch, _ := tab.DetectChallenge(ctx); ch != nil {
+				res["challenge"] = ch
+			}
+		}
+	}
 	if !readOnlyTab[a.Action] && c != nil {
 		sx, sy := -1, -1
 		if px >= 0 {
@@ -369,4 +388,53 @@ func (m *Manager) BrowserRestart(ctx context.Context, ws string) error {
 	m.Bus.Publish("browser.stopped", ws, "", map[string]any{"tabs": len(tabs)})
 	_, err := r.Browser(ctx)
 	return err
+}
+
+func (r *Runtime) observeDiff(target, cur string) string {
+	r.mu.Lock()
+	if r.lastObs == nil {
+		r.lastObs = map[string]string{}
+	}
+	prev := r.lastObs[target]
+	r.lastObs[target] = cur
+	r.mu.Unlock()
+	if prev == "" {
+		return cur
+	}
+	seen := map[string]bool{}
+	prevText := ""
+	if i := strings.Index(prev, "--- text ---\n"); i >= 0 {
+		prevText = prev[i:]
+		prev = prev[:i]
+	}
+	for _, l := range strings.Split(prev, "\n") {
+		if strings.HasPrefix(l, "[") {
+			seen[l] = true
+		}
+	}
+	text := ""
+	body := cur
+	if i := strings.Index(cur, "--- text ---\n"); i >= 0 {
+		text = cur[i:]
+		body = cur[:i]
+	}
+	var b strings.Builder
+	same := 0
+	for _, l := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
+		if strings.HasPrefix(l, "[") && seen[l] {
+			same++
+			continue
+		}
+		b.WriteString(l)
+		b.WriteByte('\n')
+	}
+	if same > 0 {
+		fmt.Fprintf(&b, "(%d elements unchanged since your last view of this tab)\n", same)
+	}
+	if text != "" && text == prevText {
+		b.WriteString("--- text unchanged ---\n")
+	} else {
+		b.WriteString(text)
+	}
+	return b.String()
 }

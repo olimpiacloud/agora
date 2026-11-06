@@ -75,14 +75,45 @@ func (m *Manager) agentCommand(c *Cursor, tok string) ([]string, []string, error
 	if prompt == "" {
 		prompt = c.Goal
 	}
+	full := l.Profile == "full"
+	groups := []string{"browser"}
+	if len(l.Tools) > 0 {
+		groups = append([]string{}, l.Tools...)
+	}
+	for _, perm := range []string{"desktop", "spawn", "workspace", "process"} {
+		if c.Can(perm) {
+			groups = append(groups, perm)
+		}
+	}
+	mcpEnv := map[string]string{"CARBON_URL": m.cfg.ListenURL, "CARBON_TOKEN": tok}
+	if !full {
+		mcpEnv["CARBON_TOOLS"] = strings.Join(groups, ",")
+		mcpEnv["CARBON_LEAN"] = "1"
+	}
+	mcpCfg := map[string]any{"mcpServers": map[string]any{"carbon": map[string]any{"command": bin, "args": []string{"mcp"}, "env": mcpEnv}}}
 	sys := fmt.Sprintf("You are Carbon cursor %s (%q) working in Carbon workspace %s. Use the carbon MCP tools to see and control the desktop and browser. Report progress with cursor_report and finish by calling cursor_complete with a concise structured result (or cursor_fail). If a CAPTCHA or login needs a human, call cursor_status with status needs_human and wait_events for control.returned.", c.ID, c.Name, c.Workspace)
-	mcpCfg := map[string]any{"mcpServers": map[string]any{"carbon": map[string]any{"command": bin, "args": []string{"mcp"}, "env": map[string]string{"CARBON_URL": m.cfg.ListenURL, "CARBON_TOKEN": tok}}}}
+	lean := fmt.Sprintf(`You are an autonomous agent (Carbon cursor %s, %q) working on a shared Linux desktop with Chromium. You act only through the carbon tools. Be fast and economical:
+- Open your own tab with browser_open and keep using its target.
+- Action tools (navigate, click, fill, type, press, select) already return what is visible afterwards. Do not call browser_snapshot after them unless you need offscreen content.
+- Prefer element refs over coordinates. Use browser_screenshot only when visual appearance matters.
+- Put independent tool calls in the same turn.
+- No destructive or irreversible actions unless the task asks. Never reveal secrets.
+- If a CAPTCHA or login blocks you, call human_request, then events_wait with types control.returned.
+- Finish with cursor_complete (structured result) or cursor_fail. Keep your final text to one line.`, c.ID, c.Name)
 	switch l.Adapter {
 	case "claude", "claude-code":
 		mb, _ := json.Marshal(mcpCfg)
-		args := []string{"claude", "-p", prompt, "--mcp-config", string(mb), "--append-system-prompt", sys, "--allowedTools", "mcp__carbon__*", "--output-format", "text"}
+		var args []string
+		if full {
+			args = []string{"claude", "-p", prompt, "--mcp-config", string(mb), "--append-system-prompt", sys, "--allowedTools", "mcp__carbon__*", "--output-format", "json"}
+		} else {
+			args = []string{"claude", "-p", prompt, "--mcp-config", string(mb), "--strict-mcp-config", "--disable-slash-commands", "--tools", "", "--setting-sources", "", "--system-prompt", lean, "--allowedTools", "mcp__carbon__*", "--output-format", "json"}
+		}
 		if l.Model != "" {
 			args = append(args, "--model", l.Model)
+		}
+		if l.Effort != "" {
+			args = append(args, "--effort", l.Effort)
 		}
 		return args, env, nil
 	case "codex":
@@ -135,7 +166,8 @@ func (m *Manager) launchAgent(id, tok string) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	logf, _ := os.OpenFile(filepath.Join(dir, "agent.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	tb := &tailBuf{f: logf}
-	cmd.Stdout = tb
+	stdout := &tailBuf{f: logf}
+	cmd.Stdout = stdout
 	cmd.Stderr = tb
 	if err := cmd.Start(); err != nil {
 		if logf != nil {
@@ -169,7 +201,20 @@ func (m *Manager) launchAgent(id, tok string) error {
 				code = -1
 			}
 		}
-		out := strings.TrimSpace(tb.String())
+		out := strings.TrimSpace(stdout.String())
+		if u, text := parseClaudeResult(out); u != nil {
+			out = text
+			m.mu.Lock()
+			if cc := m.cursors[id]; cc != nil {
+				cc.Usage = u
+				m.saveCursor(cc)
+			}
+			m.mu.Unlock()
+			m.Bus.Publish("agent.usage", c.Workspace, id, map[string]any{"cost_usd": u.CostUSD, "turns": u.Turns, "input": u.InputTokens, "output": u.OutputTokens, "cache_read": u.CacheReadTokens, "cache_write": u.CacheWriteTokens})
+		}
+		if out == "" {
+			out = strings.TrimSpace(tb.String())
+		}
 		if len(out) > 4000 {
 			out = out[len(out)-4000:]
 		}
@@ -217,4 +262,37 @@ func (m *Manager) signalLaunch(id string, stop bool) {
 		sig = syscall.SIGSTOP
 	}
 	syscall.Kill(-l.cmd.Process.Pid, sig)
+}
+
+func parseClaudeResult(out string) (*Usage, string) {
+	lines := strings.Split(out, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(l, "{") || !strings.Contains(l, `"type":"result"`) {
+			continue
+		}
+		if u, t, ok := decodeClaudeResult(l); ok {
+			return u, t
+		}
+	}
+	return nil, ""
+}
+
+func decodeClaudeResult(l string) (*Usage, string, bool) {
+	var r struct {
+		Result     string  `json:"result"`
+		NumTurns   int     `json:"num_turns"`
+		Cost       float64 `json:"total_cost_usd"`
+		DurationMs int64   `json:"duration_ms"`
+		Usage      struct {
+			In  int64 `json:"input_tokens"`
+			Out int64 `json:"output_tokens"`
+			CR  int64 `json:"cache_read_input_tokens"`
+			CW  int64 `json:"cache_creation_input_tokens"`
+		} `json:"usage"`
+	}
+	if json.Unmarshal([]byte(l), &r) != nil {
+		return nil, "", false
+	}
+	return &Usage{InputTokens: r.Usage.In, OutputTokens: r.Usage.Out, CacheReadTokens: r.Usage.CR, CacheWriteTokens: r.Usage.CW, CostUSD: r.Cost, Turns: r.NumTurns, DurationMs: r.DurationMs}, r.Result, true
 }

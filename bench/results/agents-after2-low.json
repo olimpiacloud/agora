@@ -1,0 +1,172 @@
+[
+ {
+  "task": "shop",
+  "label": "after2-low",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 12.1,
+  "cost": 0.0815,
+  "turns": 8,
+  "first_ctx": 7532,
+  "input": 16,
+  "cache_write": 7459,
+  "cache_read": 66838,
+  "output": 2229,
+  "images": 0,
+  "result_chars": 6517,
+  "tools": {
+   "browser_click": 2,
+   "browser_fill": 2,
+   "browser_open": 1,
+   "browser_snapshot": 1,
+   "browser_select": 1
+  },
+  "result": {
+   "codigo": "CONF-96-EXP",
+   "total": "$ 34.500"
+  }
+ },
+ {
+  "task": "shop",
+  "label": "after2-low",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 10.8,
+  "cost": 0.0805,
+  "turns": 8,
+  "first_ctx": 7534,
+  "input": 16,
+  "cache_write": 7436,
+  "cache_read": 66822,
+  "output": 2170,
+  "images": 0,
+  "result_chars": 6517,
+  "tools": {
+   "browser_click": 2,
+   "browser_fill": 2,
+   "browser_open": 1,
+   "browser_snapshot": 1,
+   "browser_select": 1
+  },
+  "result": {
+   "codigo": "CONF-96-EXP",
+   "total": "$ 34.500"
+  }
+ },
+ {
+  "task": "lookup",
+  "label": "after2-low",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 9.0,
+  "cost": 0.0245,
+  "turns": 3,
+  "first_ctx": 7499,
+  "input": 6,
+  "cache_write": 3036,
+  "cache_read": 22116,
+  "output": 432,
+  "images": 0,
+  "result_chars": 3908,
+  "tools": {
+   "browser_eval": 2,
+   "browser_open": 1
+  },
+  "result": {
+   "incluye": [
+    "USD 20 de uso incluido cada mes (no se acumula)",
+    "Lo que pase del incluido, se cobra por uso",
+    "Soporte prioritario, en un día hábil"
+   ],
+   "precio": "USD 20 por mes (más impuestos)"
+  }
+ },
+ {
+  "task": "lookup",
+  "label": "after2-low",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 7.7,
+  "cost": 0.0163,
+  "turns": 2,
+  "first_ctx": 7493,
+  "input": 4,
+  "cache_write": 1993,
+  "cache_read": 13801,
+  "output": 309,
+  "images": 0,
+  "result_chars": 2534,
+  "tools": {
+   "browser_open": 1,
+   "browser_eval": 1
+  },
+  "result": {
+   "incluye": [
+    "USD 20 de uso incluido cada mes",
+    "Lo que pase del incluido, se cobra por uso",
+    "Soporte prioritario, en un día hábil"
+   ],
+   "precio": "USD 20 por mes"
+  }
+ },
+ {
+  "task": "visual",
+  "label": "after2-low",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 7.4,
+  "cost": 0.0141,
+  "turns": 2,
+  "first_ctx": 7496,
+  "input": 4,
+  "cache_write": 1978,
+  "cache_read": 13804,
+  "output": 170,
+  "images": 1,
+  "result_chars": 1506,
+  "tools": {
+   "browser_open": 1,
+   "browser_screenshot": 1
+  },
+  "result": {
+   "issues": [
+    "Los botones 'Agregar' son grises, sin estilo y con texto diminuto. No se distinguen como llamada a la acción principal.",
+    "El campo de búsqueda y el botón 'Buscar' son pequeños y desparejos. El placeholder es minúsculo y la altura no coincide.",
+    "Las tarjetas no tienen imagen de producto y el precio queda pegado al botón. Hay poca jerarquía y espacio, y la página parece vacía."
+   ]
+  }
+ },
+ {
+  "task": "visual",
+  "label": "after2-low",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 7.0,
+  "cost": 0.0141,
+  "turns": 2,
+  "first_ctx": 7500,
+  "input": 4,
+  "cache_write": 1982,
+  "cache_read": 13808,
+  "output": 170,
+  "images": 1,
+  "result_chars": 1506,
+  "tools": {
+   "browser_open": 1,
+   "browser_screenshot": 1
+  },
+  "result": {
+   "issues": [
+    "Los botones 'Agregar' son grises, sin estilo y con texto diminuto, sin jerarquía de llamada a la acción",
+    "El campo de búsqueda es muy pequeño, con placeholder ilegible, y no está alineado con el botón Buscar",
+    "Las tarjetas de producto no tienen imágenes, y el precio queda pegado al botón, con poco espaciado y contraste débil"
+   ]
+  }
+ }
+]

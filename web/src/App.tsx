@@ -364,6 +364,7 @@ function CursorRow({ c, depth, refresh }: { c: Cursor; depth: number; refresh: (
       {open && (
         <div className="more">
           <div className="mono muted">{c.id} · {c.actions} actions{c.last_action ? ` · last ${c.last_action}` : ''}{c.surface ? ` · ${c.surface}` : ''}</div>
+          {c.usage && <div className="mono muted">${c.usage.cost_usd.toFixed(3)} · {c.usage.turns} turns · {Math.round((c.usage.input_tokens + c.usage.cache_read_tokens + c.usage.cache_write_tokens) / 1000)}k in · {Math.round(c.usage.output_tokens / 1000)}k out · {(c.usage.duration_ms / 1000).toFixed(0)}s</div>}
           {c.result !== undefined && c.result !== null && <pre>{JSON.stringify(c.result, null, 2).slice(0, 2000)}</pre>}
           {c.error && <pre className="err">{c.error}</pre>}
           {!terminal && (

@@ -121,7 +121,20 @@ type Message struct {
 	Body json.RawMessage `json:"body"`
 }
 
+type Usage struct {
+	InputTokens      int64   `json:"input_tokens"`
+	OutputTokens     int64   `json:"output_tokens"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	CostUSD          float64 `json:"cost_usd"`
+	Turns            int     `json:"turns"`
+	DurationMs       int64   `json:"duration_ms"`
+}
+
 type LaunchSpec struct {
+	Profile string            `json:"profile,omitempty"`
+	Effort  string            `json:"effort,omitempty"`
+	Tools   []string          `json:"tools,omitempty"`
 	Adapter string            `json:"adapter"`
 	Prompt  string            `json:"prompt,omitempty"`
 	Command []string          `json:"command,omitempty"`
@@ -159,6 +172,7 @@ type Cursor struct {
 	Worktree    string            `json:"worktree,omitempty"`
 	Launch      *LaunchSpec       `json:"launch,omitempty"`
 	LaunchPid   int               `json:"launch_pid,omitempty"`
+	Usage       *Usage            `json:"usage,omitempty"`
 	Labels      map[string]string `json:"labels,omitempty"`
 }
 

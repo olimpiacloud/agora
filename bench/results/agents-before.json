@@ -1,0 +1,179 @@
+[
+ {
+  "task": "shop",
+  "label": "before",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 42.6,
+  "cost": 0.7175,
+  "turns": 15,
+  "first_ctx": 66705,
+  "input": 32,
+  "cache_write": 104787,
+  "cache_read": 949384,
+  "output": 2645,
+  "images": 0,
+  "result_chars": 6019,
+  "tools": {
+   "browser_snapshot": 4,
+   "browser_fill": 3,
+   "browser_click": 2,
+   "ToolSearch": 1,
+   "browser_open": 1,
+   "browser_select": 1
+  },
+  "result": {
+   "codigo": "CONF-96-EXP",
+   "total": "$ 34.500"
+  }
+ },
+ {
+  "task": "shop",
+  "label": "before",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 46.4,
+  "cost": 0.6249,
+  "turns": 18,
+  "first_ctx": 66703,
+  "input": 38,
+  "cache_write": 56898,
+  "cache_read": 1211853,
+  "output": 3189,
+  "images": 0,
+  "result_chars": 4804,
+  "tools": {
+   "browser_snapshot": 5,
+   "browser_click": 4,
+   "browser_fill": 3,
+   "ToolSearch": 1,
+   "browser_open": 1,
+   "browser_select": 1,
+   "cursor_report": 1
+  },
+  "result": {
+   "codigo": "CONF-96-EXP",
+   "total": "$ 34.500"
+  }
+ },
+ {
+  "task": "lookup",
+  "label": "before",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 20.4,
+  "cost": 0.4226,
+  "turns": 4,
+  "first_ctx": 66669,
+  "input": 10,
+  "cache_write": 96685,
+  "cache_read": 172550,
+  "output": 551,
+  "images": 0,
+  "result_chars": 10639,
+  "tools": {
+   "ToolSearch": 1,
+   "browser_open": 1,
+   "browser_snapshot": 1
+  },
+  "result": {
+   "incluye": [
+    "USD 20 de uso incluido cada mes",
+    "Lo que pase del incluido se cobra por uso",
+    "Soporte prioritario, en un día hábil"
+   ],
+   "precio": "USD 20 por mes"
+  }
+ },
+ {
+  "task": "lookup",
+  "label": "before",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 21.8,
+  "cost": 0.4246,
+  "turns": 4,
+  "first_ctx": 66661,
+  "input": 10,
+  "cache_write": 96731,
+  "cache_read": 172593,
+  "output": 672,
+  "images": 0,
+  "result_chars": 10639,
+  "tools": {
+   "ToolSearch": 1,
+   "browser_open": 1,
+   "browser_snapshot": 1
+  },
+  "result": {
+   "incluye": [
+    "USD 20 de uso incluido cada mes",
+    "Lo que pase del incluido, se cobra por uso",
+    "Soporte prioritario, en un día hábil"
+   ],
+   "precio": "USD 20 por mes"
+  }
+ },
+ {
+  "task": "visual",
+  "label": "before",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 21.9,
+  "cost": 0.2332,
+  "turns": 3,
+  "first_ctx": 66668,
+  "input": 8,
+  "cache_write": 48692,
+  "cache_read": 153217,
+  "output": 305,
+  "images": 1,
+  "result_chars": 297,
+  "tools": {
+   "ToolSearch": 1,
+   "browser_open": 1,
+   "browser_screenshot": 1
+  },
+  "result": {
+   "issues": [
+    "Los botones 'Agregar' son grises por defecto y con texto largo y repetido, sin jerarquía ni CTA visible",
+    "El input de búsqueda es diminuto y sin estilo, y no está alineado en altura con el botón Buscar",
+    "Los links del navbar son azul/subrayado por defecto, sin estado activo ni estilo propio, y el precio queda pegado al botón sin espaciado"
+   ]
+  }
+ },
+ {
+  "task": "visual",
+  "label": "before",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 22.2,
+  "cost": 0.2331,
+  "turns": 3,
+  "first_ctx": 66672,
+  "input": 8,
+  "cache_write": 48694,
+  "cache_read": 153225,
+  "output": 303,
+  "images": 1,
+  "result_chars": 297,
+  "tools": {
+   "ToolSearch": 1,
+   "browser_open": 1,
+   "browser_screenshot": 1
+  },
+  "result": {
+   "issues": [
+    "Botones y buscador usan estilos nativos del navegador (grises, sin jerarquía): no hay botón primario ni color de acción, y el input de búsqueda es diminuto y pegado al botón.",
+    "Tarjetas sin imágenes de producto y con poco contraste/jerarquía: solo texto, el precio queda pegado al botón y no hay espaciado vertical claro.",
+    "Navbar con links azules subrayados por defecto (estilo sin tratar) sobre fondo oscuro, sin estado activo; el contenido queda en una columna angosta con grandes márgenes vacíos a los lados."
+   ]
+  }
+ }
+]

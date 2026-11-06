@@ -55,6 +55,7 @@ type Runtime struct {
 	idle      bool
 	closing   bool
 	restored  bool
+	lastObs   map[string]string
 	offsets   map[string][3]int
 }
 
@@ -310,30 +311,39 @@ func (r *Runtime) restoreTabs(b *browser.Browser, tabs []TabRecord) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	initial := b.Targets()
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 	restored := 0
 	for _, t := range tabs {
 		if t.URL == "" || t.URL == "about:blank" || strings.HasPrefix(t.URL, "chrome://newtab") {
 			continue
 		}
-		tab, err := b.NewTab(ctx, browser.NewTabOptions{URL: t.URL, NewWindow: true})
-		if err != nil {
-			continue
-		}
-		restored++
-		if t.Owner != "" {
-			r.mu.Lock()
-			r.tabOwner[tab.TargetID] = t.Owner
-			r.mu.Unlock()
-			tab.Owner = t.Owner
-			r.m.mu.Lock()
-			if c := r.m.cursors[t.Owner]; c != nil && !c.Status.Terminal() {
-				c.Surface = "tab:" + tab.TargetID
-				r.m.saveCursor(c)
+		wg.Add(1)
+		go func(t TabRecord) {
+			defer wg.Done()
+			tab, err := b.NewTab(ctx, browser.NewTabOptions{URL: t.URL, NewWindow: true})
+			if err != nil {
+				return
 			}
-			r.m.mu.Unlock()
-		}
-		r.m.Bus.Publish("browser.tab.restored", r.id, t.Owner, map[string]any{"target": tab.TargetID, "url": t.URL, "previous": t.Target})
+			mu.Lock()
+			restored++
+			mu.Unlock()
+			if t.Owner != "" {
+				r.mu.Lock()
+				r.tabOwner[tab.TargetID] = t.Owner
+				r.mu.Unlock()
+				tab.Owner = t.Owner
+				r.m.mu.Lock()
+				if c := r.m.cursors[t.Owner]; c != nil && !c.Status.Terminal() {
+					c.Surface = "tab:" + tab.TargetID
+					r.m.saveCursor(c)
+				}
+				r.m.mu.Unlock()
+			}
+			r.m.Bus.Publish("browser.tab.restored", r.id, t.Owner, map[string]any{"target": tab.TargetID, "url": t.URL, "previous": t.Target})
+		}(t)
 	}
+	wg.Wait()
 	if restored > 0 {
 		for _, t := range initial {
 			if t.URL == "about:blank" {

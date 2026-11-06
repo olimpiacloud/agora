@@ -1,0 +1,171 @@
+[
+ {
+  "task": "shop",
+  "label": "after2",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 12.9,
+  "cost": 0.1088,
+  "turns": 9,
+  "first_ctx": 7534,
+  "input": 18,
+  "cache_write": 14041,
+  "cache_read": 70413,
+  "output": 2332,
+  "images": 0,
+  "result_chars": 6785,
+  "tools": {
+   "browser_fill": 3,
+   "browser_click": 2,
+   "browser_open": 1,
+   "browser_snapshot": 1,
+   "browser_select": 1
+  },
+  "result": {
+   "codigo": "CONF-96-EXP",
+   "total": "$ 34.500"
+  }
+ },
+ {
+  "task": "shop",
+  "label": "after2",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 17.3,
+  "cost": 0.0701,
+  "turns": 9,
+  "first_ctx": 7534,
+  "input": 18,
+  "cache_write": 5359,
+  "cache_read": 75784,
+  "output": 1812,
+  "images": 0,
+  "result_chars": 3500,
+  "tools": {
+   "browser_fill": 3,
+   "browser_click": 3,
+   "browser_open": 1,
+   "browser_select": 1
+  },
+  "result": {
+   "codigo": "CONF-96-EXP",
+   "total": "$ 34.500"
+  }
+ },
+ {
+  "task": "lookup",
+  "label": "after2",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 6.9,
+  "cost": 0.0155,
+  "turns": 2,
+  "first_ctx": 7487,
+  "input": 4,
+  "cache_write": 1988,
+  "cache_read": 13795,
+  "output": 260,
+  "images": 0,
+  "result_chars": 2534,
+  "tools": {
+   "browser_open": 1,
+   "browser_eval": 1
+  },
+  "result": {
+   "incluye": [
+    "USD 20 de uso incluido cada mes",
+    "Lo que pase del incluido, por uso",
+    "Soporte prioritario, en un día hábil"
+   ],
+   "precio": "USD 20 por mes"
+  }
+ },
+ {
+  "task": "lookup",
+  "label": "after2",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 6.8,
+  "cost": 0.0154,
+  "turns": 2,
+  "first_ctx": 7497,
+  "input": 4,
+  "cache_write": 2000,
+  "cache_read": 13805,
+  "output": 250,
+  "images": 0,
+  "result_chars": 2534,
+  "tools": {
+   "browser_open": 1,
+   "browser_eval": 1
+  },
+  "result": {
+   "incluye": [
+    "USD 20 de uso incluido cada mes",
+    "Lo que pase del incluido, se cobra por uso",
+    "Soporte prioritario, en un día hábil"
+   ],
+   "precio": "USD 20 por mes"
+  }
+ },
+ {
+  "task": "visual",
+  "label": "after2",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 7.1,
+  "cost": 0.0141,
+  "turns": 2,
+  "first_ctx": 7500,
+  "input": 4,
+  "cache_write": 1981,
+  "cache_read": 13808,
+  "output": 169,
+  "images": 1,
+  "result_chars": 1506,
+  "tools": {
+   "browser_open": 1,
+   "browser_screenshot": 1
+  },
+  "result": {
+   "issues": [
+    "Los botones «Agregar» tienen estilo nativo gris, texto diminuto y no destacan como llamada a la acción",
+    "El campo de búsqueda es muy chico, con placeholder minúsculo y sin alinearse con el botón Buscar",
+    "Los productos no tienen imágenes, y el precio y el botón están pegados, con poca jerarquía y espaciado"
+   ]
+  }
+ },
+ {
+  "task": "visual",
+  "label": "after2",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 8.5,
+  "cost": 0.0141,
+  "turns": 2,
+  "first_ctx": 7492,
+  "input": 4,
+  "cache_write": 1975,
+  "cache_read": 13800,
+  "output": 171,
+  "images": 1,
+  "result_chars": 1506,
+  "tools": {
+   "browser_open": 1,
+   "browser_screenshot": 1
+  },
+  "result": {
+   "issues": [
+    "Los botones «Agregar» son grises, sin estilo y de texto pequeño; no se distinguen como acción principal",
+    "La barra de búsqueda es diminuta y tiene el estilo por defecto del navegador, con un placeholder casi ilegible y un input desalineado respecto del botón Buscar",
+    "Las tarjetas de producto no tienen imagen y la jerarquía es pobre: el precio y el botón están pegados y los nombres de los productos son largos"
+   ]
+  }
+ }
+]

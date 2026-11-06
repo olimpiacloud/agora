@@ -28,7 +28,14 @@ func tabProp(p map[string]any) map[string]any {
 	return p
 }
 
+var observing = map[string]bool{"scroll": true, "navigate": true, "click": true, "fill": true, "type": true, "press": true, "select": true, "back": true, "forward": true, "reload": true, "hover": true, "drag": true, "upload": true, "dialog": true}
+
 func (s *Server) tab(ctx context.Context, a Args, body map[string]any) ([]content, error) {
+	if act, _ := body["action"].(string); observing[act] {
+		if v, ok := a["observe"].(bool); !ok || v {
+			body["observe"] = true
+		}
+	}
 	ws, err := s.wsArg(a)
 	if err != nil {
 		return nil, err
@@ -47,6 +54,14 @@ func (s *Server) tab(ctx context.Context, a Args, body map[string]any) ([]conten
 			res = append(res, content{Type: "text", Text: "carbon-shot:" + id})
 		}
 		return res, nil
+	}
+	if obs, ok := out["observation"].(string); ok {
+		extra := ""
+		if ch, ok := out["challenge"]; ok && ch != nil {
+			b, _ := json.Marshal(ch)
+			extra = "\nCHALLENGE DETECTED: " + string(b)
+		}
+		return text("done. now visible:\n" + obs + extra), nil
 	}
 	if snap, ok := out["snapshot"].(string); ok {
 		extra := ""
@@ -178,7 +193,16 @@ func tools() []Tool {
 				if err != nil {
 					return nil, err
 				}
-				return s.call(ctx, "POST", "/v1/workspaces/"+ws+"/tabs", pick(a, "url", "isolated", "same_window"))
+				b := pick(a, "url", "isolated", "same_window")
+				b["observe"] = true
+				var out map[string]any
+				if err := s.c.Do(ctx, "POST", "/v1/workspaces/"+ws+"/tabs", b, &out); err != nil {
+					return nil, err
+				}
+				if obs, ok := out["observation"].(string); ok {
+					return text(fmt.Sprintf("target: %v\nnow visible:\n%s", out["target"], obs)), nil
+				}
+				return textJSON(out), nil
 			}},
 		{Name: "browser_tabs", Desc: "List browser tabs with owners.", Props: with(map[string]any{}),
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
@@ -188,11 +212,11 @@ func tools() []Tool {
 				}
 				return s.call(ctx, "GET", "/v1/workspaces/"+ws+"/tabs", nil)
 			}},
-		{Name: "browser_navigate", Desc: "Navigate a tab and wait for load (wait: load | domcontentloaded | none).", Props: tabProp(map[string]any{"url": str("URL"), "wait": str("load|domcontentloaded|none")}), Required: []string{"target", "url"},
+		{Name: "browser_navigate", Desc: "Navigate a tab, wait for load and return what is visible (action tools return the visible page, so you rarely need browser_snapshot after them).", Props: tabProp(map[string]any{"url": str("URL"), "wait": str("load|domcontentloaded|none")}), Required: []string{"target", "url"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				return s.tab(ctx, a, map[string]any{"action": "navigate", "url": a.S("url"), "wait": a.S("wait")})
 			}},
-		{Name: "browser_snapshot", Desc: "Compact semantic view of the page: interactive elements with refs [eN], roles, names, boxes, plus visible text. Use refs with browser_click/browser_fill.", Props: tabProp(map[string]any{"max_text": num("Max visible text chars (default 3000)")}), Required: []string{"target"},
+		{Name: "browser_snapshot", Desc: "Full semantic view of the whole page (also offscreen): interactive elements with refs [eN], roles, names, boxes, plus page text. Use refs with browser_click/browser_fill.", Props: tabProp(map[string]any{"max_text": num("Max visible text chars (default 3000)")}), Required: []string{"target"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				return s.tab(ctx, a, map[string]any{"action": "snapshot", "max_text": a.N("max_text")})
 			}},
@@ -261,6 +285,12 @@ func tools() []Tool {
 		{Name: "browser_screenshot", Desc: "Screenshot of a tab's viewport (or full page). Use max_width (e.g. 800) to save tokens.", Props: tabProp(map[string]any{"full_page": boo("Full page"), "format": str("jpeg|png"), "max_width": num("Downscale to this width"), "quality": num("JPEG quality")}), Required: []string{"target"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				b := pick(a, "full_page", "format", "max_width", "quality")
+				if _, ok := b["max_width"]; !ok {
+					b["max_width"] = 1024
+				}
+				if _, ok := b["quality"]; !ok {
+					b["quality"] = 60
+				}
 				b["action"] = "screenshot"
 				return s.tab(ctx, a, b)
 			}},
@@ -278,7 +308,7 @@ func tools() []Tool {
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				return s.tab(ctx, a, pick(a, "action", "accept", "text"))
 			}},
-		{Name: "cursor_spawn", Desc: "Create a subagent cursor under you. With launch.adapter = claude | codex | command Carbon starts the agent process with its own scoped token; otherwise you get the token to hand to an agent yourself.", Props: map[string]any{"name": str("Name"), "goal": str("Task for the subagent"), "workspace": str("Workspace (default yours)"), "permissions": strs("Subset of: desktop, browser, process, spawn, message, workspace"), "launch": anyv("{adapter: 'claude'|'codex'|'command', prompt?, command?: [..], model?}"), "worktree": anyv("{repo, branch?, base?} to give it its own git worktree and port range"), "max_children": num("Max direct children it may spawn")}, Required: []string{"goal"},
+		{Name: "cursor_spawn", Desc: "Create a subagent cursor under you. With launch.adapter = claude | codex | command Carbon starts the agent process with its own scoped token; otherwise you get the token to hand to an agent yourself.", Props: map[string]any{"name": str("Name"), "goal": str("Task for the subagent"), "workspace": str("Workspace (default yours)"), "permissions": strs("Subset of: desktop, browser, process, spawn, message, workspace"), "launch": anyv("{adapter: 'claude'|'codex'|'command', prompt?, command?: [..], model?, effort?: low|medium|high, tools?: [browser|browserx|desktop|spawn|workspace|process], profile?: lean|full}"), "worktree": anyv("{repo, branch?, base?} to give it its own git worktree and port range"), "max_children": num("Max direct children it may spawn")}, Required: []string{"goal"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				body := pick(a, "name", "goal", "workspace", "permissions", "launch", "worktree")
 				if n := a.N("max_children"); n > 0 {

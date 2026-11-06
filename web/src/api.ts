@@ -72,6 +72,7 @@ export interface Cursor {
   updated: string
   ended?: string
   worktree?: string
+  usage?: { input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number; cost_usd: number; turns: number; duration_ms: number }
 }
 
 export interface CarbonEvent {

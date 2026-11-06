@@ -1,0 +1,177 @@
+[
+ {
+  "task": "shop",
+  "label": "after",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 14.1,
+  "cost": 0.1333,
+  "turns": 11,
+  "first_ctx": 8715,
+  "input": 22,
+  "cache_write": 16939,
+  "cache_read": 103122,
+  "output": 2586,
+  "images": 0,
+  "result_chars": 10620,
+  "tools": {
+   "browser_fill": 3,
+   "browser_snapshot": 2,
+   "browser_click": 2,
+   "browser_open": 1,
+   "browser_select": 1
+  },
+  "result": {
+   "codigo": "CONF-96-EXP",
+   "total": "$ 34.500"
+  }
+ },
+ {
+  "task": "shop",
+  "label": "after",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 17.2,
+  "cost": 0.1215,
+  "turns": 12,
+  "first_ctx": 8713,
+  "input": 24,
+  "cache_write": 11027,
+  "cache_read": 121017,
+  "output": 2921,
+  "images": 0,
+  "result_chars": 10655,
+  "tools": {
+   "browser_fill": 3,
+   "browser_snapshot": 2,
+   "browser_click": 2,
+   "browser_open": 1,
+   "browser_scroll": 1,
+   "browser_select": 1
+  },
+  "result": {
+   "codigo": "CONF-96-EXP",
+   "total": "$ 34.500"
+  }
+ },
+ {
+  "task": "lookup",
+  "label": "after",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 10.1,
+  "cost": 0.0823,
+  "turns": 5,
+  "first_ctx": 8672,
+  "input": 10,
+  "cache_write": 14165,
+  "cache_read": 42548,
+  "output": 1092,
+  "images": 0,
+  "result_chars": 11254,
+  "tools": {
+   "browser_open": 1,
+   "browser_snapshot": 1,
+   "browser_click": 1,
+   "browser_eval": 1
+  },
+  "result": {
+   "incluye": [
+    "USD 20 de uso incluido cada mes",
+    "Lo que pase del incluido, por uso",
+    "Soporte prioritario, en un día hábil"
+   ],
+   "precio": "USD 20 por mes"
+  }
+ },
+ {
+  "task": "lookup",
+  "label": "after",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 12.5,
+  "cost": 0.0762,
+  "turns": 6,
+  "first_ctx": 8672,
+  "input": 12,
+  "cache_write": 11806,
+  "cache_read": 59915,
+  "output": 929,
+  "images": 0,
+  "result_chars": 11263,
+  "tools": {
+   "browser_open": 1,
+   "browser_snapshot": 1,
+   "browser_click": 1,
+   "browser_eval": 1
+  },
+  "result": {
+   "incluye": [
+    "USD 20 de uso incluido cada mes",
+    "Lo que pase del incluido, se cobra por uso",
+    "Soporte prioritario, en un día hábil"
+   ],
+   "precio": "USD 20 por mes"
+  }
+ },
+ {
+  "task": "visual",
+  "label": "after",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 7.6,
+  "cost": 0.0121,
+  "turns": 2,
+  "first_ctx": 8673,
+  "input": 4,
+  "cache_write": 1318,
+  "cache_read": 16158,
+  "output": 151,
+  "images": 1,
+  "result_chars": 297,
+  "tools": {
+   "browser_open": 1,
+   "browser_screenshot": 1
+  },
+  "result": {
+   "issues": [
+    "Los botones 'Agregar' usan el estilo nativo del navegador, con texto chico y sin jerarquía ni color de acción, y quedan pegados al precio.",
+    "El buscador es chico y tiene el placeholder en gris claro con bajo contraste. El input y el botón 'Buscar' tienen alturas distintas y quedan pegados a la grilla.",
+    "La barra de navegación tiene enlaces subrayados por defecto, con poco espacio entre ellos y sin estado activo. El título y el contenido están desalineados con el logo de la barra."
+   ]
+  }
+ },
+ {
+  "task": "visual",
+  "label": "after",
+  "model": "claude-sonnet-5-5",
+  "ok": true,
+  "status": "done",
+  "seconds": 7.7,
+  "cost": 0.012,
+  "turns": 2,
+  "first_ctx": 8671,
+  "input": 4,
+  "cache_write": 1315,
+  "cache_read": 16156,
+  "output": 150,
+  "images": 1,
+  "result_chars": 297,
+  "tools": {
+   "browser_open": 1,
+   "browser_screenshot": 1
+  },
+  "result": {
+   "issues": [
+    "Los botones y el buscador usan el estilo por defecto del navegador, con texto muy pequeño y sin jerarquía ni botón de acción principal.",
+    "El precio queda pegado al botón, sin espacio vertical, y las tarjetas se ven apretadas y sin imagen de producto.",
+    "El buscador queda pequeño, desalineado con el botón Buscar y pegado a la grilla. Los enlaces de la barra de navegación están subrayados y poco pulidos."
+   ]
+  }
+ }
+]

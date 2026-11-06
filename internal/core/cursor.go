@@ -422,7 +422,14 @@ func (m *Manager) cleanupCursor(id string) {
 	for _, l := range m.Arb.ReleaseHolder(id) {
 		m.Bus.Publish("control.released", c.Workspace, id, map[string]any{"surface": l.Surface})
 	}
-	m.killLaunch(id)
+	if c.Status == CursorCancelled {
+		m.killLaunch(id)
+	} else {
+		go func() {
+			time.Sleep(30 * time.Second)
+			m.killLaunch(id)
+		}()
+	}
 	if r := m.runtime(c.Workspace); r != nil {
 		var close []string
 		r.mu.Lock()

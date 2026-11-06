@@ -11,6 +11,7 @@ import (
 )
 
 const snapshotJS = `(() => {
+const VO = %t;
 const R = window.__carbon || (window.__carbon = {n: 0, m: new Map(), w: new WeakMap()});
 const out = [];
 const vw = innerWidth, vh = innerHeight;
@@ -55,6 +56,7 @@ function walk(root, ox, oy, depth) {
     if (!id) { id = 'e' + (++R.n); R.w.set(el, id); R.m.set(id, new WeakRef(el)); }
     const x = Math.round(r.x + ox), y = Math.round(r.y + oy);
     const inView = x < vw && y < vh && x + r.width > 0 && y + r.height > 0;
+    if (VO && !inView) { if (el.tagName === 'IFRAME') { try { const d = el.contentDocument; if (d && depth < 3) walk(d, x, y, depth + 1); } catch (e) {} } continue; }
     const it = {ref: id, role: rl, name: name(el).replace(/\s+/g, ' ').slice(0, 80), box: [x, y, Math.round(r.width), Math.round(r.height)]};
     if (!inView) it.offscreen = true;
     if (el.disabled) it.disabled = true;
@@ -66,7 +68,10 @@ function walk(root, ox, oy, depth) {
   for (const h of root.querySelectorAll('*')) { if (h.shadowRoot && depth < 4) walk(h.shadowRoot, ox, oy, depth + 1); }
 }
 walk(document, 0, 0, 0);
-const text = (document.body ? document.body.innerText : '').replace(/\n{3,}/g, '\n\n').slice(0, %d);
+const MAXT = %d;
+let text = '';
+if (VO) { const parts = []; let len = 0; const tw = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT); let n; while ((n = tw.nextNode()) && len < MAXT) { const t = n.textContent.replace(/\s+/g, ' ').trim(); if (!t) continue; const p = n.parentElement; if (!p) continue; const r = p.getBoundingClientRect(); if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw || r.width === 0) continue; parts.push(t); len += t.length + 1; } text = parts.join(' ').slice(0, MAXT); }
+else text = (document.body ? document.body.innerText : '').replace(/\n{3,}/g, '\n\n').slice(0, MAXT);
 return {url: location.href, title: document.title, viewport: [vw, vh], scroll: [scrollX, scrollY, (document.documentElement || {}).scrollHeight || 0], elements: out.slice(0, %d), text};
 })()`
 
@@ -117,13 +122,21 @@ func (s *Snapshot) Compact() string {
 }
 
 func (t *Tab) Snapshot(ctx context.Context, maxText, maxElements int) (*Snapshot, error) {
+	return t.snapshot(ctx, maxText, maxElements, false)
+}
+
+func (t *Tab) Observe(ctx context.Context, maxText int) (*Snapshot, error) {
+	return t.snapshot(ctx, maxText, 80, true)
+}
+
+func (t *Tab) snapshot(ctx context.Context, maxText, maxElements int, viewportOnly bool) (*Snapshot, error) {
 	if maxElements == 0 {
 		maxElements = 400
 	}
 	var s Snapshot
 	var err error
 	for i := 0; i < 3; i++ {
-		if err = t.Eval(ctx, fmt.Sprintf(snapshotJS, maxText, maxElements), &s); err == nil {
+		if err = t.Eval(ctx, fmt.Sprintf(snapshotJS, viewportOnly, maxText, maxElements), &s); err == nil {
 			return &s, nil
 		}
 		t.waitReady(ctx, 5*time.Second, "interactive")

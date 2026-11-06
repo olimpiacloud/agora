@@ -207,6 +207,11 @@ func (v *Viewer) Input(raw []byte) {
 		return
 	}
 	v.r.touch()
+	v.r.mu.Lock()
+	if eng := v.r.engine; eng != nil {
+		eng.Interact()
+	}
+	v.r.mu.Unlock()
 	switch msg.T {
 	case "take":
 		if _, err := m.Arb.Acquire(v.Workspace, "workspace", "human:"+v.ID, PrioHuman, 0, "human takeover"); err == nil {
