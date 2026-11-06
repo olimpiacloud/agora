@@ -37,14 +37,14 @@ func (f *Frame) RGBA() *image.RGBA {
 }
 
 type Capturer struct {
-	d         *Display
-	c         *xgb.Conn
-	mu        sync.Mutex
-	seg       shm.Seg
-	shmid     int
-	buf       []byte
-	useShm    bool
-	redirect  bool
+	d        *Display
+	c        *xgb.Conn
+	mu       sync.Mutex
+	seg      shm.Seg
+	shmid    int
+	buf      []byte
+	useShm   bool
+	redirect bool
 }
 
 func (d *Display) NewCapturer() (*Capturer, error) {

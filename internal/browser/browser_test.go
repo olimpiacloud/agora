@@ -1,0 +1,120 @@
+package browser
+
+import (
+	"context"
+	"os"
+	"os/user"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/agusgarcia3007/carbon/internal/x11"
+)
+
+func appUser(t *testing.T) (uint32, uint32) {
+	if os.Getuid() != 0 {
+		return 0, 0
+	}
+	u, err := user.Lookup("carbon")
+	if err != nil {
+		t.Skip("no carbon user")
+	}
+	uid, _ := strconv.Atoi(u.Uid)
+	gid, _ := strconv.Atoi(u.Gid)
+	return uint32(uid), uint32(gid)
+}
+
+func TestBrowserSemantic(t *testing.T) {
+	uid, gid := appUser(t)
+	dir, _ := os.MkdirTemp("/tmp", "carbon-bt-")
+	defer os.RemoveAll(dir)
+	os.Chown(dir, int(uid), int(gid))
+	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 1280, Height: 800, RunDir: dir + "/run", AuthUid: int(uid), AuthGid: int(gid)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	os.Chown(d.AuthFile, int(uid), int(gid))
+	wm, err := d.StartWM(x11.LayoutTile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wm.Close()
+	env := append([]string{"HOME=" + dir, "DBUS_SESSION_BUS_ADDRESS=disabled:"}, d.Env()...)
+	ctx := context.Background()
+	t0 := time.Now()
+	b, err := Launch(ctx, LaunchOptions{UserDataDir: dir + "/profile", Env: env, Uid: uid, Gid: gid, LogPath: dir + "/chrome.log"})
+	if err != nil {
+		lg, _ := os.ReadFile(dir + "/chrome.log")
+		t.Fatal(err, string(lg))
+	}
+	defer b.Close(ctx)
+	t.Logf("launch %v", time.Since(t0))
+	page := `data:text/html,<title>T</title><input id=a placeholder=first><textarea id=b placeholder=second></textarea><button onclick="document.title='clicked:'+a.value+'|'+b.value">Go</button>`
+	tab, err := b.NewTab(ctx, NewTabOptions{URL: page, NewWindow: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	s, err := tab.Snapshot(ctx, 200, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(s.Compact())
+	var in, ta, btn string
+	for _, e := range s.Elements {
+		switch {
+		case e.Name == "first":
+			in = e.Ref
+		case e.Name == "second":
+			ta = e.Ref
+		case e.Role == "button":
+			btn = e.Ref
+		}
+	}
+	if err := tab.FillRef(ctx, in, "hola", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := tab.FillRef(ctx, ta, "mundo", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := tab.ClickRef(ctx, btn, "", 1); err != nil {
+		t.Fatal(err)
+	}
+	var title string
+	tab.Eval(ctx, "document.title", &title)
+	if title != "clicked:hola|mundo" {
+		t.Fatalf("title=%q", title)
+	}
+	tab2, err := b.NewTab(ctx, NewTabOptions{URL: page, NewWindow: true, Isolated: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(800 * time.Millisecond)
+	ws, _ := d.Windows()
+	t.Logf("x windows: %d", len(ws))
+	for _, w := range ws {
+		t.Logf("  %+v", w)
+	}
+	png, err := tab2.Screenshot(ctx, "png", 0, false)
+	if err != nil || len(png) < 1000 {
+		t.Fatalf("screenshot %d %v", len(png), err)
+	}
+	restore, err := tab2.WindowTitleMarker(ctx, "carbon-marker-xyz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	ws, _ = d.Windows()
+	found := false
+	for _, w := range ws {
+		if strings.Contains(w.Title, "carbon-marker-xyz") {
+			found = true
+		}
+	}
+	restore()
+	if !found {
+		t.Fatal("marker window not found")
+	}
+}

@@ -22,14 +22,16 @@ import (
 )
 
 type DisplayOptions struct {
-	Width   int
-	Height  int
-	Depth   int
-	RunDir  string
+	Width     int
+	Height    int
+	Depth     int
+	RunDir    string
 	MaxWidth  int
 	MaxHeight int
 	MinNum    int
 	Xvfb      string
+	AuthUid   int
+	AuthGid   int
 }
 
 type Display struct {
@@ -104,9 +106,10 @@ func StartDisplay(ctx context.Context, o DisplayOptions) (*Display, error) {
 	if o.Xvfb == "" {
 		o.Xvfb = "Xvfb"
 	}
-	if err := os.MkdirAll(o.RunDir, 0700); err != nil {
+	if err := os.MkdirAll(o.RunDir, 0711); err != nil {
 		return nil, err
 	}
+	os.Chmod(o.RunDir, 0711)
 	num, lockf, err := freeDisplay(o.MinNum)
 	if err != nil {
 		return nil, err
@@ -120,6 +123,9 @@ func StartDisplay(ctx context.Context, o DisplayOptions) (*Display, error) {
 	auth := filepath.Join(o.RunDir, fmt.Sprintf("xauth-%d", num))
 	if err := writeXauth(auth, num, raw); err != nil {
 		return nil, err
+	}
+	if o.AuthUid != 0 {
+		os.Chown(auth, o.AuthUid, o.AuthGid)
 	}
 	maxW, maxH := o.MaxWidth, o.MaxHeight
 	if maxW < o.Width {
