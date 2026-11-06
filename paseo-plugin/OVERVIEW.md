@@ -1,29 +1,11 @@
-<!--
-OVERVIEW.md is required to list your plugin in the registry. Keep it beside
-paseo-plugin.json in your repository at the pinned commit and in your npm package.
-Replace this comment with useful facts before publishing.
+# Carbon
 
-This overview is for people choosing a plugin in Paseo, on the plugin page under
-its install command. README assumes a GitHub audience and includes technical
-details, installation instructions, and badges. Long, AI-generated READMEs leave
-people reading past that material to understand what the plugin does.
+Connects Paseo to a Carbon daemon running on the same machine, so agents get a real Linux desktop with Chromium and you can watch and steer it from Paseo.
 
-Write these parts in order, including only what helps someone decide to install:
+Each Claude or Codex agent receives the Carbon MCP server with its own Carbon cursor. Agents in the same Paseo workspace share one Carbon workspace (one desktop and one browser profile), each with its own windows and input seat. Add the label `carbon/enabled=false` to an agent to skip it.
 
-1. Describe what your plugin is and does in plain terms first.
-2. Explain how it works only when it is not obvious.
-3. Explain setup when needed: settings, accounts, tokens, providers, tools, or
-   other plugins. Include applicable daemon version and operating system
-   requirements. Setup guidance is allowed; installation instructions are not.
-4. Explain capabilities and settings worth understanding, what each option does,
-   what the plugin reads or sends and where, permissions, and known limits.
+The Carbon panel shows the desktop live. Frames are JPEG images sent only when the screen changes, through Paseo's existing connection, so it works on mobile and needs no open ports. Tap to click, long press to right click, type into the focused window, send keys, scroll, and take or return control when an agent asks for a human (for example on a CAPTCHA or login).
 
-Length follows complexity; a theme needs one paragraph. Choose headings only
-when they help. Use sentence case and plain factual language, with no em dashes.
-Omit installation commands, badges, changelog, contributing or license sections,
-marketing, and unsupported claims. Avoid implementation filler such as empty
-cleanup functions, theme-token field lists, or lists of absent features.
+Screenshots taken with Carbon tools appear as cards in the agent chat with a link to the live view.
 
-To translate the overview, add a whole copy beside this file named for the
-language, such as OVERVIEW.zh-CN.md. Readers in that language see it instead.
--->
+Setup: install and run Carbon (`carbon serve`, listening on 127.0.0.1:7788) on the daemon host. The plugin reads the Carbon admin token from `/var/lib/carbon/admin.token` (override with `CARBON_HOME` or `CARBON_URL`) and stores per-agent cursor tokens in `~/.carbon-paseo/state.json` with mode 0600.

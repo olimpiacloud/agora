@@ -18,11 +18,13 @@ type WorkspaceUsage struct {
 	Top      []ProcUsage        `json:"top"`
 	CgroupMB float64            `json:"cgroup_mb,omitempty"`
 	Frozen   bool               `json:"frozen,omitempty"`
+	Detailed bool               `json:"detailed"`
 }
 
 type cpuSample struct {
 	t     time.Time
 	ticks map[int]uint64
+	usec  uint64
 }
 
 func (m *Manager) schedule() {
@@ -125,23 +127,107 @@ func (m *Manager) usageTick() {
 	}
 	m.mu.Unlock()
 	for id, r := range rts {
-		u := m.measure(id, r)
+		r.mu.Lock()
+		frozen := r.frozen
+		r.mu.Unlock()
+		if frozen {
+			continue
+		}
+		u := m.measureLight(id, r)
 		m.mu.Lock()
-		m.usage[id] = u
+		if prev := m.usage[id]; prev != nil && prev.Detailed && time.Since(prev.Time) < time.Minute {
+			prev.CPU, prev.CgroupMB, prev.RSSMB, prev.Procs = u.CPU, u.CgroupMB, u.RSSMB, u.Procs
+			u = prev
+		} else {
+			m.usage[id] = u
+		}
 		w := m.ws[id]
 		var budget Budget
 		if w != nil {
 			budget = w.Config.Budget
 		}
 		m.mu.Unlock()
-		if budget.MemoryMB > 0 && u.PSSMB > float64(budget.MemoryMB) {
-			m.Bus.Publish("workspace.budget_exceeded", id, "", map[string]any{"resource": "memory", "used_mb": int(u.PSSMB), "limit_mb": budget.MemoryMB})
-			go m.relieve(id, r, u.PSSMB > float64(budget.MemoryMB)*1.25)
+		mem := u.CgroupMB
+		if mem == 0 {
+			mem = u.RSSMB
+		}
+		if budget.MemoryMB > 0 && mem > float64(budget.MemoryMB) {
+			m.Bus.Publish("workspace.budget_exceeded", id, "", map[string]any{"resource": "memory", "used_mb": int(mem), "limit_mb": budget.MemoryMB})
+			go m.relieve(id, r, mem > float64(budget.MemoryMB)*1.25)
 		}
 		if budget.CPUPercent > 0 && u.CPU > float64(budget.CPUPercent) && m.cg == nil {
 			m.Bus.Publish("workspace.budget_exceeded", id, "", map[string]any{"resource": "cpu", "used": u.CPU, "limit": budget.CPUPercent})
 		}
 	}
+}
+
+func (m *Manager) measureLight(id string, r *Runtime) *WorkspaceUsage {
+	u := &WorkspaceUsage{Time: time.Now().UTC(), ByRole: map[string]float64{}}
+	var ticks map[int]uint64
+	if m.cg != nil {
+		u.CgroupMB = float64(m.cg.Memory(id)) / (1 << 20)
+		usec := m.cg.CPUUsec(id)
+		u.Procs = len(m.cg.Pids(id))
+		m.mu.Lock()
+		prev, ok := m.cpuPrev[id]
+		m.cpuPrev[id] = cpuSample{t: time.Now(), usec: usec}
+		m.mu.Unlock()
+		if ok && usec >= prev.usec {
+			u.CPU = float64(usec-prev.usec) / 1e6 / time.Since(prev.t).Seconds() * 100
+		}
+		return u
+	}
+	pids := r.allPids()
+	u.Procs = len(pids)
+	ticks = map[int]uint64{}
+	for _, p := range pids {
+		t, rss, err := StatLight(p)
+		if err != nil {
+			continue
+		}
+		ticks[p] = t
+		u.RSSMB += float64(rss) / 1024
+	}
+	m.mu.Lock()
+	prev, ok := m.cpuPrev[id]
+	m.cpuPrev[id] = cpuSample{t: time.Now(), ticks: ticks}
+	m.mu.Unlock()
+	if ok {
+		el := time.Since(prev.t).Seconds()
+		var d uint64
+		for p, t := range ticks {
+			if pt, ok := prev.ticks[p]; ok && t >= pt {
+				d += t - pt
+			}
+		}
+		u.CPU = float64(d) / clkTck / el * 100
+	}
+	return u
+}
+
+func (m *Manager) DetailedUsage(id string) *WorkspaceUsage {
+	r := m.runtime(id)
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	frozen := r.frozen
+	r.mu.Unlock()
+	m.mu.Lock()
+	cur := m.usage[id]
+	m.mu.Unlock()
+	if frozen || (cur != nil && cur.Detailed && time.Since(cur.Time) < 30*time.Second) {
+		return cur
+	}
+	u := m.measure(id, r)
+	u.Detailed = true
+	if cur != nil {
+		u.CPU = cur.CPU
+	}
+	m.mu.Lock()
+	m.usage[id] = u
+	m.mu.Unlock()
+	return u
 }
 
 func (m *Manager) measure(id string, r *Runtime) *WorkspaceUsage {
@@ -160,7 +246,6 @@ func (m *Manager) measure(id string, r *Runtime) *WorkspaceUsage {
 		bpid = r.browser.Pid()
 	}
 	r.brMu.Unlock()
-	ticks := map[int]uint64{}
 	var all []ProcUsage
 	for _, p := range pids {
 		pu, err := ReadUsage(p)
@@ -182,22 +267,13 @@ func (m *Manager) measure(id string, r *Runtime) *WorkspaceUsage {
 		u.PSSMB += float64(pu.PSSKB) / 1024
 		u.RSSMB += float64(pu.RSSKB) / 1024
 		u.ByRole[role] += float64(pu.PSSKB) / 1024
-		ticks[p] = pu.CPUTicks
 		all = append(all, pu)
 	}
 	m.mu.Lock()
 	prev, ok := m.cpuPrev[id]
-	m.cpuPrev[id] = cpuSample{t: time.Now(), ticks: ticks}
 	m.mu.Unlock()
 	if ok {
 		el := time.Since(prev.t).Seconds()
-		var d uint64
-		for p, t := range ticks {
-			if pt, ok := prev.ticks[p]; ok && t >= pt {
-				d += t - pt
-			}
-		}
-		u.CPU = float64(d) / clkTck / el * 100
 		for i := range all {
 			if pt, ok := prev.ticks[all[i].Pid]; ok && all[i].CPUTicks >= pt {
 				all[i].CPU = float64(all[i].CPUTicks-pt) / clkTck / el * 100

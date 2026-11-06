@@ -155,6 +155,37 @@ func (x *H264Encoder) Encode(bgrx []byte, stride, srcW, srcH int, ptsMs int64, i
 	return b, key != 0, nil
 }
 
+func (x *H264Encoder) EncodeRect(src []byte, stride, rx, ry, rw, rh int, ptsMs int64, idr bool) ([]byte, bool, error) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.e == nil {
+		return nil, false, errors.New("closed")
+	}
+	ys := int(C.cenc_stride(x.e, 0))
+	uvs := int(C.cenc_stride(x.e, 1))
+	if rw > 0 && rh > 0 && rx >= 0 && ry >= 0 && rx+rw <= x.w && ry+rh <= x.h && rx%2 == 0 && ry%2 == 0 && rw%2 == 0 && rh%2 == 0 {
+		yP := unsafe.Slice((*byte)(unsafe.Pointer(C.cenc_plane(x.e, 0))), ys*x.h)
+		uP := unsafe.Slice((*byte)(unsafe.Pointer(C.cenc_plane(x.e, 1))), uvs*x.h/2)
+		vP := unsafe.Slice((*byte)(unsafe.Pointer(C.cenc_plane(x.e, 2))), uvs*x.h/2)
+		BGRXRectToI420(src, stride, rx, ry, rw, rh, yP, ys, uP, vP, uvs)
+	}
+	var key C.int
+	idrI := 0
+	if idr {
+		idrI = 1
+	}
+	n := C.cenc_encode(x.e, C.int64_t(ptsMs), C.int(idrI), (*C.uint8_t)(unsafe.Pointer(&x.out[0])), C.int(len(x.out)), &key)
+	if n < 0 {
+		return nil, false, errors.New("encode failed")
+	}
+	if n == 0 {
+		return nil, false, nil
+	}
+	b := make([]byte, int(n))
+	copy(b, x.out[:n])
+	return b, key != 0, nil
+}
+
 func (x *H264Encoder) Close() {
 	x.mu.Lock()
 	defer x.mu.Unlock()

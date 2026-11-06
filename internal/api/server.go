@@ -190,6 +190,9 @@ func (s *Server) routes() {
 		writeJSON(w, 200, out)
 	}, false))
 	m.HandleFunc("GET /v1/workspaces/{id}", s.ws(func(w http.ResponseWriter, r *http.Request, p *Principal, id string) {
+		if r.URL.Query().Get("detail") == "1" {
+			s.m.DetailedUsage(id)
+		}
 		v, err := s.m.ViewWorkspace(id)
 		if err != nil {
 			writeErr(w, err)
@@ -530,8 +533,7 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 	case "release":
 		res = map[string]any{"released": s.m.ReleaseSurface(id, p.CursorID(), body.Surface)}
 	case "usage":
-		v, e := s.m.ViewWorkspace(id)
-		res, err = v.Usage, e
+		res = s.m.DetailedUsage(id)
 	default:
 		err = fmt.Errorf("%w: unknown op %q", core.ErrNotFound, op)
 	}

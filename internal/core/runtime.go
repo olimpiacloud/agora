@@ -114,7 +114,8 @@ func (m *Manager) ensureRuntimeLocked(ctx context.Context, id string, display bo
 		home := m.wsDir(id)
 		os.MkdirAll(filepath.Join(home, "home", "Downloads"), 0700)
 		os.MkdirAll(filepath.Join(home, "run"), 0711)
-		for _, p := range []string{home, filepath.Join(home, "home"), filepath.Join(home, "home", "Downloads")} {
+		os.MkdirAll(filepath.Join(home, "home", ".xdg-run"), 0700)
+		for _, p := range []string{home, filepath.Join(home, "home"), filepath.Join(home, "home", "Downloads"), filepath.Join(home, "home", ".xdg-run")} {
 			m.chownApps(p)
 		}
 		if m.cg != nil {
@@ -165,12 +166,11 @@ func (r *Runtime) startDisplay(ctx context.Context, cfg WorkspaceConfig) error {
 	if w == 0 {
 		w, h = m.cfg.Width, m.cfg.Height
 	}
-	d, err := x11.StartDisplay(ctx, x11.DisplayOptions{Width: w, Height: h, RunDir: filepath.Join(m.wsDir(r.id), "run"), AuthUid: m.uid, AuthGid: m.gid})
+	cgfd, release := r.cgroupFD()
+	d, err := x11.StartDisplay(ctx, x11.DisplayOptions{Width: w, Height: h, RunDir: filepath.Join(m.wsDir(r.id), "run"), AuthUid: m.uid, AuthGid: m.gid, CgroupFD: cgfd})
+	release()
 	if err != nil {
 		return fmt.Errorf("display: %w", err)
-	}
-	if m.cg != nil {
-		m.cg.Add(r.id, d.Pid())
 	}
 	layout := x11.Layout(cfg.Layout)
 	if layout == "" {
@@ -221,7 +221,7 @@ func (r *Runtime) appEnv() []string {
 		"PATH=/usr/local/bin:/usr/bin:/bin",
 		"LANG=en_US.UTF-8",
 		"DBUS_SESSION_BUS_ADDRESS=disabled:",
-		"XDG_RUNTIME_DIR=" + filepath.Join(r.m.wsDir(r.id), "run"),
+		"XDG_RUNTIME_DIR=" + filepath.Join(home, ".xdg-run"),
 		"CARBON_WORKSPACE=" + r.id,
 	}
 	if r.display != nil {
@@ -269,12 +269,11 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 			restore = append(restore, TabRecord{URL: u})
 		}
 	}
-	b, err := browser.Launch(ctx, browser.LaunchOptions{Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: cfg.BrowserArgs, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log"), StartURLs: start})
+	cgfd, release := r.cgroupFD()
+	defer release()
+	b, err := browser.Launch(ctx, browser.LaunchOptions{CgroupFD: cgfd, Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: cfg.BrowserArgs, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log"), StartURLs: start})
 	if err != nil {
 		return nil, err
-	}
-	if m.cg != nil {
-		m.cg.Add(r.id, b.Pid())
 	}
 	b.OnEvent = func(kind string, data map[string]any) {
 		cur := ""
@@ -367,6 +366,9 @@ func (r *Runtime) watchBrowser(b *browser.Browser) {
 }
 
 func (r *Runtime) tabRecordsFrom(b *browser.Browser) []TabRecord {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	b.Refresh(ctx)
+	cancel()
 	out := []TabRecord{}
 	for _, t := range b.Targets() {
 		r.mu.Lock()
@@ -402,7 +404,19 @@ func (m *Manager) profileHolder(profile, except string) string {
 	return ""
 }
 
+func (r *Runtime) cgroupFD() (int, func()) {
+	if r.m.cg == nil {
+		return -1, func() {}
+	}
+	return r.m.cg.FD(r.id)
+}
+
 func (r *Runtime) allPids() []int {
+	if r.m.cg != nil {
+		if p := r.m.cg.Pids(r.id); len(p) > 0 {
+			return p
+		}
+	}
 	roots := []int{}
 	r.mu.Lock()
 	if r.display != nil {

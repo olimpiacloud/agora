@@ -178,11 +178,12 @@ func (cp *Capturer) GrabWindow(id uint32, dst *Frame) (*Frame, error) {
 }
 
 type DamageWatcher struct {
-	c    *xgb.Conn
-	C    chan struct{}
-	dmg  damage.Damage
-	done chan struct{}
-	once sync.Once
+	c      *xgb.Conn
+	C      chan struct{}
+	dmg    damage.Damage
+	region xfixes.Region
+	done   chan struct{}
+	once   sync.Once
 }
 
 func (d *Display) WatchDamage() (*DamageWatcher, error) {
@@ -204,7 +205,12 @@ func (d *Display) WatchDamage() (*DamageWatcher, error) {
 	}
 	xfixes.QueryVersion(c, 5, 0).Reply()
 	id, _ := c.NewId()
-	dw := &DamageWatcher{c: c, C: make(chan struct{}, 1), dmg: damage.Damage(id), done: make(chan struct{})}
+	rid, _ := c.NewId()
+	dw := &DamageWatcher{c: c, C: make(chan struct{}, 1), dmg: damage.Damage(id), region: xfixes.Region(rid), done: make(chan struct{})}
+	if err := xfixes.CreateRegionChecked(c, dw.region, nil).Check(); err != nil {
+		c.Close()
+		return nil, err
+	}
 	if err := damage.CreateChecked(c, dw.dmg, xproto.Drawable(d.root), damage.ReportLevelNonEmpty).Check(); err != nil {
 		c.Close()
 		return nil, err
@@ -235,6 +241,15 @@ func (dw *DamageWatcher) loop() {
 
 func (dw *DamageWatcher) Ack() {
 	damage.Subtract(dw.c, dw.dmg, 0, 0)
+}
+
+func (dw *DamageWatcher) AckRegion() (x, y, w, h int, ok bool) {
+	damage.Subtract(dw.c, dw.dmg, 0, dw.region)
+	r, err := xfixes.FetchRegion(dw.c, dw.region).Reply()
+	if err != nil || r.Extents.Width == 0 || r.Extents.Height == 0 {
+		return 0, 0, 0, 0, false
+	}
+	return int(r.Extents.X), int(r.Extents.Y), int(r.Extents.Width), int(r.Extents.Height), true
 }
 
 func (dw *DamageWatcher) Close() {

@@ -89,12 +89,14 @@ func (m *Manager) ViewWorkspace(id string) (*WorkspaceView, error) {
 	}
 	v := &WorkspaceView{Workspace: *w, Locks: m.Arb.List(id)}
 	m.mu.Lock()
+	v.Usage = m.usage[id]
+	m.mu.Unlock()
+	m.mu.Lock()
 	for _, c := range m.cursors {
 		if c.Workspace == id && !c.Status.Terminal() {
 			v.Cursors++
 		}
 	}
-	v.Usage = m.usage[id]
 	r := m.rt[id]
 	m.mu.Unlock()
 	if r != nil {
@@ -482,6 +484,12 @@ func (r *Runtime) launch(spec AppSpec) (*Proc, error) {
 	if r.m.uid != 0 {
 		attr.Credential = &syscall.Credential{Uid: uint32(r.m.uid), Gid: uint32(r.m.gid)}
 	}
+	cgfd, release := r.cgroupFD()
+	defer release()
+	if cgfd > 0 {
+		attr.UseCgroupFD = true
+		attr.CgroupFD = cgfd
+	}
 	cmd.SysProcAttr = attr
 	logf, _ := os.OpenFile(filepath.Join(r.m.wsDir(r.id), "run", spec.ID+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	cmd.Stdout = logf
@@ -491,9 +499,6 @@ func (r *Runtime) launch(spec AppSpec) (*Proc, error) {
 			logf.Close()
 		}
 		return nil, err
-	}
-	if r.m.cg != nil {
-		r.m.cg.Add(r.id, cmd.Process.Pid)
 	}
 	p := &Proc{Pid: cmd.Process.Pid, App: spec, Started: time.Now(), cmd: cmd, done: make(chan struct{})}
 	r.mu.Lock()

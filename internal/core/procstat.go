@@ -211,3 +211,58 @@ func (c *Cgroups) Memory(ws string) int64 {
 	v, _ := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
 	return v
 }
+
+func StatLight(pid int) (uint64, int64, error) {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0, 0, err
+	}
+	r := bytes.LastIndexByte(b, ')')
+	if r < 0 {
+		return 0, 0, fmt.Errorf("bad stat")
+	}
+	f := strings.Fields(string(b[r+2:]))
+	if len(f) < 22 {
+		return 0, 0, fmt.Errorf("short stat")
+	}
+	ut, _ := strconv.ParseUint(f[11], 10, 64)
+	st, _ := strconv.ParseUint(f[12], 10, 64)
+	rss, _ := strconv.ParseInt(f[21], 10, 64)
+	return ut + st, rss * int64(os.Getpagesize()) / 1024, nil
+}
+
+func (c *Cgroups) FD(ws string) (int, func()) {
+	f, err := os.Open(c.path(ws))
+	if err != nil {
+		return -1, func() {}
+	}
+	return int(f.Fd()), func() { f.Close() }
+}
+
+func (c *Cgroups) Pids(ws string) []int {
+	b, err := os.ReadFile(filepath.Join(c.path(ws), "cgroup.procs"))
+	if err != nil {
+		return nil
+	}
+	var out []int
+	for _, l := range strings.Fields(string(b)) {
+		if p, err := strconv.Atoi(l); err == nil {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (c *Cgroups) CPUUsec(ws string) uint64 {
+	b, err := os.ReadFile(filepath.Join(c.path(ws), "cpu.stat"))
+	if err != nil {
+		return 0
+	}
+	for _, l := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(l, "usage_usec ") {
+			v, _ := strconv.ParseUint(strings.TrimPrefix(l, "usage_usec "), 10, 64)
+			return v
+		}
+	}
+	return 0
+}

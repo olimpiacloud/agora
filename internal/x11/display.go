@@ -32,6 +32,7 @@ type DisplayOptions struct {
 	Xvfb      string
 	AuthUid   int
 	AuthGid   int
+	CgroupFD  int
 }
 
 type Display struct {
@@ -148,6 +149,10 @@ func StartDisplay(ctx context.Context, o DisplayOptions) (*Display, error) {
 	}
 	cmd := exec.Command(o.Xvfb, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
+	if o.CgroupFD > 0 {
+		cmd.SysProcAttr.UseCgroupFD = true
+		cmd.SysProcAttr.CgroupFD = o.CgroupFD
+	}
 	logf, _ := os.Create(filepath.Join(o.RunDir, fmt.Sprintf("xvfb-%d.log", num)))
 	cmd.Stdout = logf
 	cmd.Stderr = logf

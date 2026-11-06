@@ -77,3 +77,55 @@ func BGRXToI420(src []byte, stride, sw, sh int, y []byte, ys int, u, v []byte, u
 	}
 	wg.Wait()
 }
+
+func BGRXRectToI420(src []byte, stride int, rx, ry, rw, rh int, y []byte, ys int, u, v []byte, uvs int) {
+	workers := runtime.NumCPU()
+	if workers > 4 {
+		workers = 4
+	}
+	crows := rh / 2
+	if crows < 32 {
+		workers = 1
+	}
+	per := (crows + workers - 1) / workers
+	var wg sync.WaitGroup
+	for k := 0; k < workers; k++ {
+		c0 := k * per
+		c1 := c0 + per
+		if c1 > crows {
+			c1 = crows
+		}
+		if c0 >= c1 {
+			break
+		}
+		wg.Add(1)
+		go func(c0, c1 int) {
+			defer wg.Done()
+			for cy := c0; cy < c1; cy++ {
+				r0 := src[(cy*2)*stride:]
+				r1 := src[(cy*2+1)*stride:]
+				y0 := y[(ry+cy*2)*ys+rx:]
+				y1 := y[(ry+cy*2+1)*ys+rx:]
+				ur := u[(ry/2+cy)*uvs+rx/2:]
+				vr := v[(ry/2+cy)*uvs+rx/2:]
+				for cx := 0; cx < rw/2; cx++ {
+					o := cx * 8
+					b00, g00, r00 := int(r0[o]), int(r0[o+1]), int(r0[o+2])
+					b01, g01, r01 := int(r0[o+4]), int(r0[o+5]), int(r0[o+6])
+					b10, g10, r10 := int(r1[o]), int(r1[o+1]), int(r1[o+2])
+					b11, g11, r11 := int(r1[o+4]), int(r1[o+5]), int(r1[o+6])
+					y0[cx*2] = byte(((66*r00 + 129*g00 + 25*b00 + 128) >> 8) + 16)
+					y0[cx*2+1] = byte(((66*r01 + 129*g01 + 25*b01 + 128) >> 8) + 16)
+					y1[cx*2] = byte(((66*r10 + 129*g10 + 25*b10 + 128) >> 8) + 16)
+					y1[cx*2+1] = byte(((66*r11 + 129*g11 + 25*b11 + 128) >> 8) + 16)
+					bb := (b00 + b01 + b10 + b11) >> 2
+					gg := (g00 + g01 + g10 + g11) >> 2
+					rr := (r00 + r01 + r10 + r11) >> 2
+					ur[cx] = byte(((-38*rr - 74*gg + 112*bb + 128) >> 8) + 128)
+					vr[cx] = byte(((112*rr - 94*gg - 18*bb + 128) >> 8) + 128)
+				}
+			}
+		}(c0, c1)
+	}
+	wg.Wait()
+}

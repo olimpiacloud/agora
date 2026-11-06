@@ -57,22 +57,29 @@ func (t tree) pssMB() float64 {
 	return s
 }
 
-func (t tree) ticks() uint64 {
-	var s uint64
+func (t tree) ticks() map[int]uint64 {
+	out := map[int]uint64{}
 	for _, p := range t.all() {
-		u, err := core.ReadUsage(p)
-		if err == nil {
-			s += u.CPUTicks
+		if v, _, err := core.StatLight(p); err == nil {
+			out[p] = v
 		}
 	}
-	return s
+	return out
 }
 
 func (t tree) cpu(d time.Duration) float64 {
 	a := t.ticks()
 	time.Sleep(d)
 	b := t.ticks()
-	return float64(b-a) / 100 / d.Seconds() * 100
+	var sum uint64
+	for p, v := range b {
+		if pv, ok := a[p]; ok && v >= pv {
+			sum += v - pv
+		} else if !ok {
+			sum += v
+		}
+	}
+	return float64(sum) / 100 / d.Seconds() * 100
 }
 
 var (
@@ -329,7 +336,7 @@ func carbonTree() tree {
 	return tree{daemon.Process.Pid}
 }
 
-const animPage = "data:text/html,<body style='margin:0;font:40px sans-serif'><div id=d></div><canvas id=c width=600 height=300></canvas><script>const x=c.getContext('2d');let i=0;setInterval(()=>{d.textContent=Date.now();x.fillStyle='hsl('+(i++%360)+',70%,50%)';x.fillRect((i*7)%560,(i*3)%260,40,40)},33)</script>"
+const animHTML = `<title>anim</title><body style="margin:0;font:40px sans-serif"><div id=d></div><canvas id=c width=600 height=300></canvas><script>const x=c.getContext('2d');let i=0;setInterval(()=>{d.textContent=Date.now();x.fillStyle='hsl('+(i++%360)+',70%,50%)';x.fillRect((i*7)%560,(i*3)%260,40,40)},33)</script>`
 
 func main() {
 	bin := flag.String("carbon", "./bin/carbon", "carbon binary")
@@ -347,6 +354,10 @@ func main() {
 	}
 	site = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
+		if r.URL.Path == "/anim" {
+			fmt.Fprint(w, animHTML)
+			return
+		}
 		fmt.Fprintf(w, "<title>bench</title><h1 id=h>bench page</h1><input id=i><script>document.addEventListener('mousedown',e=>{window.__md=performance.timeOrigin+performance.now()},true)</script>")
 	}))
 	defer site.Close()
@@ -515,9 +526,9 @@ func main() {
 		cdo("DELETE", "/v1/cursors/"+id, nil)
 	}
 
-	sv := cdo("POST", "/v1/workspaces/"+ws+"/tabs/"+target, map[string]any{"action": "navigate", "url": animPage})
+	sv := cdo("POST", "/v1/workspaces/"+ws+"/tabs/"+target, map[string]any{"action": "navigate", "url": site.URL + "/anim"})
 	_ = sv
-	bcdp.call("Page.navigate", map[string]any{"url": animPage})
+	bcdp.call("Page.navigate", map[string]any{"url": site.URL + "/anim"})
 	time.Sleep(2 * time.Second)
 	add("8 animated page, no viewer", "CPU", carbonTree().cpu(window), bs.roots().cpu(window), "%", "page animation cost on both; carbon encodes nothing")
 	stopC := make(chan [2]float64)

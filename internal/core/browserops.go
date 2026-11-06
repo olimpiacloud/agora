@@ -91,6 +91,7 @@ func (m *Manager) ListTabs(ctx context.Context, ws string) ([]map[string]any, er
 	if b == nil {
 		return out, nil
 	}
+	b.Refresh(ctx)
 	for _, t := range b.Targets() {
 		r.mu.Lock()
 		owner := r.tabOwner[t.TargetID]

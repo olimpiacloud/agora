@@ -27,6 +27,7 @@ type LaunchOptions struct {
 	DownloadDir string
 	LogPath     string
 	StartURLs   []string
+	CgroupFD    int
 }
 
 type TargetInfo struct {
@@ -134,6 +135,10 @@ func Launch(ctx context.Context, o LaunchOptions) (*Browser, error) {
 	attr := &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
 	if o.Uid != 0 && uint32(os.Getuid()) != o.Uid {
 		attr.Credential = &syscall.Credential{Uid: o.Uid, Gid: o.Gid}
+	}
+	if o.CgroupFD > 0 {
+		attr.UseCgroupFD = true
+		attr.CgroupFD = o.CgroupFD
 	}
 	cmd.SysProcAttr = attr
 	if o.LogPath != "" {
@@ -273,6 +278,33 @@ func (b *Browser) Pid() int {
 }
 
 func (b *Browser) Exited() <-chan struct{} { return b.exited }
+
+func (b *Browser) Refresh(ctx context.Context) {
+	var tl struct {
+		TargetInfos []TargetInfo `json:"targetInfos"`
+	}
+	if err := b.cdp.Call(ctx, "", "Target.getTargets", nil, &tl); err != nil {
+		return
+	}
+	b.mu.Lock()
+	seen := map[string]bool{}
+	for i := range tl.TargetInfos {
+		t := tl.TargetInfos[i]
+		seen[t.TargetID] = true
+		b.targets[t.TargetID] = &t
+		if tab := b.tabs[t.TargetID]; tab != nil {
+			tab.mu.Lock()
+			tab.URL, tab.Title = t.URL, t.Title
+			tab.mu.Unlock()
+		}
+	}
+	for id := range b.targets {
+		if !seen[id] {
+			delete(b.targets, id)
+		}
+	}
+	b.mu.Unlock()
+}
 
 func (b *Browser) Targets() []TargetInfo {
 	b.mu.Lock()

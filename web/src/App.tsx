@@ -446,7 +446,14 @@ function EventList({ events, compact }: { events: CarbonEvent[]; compact?: boole
 }
 
 function UsageView({ ws }: { ws: Workspace }) {
-  const u = ws.usage
+  const [detail, setDetail] = useState<Workspace['usage']>()
+  useEffect(() => {
+    const f = () => api<Workspace>('GET', `/v1/workspaces/${ws.id}?detail=1`).then((w) => setDetail(w.usage)).catch(() => {})
+    f()
+    const t = setInterval(f, 30000)
+    return () => clearInterval(t)
+  }, [ws.id])
+  const u = detail || ws.usage
   return (
     <div className="list pad">
       {!u && <div className="muted">No runtime (nothing is consuming resources).</div>}

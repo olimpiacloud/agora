@@ -197,6 +197,7 @@ func (e *Engine) loop(stop, done chan struct{}) {
 	}()
 	var frame *x11.Frame
 	var curMode Mode
+	needFull := true
 	start := time.Now()
 	last := time.Time{}
 	fpsWin := time.Now()
@@ -235,21 +236,56 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			e.mu.Unlock()
 			curMode = mode
 			e.keyReq.Store(true)
+			needFull = true
 		} else if mode != curMode {
 			enc.Reconfigure(crf, kbps)
 			curMode = mode
 		}
-		dw.Ack()
 		t0 := time.Now()
-		frame, err = cp.GrabScreen(frame)
-		if err != nil {
-			continue
-		}
-		t1 := time.Now()
 		key := e.keyReq.Swap(false)
 		now := time.Now()
 		pts := now.Sub(start).Milliseconds()
-		data, isKey, err := enc.Encode(frame.Pix, frame.Stride, frame.Width, frame.Height, pts, key)
+		var data []byte
+		var isKey bool
+		rx, ry, rw, rh, ok := dw.AckRegion()
+		ew, eh := e.w, e.h
+		var t1 time.Time
+		if needFull || !ok {
+			frame, err = cp.Grab(0, 0, ew, eh, frame)
+			if err != nil {
+				continue
+			}
+			t1 = time.Now()
+			data, isKey, err = enc.Encode(frame.Pix, frame.Stride, frame.Width, frame.Height, pts, key || needFull)
+			needFull = false
+		} else {
+			x0, y0 := rx&^1, ry&^1
+			x1, y1 := (rx+rw+1)&^1, (ry+rh+1)&^1
+			if x1 > ew {
+				x1 = ew
+			}
+			if y1 > eh {
+				y1 = eh
+			}
+			if x1-x0 < 2 || y1-y0 < 2 {
+				if !key {
+					continue
+				}
+				x1, y1 = x0, y0
+			}
+			if x1 > x0 && y1 > y0 {
+				frame, err = cp.Grab(x0, y0, x1-x0, y1-y0, frame)
+				if err != nil {
+					continue
+				}
+			}
+			t1 = time.Now()
+			if frame != nil && x1 > x0 && y1 > y0 {
+				data, isKey, err = enc.EncodeRect(frame.Pix, frame.Stride, x0, y0, x1-x0, y1-y0, pts, key)
+			} else {
+				data, isKey, err = enc.EncodeRect(nil, 0, 0, 0, 0, 0, pts, key)
+			}
+		}
 		t2 := time.Now()
 		if err != nil || len(data) == 0 {
 			continue
