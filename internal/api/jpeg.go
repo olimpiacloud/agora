@@ -65,6 +65,7 @@ func (s *Server) streamJPEG(w http.ResponseWriter, r *http.Request, p *Principal
 	if err != nil {
 		return
 	}
+	defer c.CloseNow()
 	c.SetReadLimit(1 << 20)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

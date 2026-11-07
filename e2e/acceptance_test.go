@@ -426,6 +426,15 @@ func TestFG_NoViewerAndReconnect(t *testing.T) {
 	if n2 < 10 || !k2 {
 		t.Fatal("reconnect failed")
 	}
+	fds := func() int { e, _ := os.ReadDir("/proc/self/fd"); return len(e) }
+	before := fds()
+	for i := 0; i < 8; i++ {
+		count(300 * time.Millisecond)
+	}
+	time.Sleep(time.Second)
+	if after := fds(); after > before+2 {
+		t.Fatalf("viewer connections leak file descriptors: %d before, %d after 8 viewers", before, after)
+	}
 	t.Log("PASS F+G: zero encoding without viewers; abrupt disconnect stops encoder, workspace keeps running, reconnect resumes with keyframe")
 }
 
