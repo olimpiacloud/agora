@@ -18,8 +18,9 @@ func TestCaptureEncode(t *testing.T) {
 	defer d.Close()
 	c := exec.Command("xclock", "-update", "1", "-geometry", "400x400+100+100")
 	c.Env = append(os.Environ(), d.Env()...)
-	c.Start()
-	defer func() { c.Process.Kill(); c.Wait() }()
+	if err := c.Start(); err == nil {
+		defer func() { c.Process.Kill(); c.Wait() }()
+	}
 	time.Sleep(500 * time.Millisecond)
 	cp, err := d.NewCapturer()
 	if err != nil {
