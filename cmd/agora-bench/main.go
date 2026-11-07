@@ -89,6 +89,7 @@ var (
 	daemon   *exec.Cmd
 	site     *httptest.Server
 	window   = 10 * time.Second
+	apiAddr  string
 )
 
 func must(err error) {
@@ -100,19 +101,19 @@ func must(err error) {
 func startAgora(bin string) {
 	home, _ = os.MkdirTemp("/tmp", "agora-bench-")
 	os.Chmod(home, 0711)
-	daemon = exec.Command(bin, "serve", "--home", home, "--listen", "127.0.0.1:7791")
+	daemon = exec.Command(bin, "serve", "--home", home, "--listen", apiAddr)
 	daemon.Stdout, daemon.Stderr = os.Stderr, os.Stderr
 	daemon.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	must(daemon.Start())
 	for i := 0; i < 100; i++ {
-		if r, err := http.Get("http://127.0.0.1:7791/v1/health"); err == nil {
+		if r, err := http.Get("http://" + apiAddr + "/v1/health"); err == nil {
 			r.Body.Close()
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	tok, _ := os.ReadFile(filepath.Join(home, "admin.token"))
-	agoraC = &client.Client{URL: "http://127.0.0.1:7791", Token: strings.TrimSpace(string(tok)), HTTP: &http.Client{Timeout: 2 * time.Minute}}
+	agoraC = &client.Client{URL: "http://" + apiAddr, Token: strings.TrimSpace(string(tok)), HTTP: &http.Client{Timeout: 2 * time.Minute}}
 }
 
 func cdo(method, path string, body any) map[string]any {
@@ -308,7 +309,7 @@ func agoraConsumeOpt(ws string, d time.Duration, interact bool) (frames int, byt
 	vt := cdo("POST", "/v1/viewer-tokens", map[string]any{"workspace": ws, "control": interact})["token"].(string)
 	ctx, cancel := context.WithTimeout(context.Background(), d+5*time.Second)
 	defer cancel()
-	c, _, err := websocket.Dial(ctx, "ws://127.0.0.1:7791/v1/workspaces/"+ws+"/stream/ws?token="+vt, nil)
+	c, _, err := websocket.Dial(ctx, "ws://"+apiAddr+"/v1/workspaces/"+ws+"/stream/ws?token="+vt, nil)
 	must(err)
 	c.SetReadLimit(64 << 20)
 	defer c.CloseNow()
@@ -356,7 +357,15 @@ func main() {
 	bin := flag.String("agora", "./bin/agora", "agora binary")
 	out := flag.String("out", "bench/results", "output directory")
 	quick := flag.Bool("quick", false, "shorter windows")
+	listen := flag.String("listen", "", "address for the benchmarked daemon (default: a free port)")
+	only := flag.String("only", "", "run a single suite: stream")
+	beforeBin := flag.String("before", "", "with -only stream: binary to compare against")
+	rounds := flag.Int("rounds", 2, "with -only stream: alternating rounds per binary")
 	flag.Parse()
+	apiAddr = *listen
+	if apiAddr == "" {
+		apiAddr = fmt.Sprintf("127.0.0.1:%d", freePort())
+	}
 	if *quick {
 		window = 5 * time.Second
 	}
@@ -372,9 +381,17 @@ func main() {
 			fmt.Fprint(w, animHTML)
 			return
 		}
+		if r.URL.Path == "/full" {
+			io.WriteString(w, fullHTML)
+			return
+		}
 		fmt.Fprintf(w, "<title>bench</title><h1 id=h>bench page</h1><input id=i><script>document.addEventListener('mousedown',e=>{window.__md=performance.timeOrigin+performance.now()},true)</script>")
 	}))
 	defer site.Close()
+	if *only == "stream" {
+		streamSuite(*bin, *beforeBin, *rounds, *out)
+		return
+	}
 	startAgora(*bin)
 	defer func() {
 		syscall.Kill(-daemon.Process.Pid, syscall.SIGINT)
