@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
+	"hash/maphash"
+	"image"
 	"image/jpeg"
 	"net/http"
 	"strconv"
@@ -34,10 +37,18 @@ func (s *Server) streamJPEG(w http.ResponseWriter, r *http.Request, p *Principal
 	if quality <= 0 || quality > 95 {
 		quality = 60
 	}
+	cursorID := q.Get("cursor")
+	winID, _ := strconv.ParseUint(q.Get("window"), 0, 32)
 	d, err := s.m.LiveDisplay(r.Context(), ws)
 	if err != nil {
 		writeErr(w, err)
 		return
+	}
+	if cursorID != "" {
+		if _, err := s.m.CursorRegion(r.Context(), ws, cursorID); err != nil {
+			writeErr(w, err)
+			return
+		}
 	}
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
@@ -82,8 +93,12 @@ func (s *Server) streamJPEG(w http.ResponseWriter, r *http.Request, p *Principal
 	defer dw.Close()
 	gap := time.Second / time.Duration(fps)
 	var frame *x11.Frame
-	var last time.Time
+	var last, resolved time.Time
 	var buf bytes.Buffer
+	var region, sent image.Rectangle
+	var lastSum uint64
+	seed := maphash.MakeSeed()
+	cropped := cursorID != "" || winID != 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -101,10 +116,36 @@ func (s *Server) streamJPEG(w http.ResponseWriter, r *http.Request, p *Principal
 			}
 		}
 		dw.Ack()
-		frame, err = cp.GrabScreen(frame)
+		if cropped && time.Since(resolved) > 1500*time.Millisecond {
+			resolved = time.Now()
+			if cursorID != "" {
+				region, _ = s.m.CursorRegion(ctx, ws, cursorID)
+			} else {
+				region = core.WindowRegion(d, uint32(winID))
+			}
+			region = region.Intersect(image.Rect(0, 0, d.Width, d.Height))
+		}
+		if region.Dx() > 1 && region.Dy() > 1 {
+			frame, err = cp.Grab(region.Min.X, region.Min.Y, region.Dx(), region.Dy(), frame)
+		} else {
+			frame, err = cp.GrabScreen(frame)
+		}
 		if err != nil {
 			continue
 		}
+		if region != sent {
+			msg, _ := json.Marshal(map[string]any{"type": "region", "x": region.Min.X, "y": region.Min.Y, "w": frame.Width, "h": frame.Height, "screen_w": d.Width, "screen_h": d.Height})
+			if send(msg) != nil {
+				return
+			}
+			sent = region
+			lastSum = 0
+		}
+		sum := maphash.Bytes(seed, frame.Pix[:frame.Stride*frame.Height])
+		if sum == lastSum {
+			continue
+		}
+		lastSum = sum
 		img := frame.RGBA()
 		out := core.Downscale(img, maxW)
 		buf.Reset()

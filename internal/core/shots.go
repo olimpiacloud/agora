@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"errors"
+	"image"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,4 +71,64 @@ func (m *Manager) LiveDisplay(ctx context.Context, ws string) (*x11.Display, err
 		return nil, errors.New("workspace has no display")
 	}
 	return d, nil
+}
+
+func (m *Manager) CursorRegion(ctx context.Context, ws, cursorID string) (image.Rectangle, error) {
+	c, err := m.GetCursor(cursorID)
+	if err != nil {
+		return image.Rectangle{}, err
+	}
+	if c.Workspace != ws {
+		return image.Rectangle{}, ErrNotFound
+	}
+	r := m.runtime(ws)
+	if r == nil {
+		return image.Rectangle{}, nil
+	}
+	if target, ok := strings.CutPrefix(c.Surface, "tab:"); ok {
+		r.brMu.Lock()
+		b := r.browser
+		r.brMu.Unlock()
+		if b != nil {
+			var win struct {
+				Bounds struct {
+					Left        int    `json:"left"`
+					Top         int    `json:"top"`
+					Width       int    `json:"width"`
+					Height      int    `json:"height"`
+					WindowState string `json:"windowState"`
+				} `json:"bounds"`
+			}
+			cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			err := b.CDP().Call(cctx, "", "Browser.getWindowForTarget", map[string]any{"targetId": target}, &win)
+			cancel()
+			if err == nil && win.Bounds.Width > 0 && win.Bounds.WindowState != "minimized" {
+				bb := win.Bounds
+				return image.Rect(bb.Left, bb.Top, bb.Left+bb.Width, bb.Top+bb.Height), nil
+			}
+		}
+	}
+	r.mu.Lock()
+	d := r.display
+	r.mu.Unlock()
+	if d == nil || (c.X == 0 && c.Y == 0) {
+		return image.Rectangle{}, nil
+	}
+	return WindowRegion(d, d.WindowAt(c.X, c.Y)), nil
+}
+
+func WindowRegion(d *x11.Display, id uint32) image.Rectangle {
+	if id == 0 {
+		return image.Rectangle{}
+	}
+	wins, err := d.Windows()
+	if err != nil {
+		return image.Rectangle{}
+	}
+	for _, w := range wins {
+		if w.ID == id {
+			return image.Rect(w.X, w.Y, w.X+w.Width, w.Y+w.Height)
+		}
+	}
+	return image.Rectangle{}
 }
