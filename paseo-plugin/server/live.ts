@@ -1,34 +1,123 @@
+import type { RpcInput } from "@getpaseo/plugin";
 import { call, wsURL } from "./agora";
+import type { live } from "../shared/agora";
 
-interface LiveEvent {
-  type: string;
-  cursor?: string;
-  data?: Record<string, unknown>;
+type Cur = { id: string; name: string; status: string; detail: string; color: string; x: number; y: number; goal: string; parent: string; agent: string };
+type Region = { x: number; y: number; w: number; h: number; sw: number; sh: number };
+
+interface Meta {
+  cursors: Cur[];
+  locked: string | null;
+  seq: number;
+  lastUse: number;
+  refreshAt: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  hubs: Set<Hub>;
+  waiters: Set<() => void>;
 }
 
 interface Hub {
   key: string;
+  workspace: string;
   sock: WebSocket | null;
   seq: number;
-  frame: { w: number; h: number; sw: number; sh: number; b64: string } | null;
-  events: { seq: number; e: LiveEvent }[];
-  eventSeq: number;
+  frame: { w: number; h: number; b64: string } | null;
+  region: Region;
+  gotRegion: boolean;
   status: string | null;
   lastPoll: number;
+  openedAt: number;
   waiters: Set<() => void>;
 }
 
+const TIERS = {
+  card: { maxWidth: 720, fps: 4, control: false },
+  tile: { maxWidth: 560, fps: 3, control: false },
+  full: { maxWidth: 1400, fps: 8, control: true },
+} as const;
+
 const hubs = new Map<string, Hub>();
+const metas = new Map<string, Meta>();
 
 function wake(h: Hub) {
   for (const w of h.waiters) w();
   h.waiters.clear();
 }
 
-async function open(h: Hub, workspace: string, maxWidth: number, fps: number) {
-  const { token } = await call("POST", "/v1/viewer-tokens", { workspace, control: true, ttl_seconds: 86400 });
-  const url = wsURL(`/v1/workspaces/${workspace}/stream/jpeg?fps=${fps}&max_width=${maxWidth}&quality=60&token=${encodeURIComponent(token)}`);
-  const sock = new WebSocket(url);
+function meta(workspace: string): Meta {
+  let m = metas.get(workspace);
+  if (!m) {
+    m = { cursors: [], locked: null, seq: 0, lastUse: Date.now(), refreshAt: 0, timer: null, hubs: new Set(), waiters: new Set() };
+    metas.set(workspace, m);
+    scheduleRefresh(workspace, 0);
+  }
+  return m;
+}
+
+function bumpMeta(workspace: string) {
+  const m = metas.get(workspace);
+  if (!m) return;
+  m.seq++;
+  for (const h of m.hubs) wake(h);
+  for (const w of m.waiters) w();
+  m.waiters.clear();
+}
+
+function scheduleRefresh(workspace: string, delay: number) {
+  const m = metas.get(workspace);
+  if (!m || m.timer) return;
+  m.timer = setTimeout(async () => {
+    m.timer = null;
+    m.refreshAt = Date.now();
+    try {
+      const cs: any[] = await call("GET", `/v1/cursors?workspace=${workspace}&active=1`);
+      const locks: any[] = await call("GET", `/v1/workspaces/${workspace}/locks`).catch(() => []);
+      const ws = locks.find((l) => l.surface === "workspace" && !l.expires);
+      const prev = new Map(m.cursors.map((c) => [c.id, c]));
+      m.cursors = cs.map((c) => {
+        const p = prev.get(c.id);
+        return {
+          id: c.id,
+          name: c.name,
+          status: c.status,
+          detail: c.detail || "",
+          color: c.color,
+          x: p && (p.x || p.y) ? p.x : c.x || 0,
+          y: p && (p.x || p.y) ? p.y : c.y || 0,
+          goal: c.goal || "",
+          parent: c.parent || "",
+          agent: c.labels?.paseo_agent || "",
+        };
+      });
+      m.locked = ws ? ws.holder : null;
+      bumpMeta(workspace);
+    } catch {}
+  }, delay);
+}
+
+function onEvent(workspace: string, e: { type: string; cursor?: string; data?: Record<string, unknown> }) {
+  const m = metas.get(workspace);
+  if (!m) return;
+  const d = e.data || {};
+  if (e.type === "cursor.pointer" && e.cursor && typeof d.x === "number" && typeof d.y === "number" && d.x >= 0) {
+    const c = m.cursors.find((c) => c.id === e.cursor);
+    if (!c) return scheduleRefresh(workspace, 200);
+    if (c.x === d.x && c.y === d.y) return;
+    c.x = d.x;
+    c.y = d.y;
+    bumpMeta(workspace);
+  } else if (e.type.startsWith("cursor.") || e.type.startsWith("control.") || e.type.startsWith("human.")) {
+    scheduleRefresh(workspace, 250);
+  }
+}
+
+async function open(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidth: number) {
+  const t = TIERS[tier];
+  h.openedAt = Date.now();
+  const { token } = await call("POST", "/v1/viewer-tokens", { workspace: h.workspace, control: t.control, ttl_seconds: 86400 });
+  const q = new URLSearchParams({ fps: String(t.fps), max_width: String(maxWidth), quality: tier === "full" ? "62" : "55", token });
+  if (cursor) q.set("cursor", cursor);
+  const sock = new WebSocket(wsURL(`/v1/workspaces/${h.workspace}/stream/jpeg?${q}`));
   sock.binaryType = "arraybuffer";
   h.sock = sock;
   sock.onmessage = (ev) => {
@@ -36,10 +125,10 @@ async function open(h: Hub, workspace: string, maxWidth: number, fps: number) {
       try {
         const m = JSON.parse(ev.data);
         if (m.type === "event" && m.event && m.event.type !== "cursor.action") {
-          h.eventSeq++;
-          h.events.push({ seq: h.eventSeq, e: { type: m.event.type, cursor: m.event.cursor, data: m.event.data || {} } });
-          if (h.events.length > 200) h.events.splice(0, h.events.length - 200);
-          wake(h);
+          onEvent(h.workspace, m.event);
+        } else if (m.type === "region") {
+          h.region = { x: m.x, y: m.y, w: m.w, h: m.h, sw: m.screen_w, sh: m.screen_h };
+          h.gotRegion = true;
         } else if (m.type === "bye") {
           h.status = `session ended: ${m.reason}`;
           wake(h);
@@ -48,8 +137,11 @@ async function open(h: Hub, workspace: string, maxWidth: number, fps: number) {
       return;
     }
     const buf = Buffer.from(ev.data as ArrayBuffer);
+    const fw = buf.readUInt16BE(4);
+    const fh = buf.readUInt16BE(6);
+    if (!h.gotRegion) h.region = { x: 0, y: 0, w: fw, h: fh, sw: fw, sh: fh };
     h.seq++;
-    h.frame = { w: buf.readUInt16BE(0), h: buf.readUInt16BE(2), sw: buf.readUInt16BE(4), sh: buf.readUInt16BE(6), b64: buf.subarray(8).toString("base64") };
+    h.frame = { w: buf.readUInt16BE(0), h: buf.readUInt16BE(2), b64: buf.subarray(8).toString("base64") };
     h.status = null;
     wake(h);
   };
@@ -65,52 +157,97 @@ async function open(h: Hub, workspace: string, maxWidth: number, fps: number) {
 setInterval(() => {
   const now = Date.now();
   for (const [k, h] of hubs) {
-    if (now - h.lastPoll > 15000) {
+    if (h.waiters.size === 0 && now - h.lastPoll > 12000) {
       h.sock?.close();
       hubs.delete(k);
+      metas.get(h.workspace)?.hubs.delete(h);
     }
   }
-}, 5000).unref();
+  for (const [ws, m] of metas) {
+    if (m.hubs.size === 0 && m.waiters.size === 0 && now - m.lastUse > 12000) {
+      if (m.timer) clearTimeout(m.timer);
+      metas.delete(ws);
+    } else if (now - m.refreshAt > 10000) {
+      scheduleRefresh(ws, 0);
+    }
+  }
+}, 4000).unref();
 
-export async function pollFrame(input: { workspace: string; maxWidth: number; fps: number; after: number; eventsAfter: number }) {
-  const maxWidth = Math.min(1920, Math.max(320, Math.round(input.maxWidth)));
-  const fps = Math.min(10, Math.max(1, Math.round(input.fps)));
-  const key = `${input.workspace}|${maxWidth}|${fps}`;
+export function closeAll() {
+  for (const h of hubs.values()) h.sock?.close();
+  hubs.clear();
+  for (const m of metas.values()) if (m.timer) clearTimeout(m.timer);
+  metas.clear();
+}
+
+export async function pollLive(input: RpcInput<typeof live>) {
+  if (input.metaOnly) return pollMeta(input);
+  const tier = input.tier;
+  const maxWidth = tier === "full" ? Math.min(1920, Math.max(480, Math.round((input.maxWidth || 1400) / 240) * 240)) : TIERS[tier].maxWidth;
+  const cursor = input.cursor || "";
+  const key = `${input.workspace}|${cursor}|${tier}|${maxWidth}`;
+  const m = meta(input.workspace);
+  m.lastUse = Date.now();
   let h = hubs.get(key);
   if (!h) {
-    h = { key, sock: null, seq: 0, frame: null, events: [], eventSeq: 0, status: "connecting", lastPoll: Date.now(), waiters: new Set() };
+    h = { key, workspace: input.workspace, sock: null, seq: 0, frame: null, region: { x: 0, y: 0, w: 0, h: 0, sw: 0, sh: 0 }, gotRegion: false, status: "connecting", lastPoll: Date.now(), openedAt: 0, waiters: new Set() };
     hubs.set(key, h);
   }
+  m.hubs.add(h);
   h.lastPoll = Date.now();
-  if (!h.sock) {
+  if (!h.sock && Date.now() - h.openedAt > 2000) {
     try {
-      await open(h, input.workspace, maxWidth, fps);
+      await open(h, cursor, tier, maxWidth);
     } catch (e) {
       h.status = e instanceof Error ? e.message : String(e);
     }
   }
-  const fresh = () => h!.seq > input.after || h!.eventSeq > input.eventsAfter;
+  const hub = h;
+  const fresh = () => hub.seq > input.after || m.seq > input.metaAfter;
   if (!fresh()) {
     await new Promise<void>((resolve) => {
       const t = setTimeout(resolve, 8000);
-      h!.waiters.add(() => {
+      hub.waiters.add(() => {
         clearTimeout(t);
         resolve();
       });
     });
   }
-  const events = h.events.filter((x) => x.seq > input.eventsAfter).map((x) => x.e);
-  const f = h.frame;
-  const sendFrame = f && h.seq > input.after;
+  hub.lastPoll = Date.now();
+  const f = hub.frame;
   return {
-    seq: h.seq,
-    w: f?.w ?? 0,
-    h: f?.h ?? 0,
-    sw: f?.sw ?? 0,
-    sh: f?.sh ?? 0,
-    b64: sendFrame ? f!.b64 : null,
-    events,
-    eventSeq: h.eventSeq,
-    status: h.status,
+    seq: hub.seq,
+    frame: f && hub.seq > input.after ? f : null,
+    region: hub.region,
+    status: hub.status,
+    metaSeq: m.seq,
+    cursors: m.seq > input.metaAfter ? m.cursors : null,
+    locked: m.locked,
+  };
+}
+
+async function pollMeta(input: RpcInput<typeof live>) {
+  const m = meta(input.workspace);
+  m.lastUse = Date.now();
+  if (m.seq <= input.metaAfter) {
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(t);
+        m.waiters.delete(done);
+        resolve();
+      };
+      const t = setTimeout(done, 8000);
+      m.waiters.add(done);
+    });
+  }
+  m.lastUse = Date.now();
+  return {
+    seq: 0,
+    frame: null,
+    region: { x: 0, y: 0, w: 0, h: 0, sw: 0, sh: 0 },
+    status: null,
+    metaSeq: m.seq,
+    cursors: m.seq > input.metaAfter ? m.cursors : null,
+    locked: m.locked,
   };
 }

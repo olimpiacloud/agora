@@ -60,32 +60,36 @@ export const agoraCursor = z.object({
   parent: z.string(),
 });
 
-export const listCursors = defineRpc({
-  name: "agora.cursors",
-  input: z.object({ workspace: z.string() }),
-  output: z.object({ items: z.array(agoraCursor), locked: z.string().nullable() }),
-});
+export const liveCursor = agoraCursor.extend({ agent: z.string() });
 
-export const liveEvent = z.object({
-  type: z.string(),
-  cursor: z.string().optional(),
-  data: z.record(z.string(), z.unknown()).optional(),
-});
-
-export const liveFrame = defineRpc({
-  name: "agora.live_frame",
-  input: z.object({ workspace: z.string(), maxWidth: z.number(), fps: z.number(), after: z.number(), eventsAfter: z.number() }),
+export const live = defineRpc({
+  name: "agora.live",
+  input: z.object({
+    workspace: z.string(),
+    cursor: z.string().optional(),
+    tier: z.enum(["card", "tile", "full"]),
+    maxWidth: z.number().optional(),
+    metaOnly: z.boolean().optional(),
+    after: z.number(),
+    metaAfter: z.number(),
+  }),
   output: z.object({
     seq: z.number(),
-    w: z.number(),
-    h: z.number(),
-    sw: z.number(),
-    sh: z.number(),
-    b64: z.string().nullable(),
-    events: z.array(liveEvent),
-    eventSeq: z.number(),
+    frame: z.object({ w: z.number(), h: z.number(), b64: z.string() }).nullable(),
+    region: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number(), sw: z.number(), sh: z.number() }),
     status: z.string().nullable(),
+    metaSeq: z.number(),
+    cursors: z.array(liveCursor).nullable(),
+    locked: z.string().nullable(),
   }),
 });
+
+export const resolveWorkspace = defineRpc({
+  name: "agora.resolve_workspace",
+  input: z.object({ paseoWorkspaceId: z.string() }),
+  output: z.object({ id: z.string().nullable() }),
+});
+
+export const BROWSE_RE = /agora__browser_(open|navigate)$/;
 
 export const SHOT_RE = /agora-shot:(shot_[0-9a-f]+)/;

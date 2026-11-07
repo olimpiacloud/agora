@@ -1,7 +1,7 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { agentCursor, bytes, call, AGORA_BIN, linkedWorkspace, nameFromCwd } from "./server/agora";
-import { control, ensureWorkspace, getShot, listCursors, listWorkspaces, liveFrame, sendInput } from "./shared/agora";
-import { pollFrame } from "./server/live";
+import { control, ensureWorkspace, getShot, listWorkspaces, live, resolveWorkspace, sendInput } from "./shared/agora";
+import { closeAll, pollLive } from "./server/live";
 
 const MCP_PROVIDERS = ["claude", "codex"];
 
@@ -55,17 +55,15 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  server.handle(listCursors, async ({ workspace }) => {
-    const cs: any[] = await call("GET", `/v1/cursors?workspace=${workspace}&active=1`);
-    const locks: any[] = await call("GET", `/v1/workspaces/${workspace}/locks`).catch(() => []);
-    const ws = locks.find((l) => l.surface === "workspace" && !l.expires);
-    return {
-      items: cs.map((c) => ({ id: c.id, name: c.name, status: c.status, detail: c.detail || "", color: c.color, x: c.x || 0, y: c.y || 0, goal: c.goal || "", parent: c.parent || "" })),
-      locked: ws ? ws.holder : null,
-    };
-  });
+  server.handle(live, pollLive);
 
-  server.handle(liveFrame, pollFrame);
+  server.handle(resolveWorkspace, async ({ paseoWorkspaceId }) => {
+    try {
+      return { id: await linkedWorkspace(paseoWorkspaceId, "", false) };
+    } catch {
+      return { id: null };
+    }
+  });
 
   server.addHook("agent.open.before", async ({ request }) => {
     if (request.purpose === "history") return;
@@ -93,5 +91,5 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  return () => {};
+  return () => closeAll();
 }

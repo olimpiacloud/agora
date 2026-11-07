@@ -1,7 +1,7 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { LivePanel } from "./client/live";
-import { makeShotCard, shotSchema } from "./client/shot";
-import { SHOT_RE } from "./shared/agora";
+import { cardSchema, makeLiveCard } from "./client/card";
+import { BROWSE_RE, SHOT_RE } from "./shared/agora";
 
 function findInline(v: unknown, depth = 0): { data: string; mime: string } | null {
   if (!v || depth > 6) return null;
@@ -37,30 +37,33 @@ export default function contribute(client: PluginClientContext) {
     },
   });
   client.addTimelineTransformer({
-    id: "agora-screenshots",
+    id: "agora-live",
     query: { itemType: "tool_call" },
     transform({ item }) {
       const name = item.name || "";
-      if (!/agora/i.test(name) || !/screenshot/i.test(name)) return undefined;
+      if (!/agora/i.test(name)) return undefined;
+      const browse = BROWSE_RE.test(name);
+      if (!browse && !/screenshot/i.test(name)) return undefined;
       let raw = "";
       try {
         raw = JSON.stringify(item.detail ?? null);
       } catch {}
-      const m = raw.match(SHOT_RE);
-      const inline = m ? null : findInline(item.detail);
-      if (!m && !inline && item.status !== "running") return undefined;
+      const m = browse ? null : raw.match(SHOT_RE);
+      const inline = browse || m ? null : findInline(item.detail);
+      if (!browse && !m && !inline && item.status !== "running") return undefined;
+      const url = browse ? (raw.match(/"url"\s*:\s*"((?:[^"\\]|\\.)*)"/)?.[1] ?? null) : null;
       return {
         items: [
           {
             type: "plugin",
-            kind: "agora-shot",
+            kind: "agora-live",
             version: 1,
-            data: { shot: m ? m[1] : null, tool: name, status: item.status, inline: inline?.data ?? null, mime: inline?.mime ?? null },
+            data: { mode: browse ? "browse" : "shot", call: item.callId || "", tool: name, status: item.status, shot: m ? m[1] : null, inline: inline?.data ?? null, mime: inline?.mime ?? null, url },
           },
         ],
       };
     },
   });
-  client.addTimelineRenderer({ kind: "agora-shot", version: 1, schema: shotSchema, Component: makeShotCard(client) });
+  client.addTimelineRenderer({ kind: "agora-live", version: 1, schema: cardSchema, Component: makeLiveCard(client) });
   return () => {};
 }
