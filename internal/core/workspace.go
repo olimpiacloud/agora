@@ -7,10 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"syscall"
 	"time"
 )
+
+var nameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 type CreateWorkspaceReq struct {
 	Name   string            `json:"name"`
@@ -42,6 +45,9 @@ func (m *Manager) CreateWorkspace(ctx context.Context, req CreateWorkspaceReq) (
 	}
 	if req.Config.Profile == "" {
 		req.Config.Profile = id
+	}
+	if !nameRe.MatchString(req.Config.Profile) {
+		return nil, fmt.Errorf("invalid profile name %q", req.Config.Profile)
 	}
 	now := time.Now().UTC()
 	w := &Workspace{ID: id, Name: req.Name, State: StateCreated, Config: req.Config, Owner: req.Owner, Created: now, Updated: now, LastActive: now, Labels: req.Labels}
