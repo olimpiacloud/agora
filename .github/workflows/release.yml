@@ -7,8 +7,13 @@ on:
     inputs:
       tag:
         description: Existing tag to (re)build, e.g. v0.1.0
-        required: true
+        required: false
         type: string
+      dry_run:
+        description: Build the current commit as v0.0.0-dryrun and skip publishing
+        required: false
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -24,16 +29,24 @@ jobs:
     permissions: {}
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      ref: ${{ steps.tag.outputs.ref }}
     steps:
       - id: tag
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
+          if [ "$DRY_RUN" = true ]; then
+            echo "tag=v0.0.0-dryrun" >> "$GITHUB_OUTPUT"
+            echo "ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
             echo "::error::not a release tag: $TAG"
             exit 1
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ref=$TAG" >> "$GITHUB_OUTPUT"
 
   binaries:
     name: binaries (${{ matrix.arch }})
@@ -53,7 +66,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.tag.outputs.tag }}
+          ref: ${{ needs.tag.outputs.ref }}
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - run: bun install --frozen-lockfile && bun run build
@@ -82,7 +95,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.tag.outputs.tag }}
+          ref: ${{ needs.tag.outputs.ref }}
           persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -94,18 +107,25 @@ jobs:
       - name: Release notes from CHANGELOG.md
         env:
           TAG: ${{ needs.tag.outputs.tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          awk -v v="${TAG#v}" '
+          v=${TAG#v}
+          if [ "$DRY_RUN" = true ]; then
+            v=$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | head -n 1)
+          fi
+          awk -v v="$v" '
             $0 ~ "^## \\[" v "\\]" { on = 1; next }
             on && /^## \[/ { exit }
             on && /^\[[^]]+\]: / { exit }
             on { print }
           ' CHANGELOG.md > notes.md
           if ! grep -q '[^[:space:]]' notes.md; then
-            echo "::error::CHANGELOG.md has no section for ${TAG#v}"
+            echo "::error::CHANGELOG.md has no section for $v"
             exit 1
           fi
+          cat notes.md dist/SHA256SUMS
       - name: Create the GitHub release
+        if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

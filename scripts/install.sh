@@ -50,7 +50,7 @@ case "$VERSION" in
 *) VERSION=v$VERSION ;;
 esac
 
-[ "$(id -u)" -eq 0 ] || die "run as root, for example: curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/install.sh | sudo sh"
+[ "$(id -u)" -eq 0 ] || die "run as root, for example: curl -fsSL https://agora.olimpia.dev/install.sh | sudo sh"
 [ -r /etc/os-release ] || die "cannot detect the distribution (/etc/os-release missing)"
 OS_ID=$(. /etc/os-release && echo "${ID:-unknown}")
 case " $OS_ID $(. /etc/os-release && echo "${ID_LIKE:-}") " in
@@ -274,4 +274,4 @@ start_service
 say "Agora $("$PREFIX/bin/agora" version | sed 's/^agora //') installed"
 echo "  dashboard:   http://127.0.0.1:7788 (paste the token from 'sudo agora token')"
 echo "  admin token: $HOME_DIR/admin.token"
-echo "  uninstall:   curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/uninstall.sh | sudo sh"
+echo "  uninstall:   curl -fsSL https://agora.olimpia.dev/uninstall.sh | sudo sh"
