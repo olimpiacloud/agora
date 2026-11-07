@@ -24,6 +24,12 @@ typedef struct {
 	VAImage img;
 	int derived;
 	int have_img;
+	int vpp;
+	VAConfigID vcfg;
+	VAContextID vctx;
+	VASurfaceID rgb;
+	VAImage rimg;
+	int rgb_dirty;
 	int w, h, mbw, mbh;
 	int fps, kbps, minqp;
 	int rc_dirty;
@@ -37,10 +43,77 @@ typedef struct {
 	int coded_size;
 } venc;
 
+static void venc_vpp_close(venc *e) {
+	if (e->vpp) vaDestroyImage(e->dpy, e->rimg.image_id);
+	if (e->vctx != VA_INVALID_ID) vaDestroyContext(e->dpy, e->vctx);
+	if (e->rgb != VA_INVALID_SURFACE) vaDestroySurfaces(e->dpy, &e->rgb, 1);
+	if (e->vcfg != VA_INVALID_ID) vaDestroyConfig(e->dpy, e->vcfg);
+	e->vpp = 0;
+	e->vctx = e->vcfg = VA_INVALID_ID;
+	e->rgb = VA_INVALID_SURFACE;
+}
+
+static void venc_vpp_open(venc *e, int aw, int ah) {
+	if (vaCreateConfig(e->dpy, VAProfileNone, VAEntrypointVideoProc, NULL, 0, &e->vcfg) != VA_STATUS_SUCCESS) { e->vcfg = VA_INVALID_ID; return; }
+	VASurfaceAttrib sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.type = VASurfaceAttribPixelFormat;
+	sa.flags = VA_SURFACE_ATTRIB_SETTABLE;
+	sa.value.type = VAGenericValueTypeInteger;
+	sa.value.value.i = VA_FOURCC_BGRX;
+	if (vaCreateSurfaces(e->dpy, VA_RT_FORMAT_RGB32, aw, ah, &e->rgb, 1, &sa, 1) != VA_STATUS_SUCCESS) { e->rgb = VA_INVALID_SURFACE; venc_vpp_close(e); return; }
+	if (vaCreateContext(e->dpy, e->vcfg, aw, ah, VA_PROGRESSIVE, &e->src, 1, &e->vctx) != VA_STATUS_SUCCESS) { e->vctx = VA_INVALID_ID; venc_vpp_close(e); return; }
+	if (vaDeriveImage(e->dpy, e->rgb, &e->rimg) != VA_STATUS_SUCCESS) { venc_vpp_close(e); return; }
+	if (e->rimg.format.fourcc != VA_FOURCC_BGRX && e->rimg.format.fourcc != VA_FOURCC_BGRA) { vaDestroyImage(e->dpy, e->rimg.image_id); venc_vpp_close(e); return; }
+	e->vpp = 1;
+}
+
+static int venc_map_rgb(venc *e, uint8_t **p, int *stride) {
+	void *m;
+	if (vaMapBuffer(e->dpy, e->rimg.buf, &m) != VA_STATUS_SUCCESS) return -1;
+	*p = (uint8_t *)m + e->rimg.offsets[0];
+	*stride = e->rimg.pitches[0];
+	return 0;
+}
+
+static int venc_unmap_rgb(venc *e) {
+	if (vaUnmapBuffer(e->dpy, e->rimg.buf) != VA_STATUS_SUCCESS) return -1;
+	e->rgb_dirty = 1;
+	return 0;
+}
+
+static int venc_convert(venc *e) {
+	if (!e->vpp || !e->rgb_dirty) return 0;
+	VARectangle r = {0, 0, e->w, e->h};
+	VAProcPipelineParameterBuffer pp;
+	memset(&pp, 0, sizeof(pp));
+	pp.surface = e->rgb;
+	pp.surface_region = &r;
+	pp.output_region = &r;
+	pp.surface_color_standard = VAProcColorStandardBT601;
+	pp.output_color_standard = VAProcColorStandardBT601;
+	pp.input_color_properties.color_range = VA_SOURCE_RANGE_FULL;
+	pp.output_color_properties.color_range = VA_SOURCE_RANGE_REDUCED;
+	pp.filter_flags = VA_FILTER_SCALING_FAST;
+	VABufferID id;
+	if (vaCreateBuffer(e->dpy, e->vctx, VAProcPipelineParameterBufferType, sizeof(pp), 1, &pp, &id) != VA_STATUS_SUCCESS) return -1;
+	int r2 = 0;
+	if (vaBeginPicture(e->dpy, e->vctx, e->src) != VA_STATUS_SUCCESS) r2 = -2;
+	else {
+		if (vaRenderPicture(e->dpy, e->vctx, &id, 1) != VA_STATUS_SUCCESS) r2 = -3;
+		if (vaEndPicture(e->dpy, e->vctx) != VA_STATUS_SUCCESS) r2 = -4;
+	}
+	vaDestroyBuffer(e->dpy, id);
+	if (r2 == 0 && vaSyncSurface(e->dpy, e->src) != VA_STATUS_SUCCESS) r2 = -5;
+	if (r2 == 0) e->rgb_dirty = 0;
+	return r2;
+}
+
 static void venc_close(venc *e) {
 	if (!e) return;
 	if (e->dpy) {
 		if (e->have_img) vaDestroyImage(e->dpy, e->img.image_id);
+		venc_vpp_close(e);
 		if (e->coded != VA_INVALID_ID) vaDestroyBuffer(e->dpy, e->coded);
 		if (e->ctx != VA_INVALID_ID) vaDestroyContext(e->dpy, e->ctx);
 		if (e->src != VA_INVALID_SURFACE) vaDestroySurfaces(e->dpy, &e->src, 1);
@@ -195,11 +268,13 @@ static void write_slice_header(venc *e, bw *w, int idr) {
 
 static void venc_silent(void *ctx, const char *msg) {}
 
-static int venc_open(const char *dev, int w, int h, int fps, int kbps, int minqp, venc **out) {
+static int venc_open(const char *dev, int w, int h, int fps, int kbps, int minqp, int vpp, venc **out) {
 	venc *e = calloc(1, sizeof(venc));
 	e->fd = -1;
 	e->cfg = e->ctx = e->coded = VA_INVALID_ID;
 	e->src = e->rec[0] = e->rec[1] = VA_INVALID_SURFACE;
+	e->vcfg = e->vctx = VA_INVALID_ID;
+	e->rgb = VA_INVALID_SURFACE;
 	e->w = w; e->h = h;
 	e->mbw = (w + 15) / 16; e->mbh = (h + 15) / 16;
 	e->fps = fps; e->kbps = kbps; e->minqp = minqp;
@@ -246,6 +321,7 @@ static int venc_open(const char *dev, int w, int h, int fps, int kbps, int minqp
 	}
 	e->have_img = 1;
 	e->rc_dirty = 1;
+	if (vpp) venc_vpp_open(e, aw, ah);
 	*out = e;
 	return 0;
 }
@@ -293,6 +369,7 @@ static void invalid_pic(VAPictureH264 *p) {
 }
 
 static int venc_encode(venc *e, int idr, uint8_t *out, int cap, int *key) {
+	if (venc_convert(e)) return -20;
 	if (!e->have_ref) idr = 1;
 	if (idr) { e->frame_num = 0; e->poc = 0; }
 	VABufferID ids[16];
@@ -461,7 +538,11 @@ func NewVAAPI(o H264Options) (*VAAPIEncoder, error) {
 	dev := C.CString(vaapiDevice())
 	defer C.free(unsafe.Pointer(dev))
 	var e *C.venc
-	if r := C.venc_open(dev, C.int(w), C.int(h), C.int(o.FPS), C.int(o.MaxKbps), C.int(minQP(o.CRF)), &e); r != 0 {
+	vpp := 1
+	if os.Getenv("AGORA_VAAPI_VPP") == "0" {
+		vpp = 0
+	}
+	if r := C.venc_open(dev, C.int(w), C.int(h), C.int(o.FPS), C.int(o.MaxKbps), C.int(minQP(o.CRF)), C.int(vpp), &e); r != 0 {
 		return nil, &vaapiOpenError{int(r)}
 	}
 	x := &VAAPIEncoder{e: e, w: w, h: h, out: make([]byte, int(e.coded_size))}
@@ -516,6 +597,12 @@ func (x *VAAPIEncoder) Encode(bgrx []byte, stride, srcW, srcH int, ptsMs int64, 
 	if x.e == nil {
 		return nil, false, errors.New("closed")
 	}
+	if x.e.vpp != 0 {
+		if err := x.copyRGB(bgrx, stride, 0, 0, min(srcW, x.w), min(srcH, x.h)); err != nil {
+			return nil, false, err
+		}
+		return x.encode(idr)
+	}
 	y, uv, ys, uvs, err := x.planes()
 	if err != nil {
 		return nil, false, err
@@ -533,7 +620,11 @@ func (x *VAAPIEncoder) EncodeRect(src []byte, stride, rx, ry, rw, rh int, ptsMs 
 	if x.e == nil {
 		return nil, false, errors.New("closed")
 	}
-	if rw > 0 && rh > 0 && rx >= 0 && ry >= 0 && rx+rw <= x.w && ry+rh <= x.h && rx%2 == 0 && ry%2 == 0 && rw%2 == 0 && rh%2 == 0 {
+	if rw > 0 && rh > 0 && rx >= 0 && ry >= 0 && rx+rw <= x.w && ry+rh <= x.h && x.e.vpp != 0 {
+		if err := x.copyRGB(src, stride, rx, ry, rw, rh); err != nil {
+			return nil, false, err
+		}
+	} else if rw > 0 && rh > 0 && rx >= 0 && ry >= 0 && rx+rw <= x.w && ry+rh <= x.h && rx%2 == 0 && ry%2 == 0 && rw%2 == 0 && rh%2 == 0 {
 		y, uv, ys, uvs, err := x.planes()
 		if err != nil {
 			return nil, false, err
@@ -544,6 +635,23 @@ func (x *VAAPIEncoder) EncodeRect(src []byte, stride, rx, ry, rw, rh int, ptsMs 
 		}
 	}
 	return x.encode(idr)
+}
+
+func (x *VAAPIEncoder) copyRGB(src []byte, stride, rx, ry, rw, rh int) error {
+	var p *C.uint8_t
+	var cs C.int
+	if C.venc_map_rgb(x.e, &p, &cs) != 0 {
+		return errors.New("vaapi: map failed")
+	}
+	ds := int(cs)
+	dst := unsafe.Slice((*byte)(unsafe.Pointer(p)), ds*(int(x.e.mbh)*16))
+	for row := 0; row < rh; row++ {
+		copy(dst[(ry+row)*ds+rx*4:(ry+row)*ds+(rx+rw)*4], src[row*stride:row*stride+rw*4])
+	}
+	if C.venc_unmap_rgb(x.e) != 0 {
+		return errors.New("vaapi: upload failed")
+	}
+	return nil
 }
 
 func (x *VAAPIEncoder) encode(idr bool) ([]byte, bool, error) {

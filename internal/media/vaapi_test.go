@@ -135,3 +135,66 @@ func TestVAAPIReopen(t *testing.T) {
 		enc.Close()
 	}
 }
+
+func TestEncoderFallback(t *testing.T) {
+	t.Setenv("AGORA_VAAPI_DEVICE", "/nonexistent")
+	t.Setenv("AGORA_ENCODER", "auto")
+	vaapiBroken.Store(false)
+	defer vaapiBroken.Store(false)
+	enc, err := NewEncoder(H264Options{Width: 320, Height: 240})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer enc.Close()
+	if enc.Name() != "x264" {
+		t.Fatalf("got %s, want x264", enc.Name())
+	}
+	t.Setenv("AGORA_ENCODER", "vaapi")
+	if _, err := NewEncoder(H264Options{Width: 320, Height: 240}); err == nil {
+		t.Fatal("strict vaapi should fail without a device")
+	}
+}
+
+func TestVAAPIColors(t *testing.T) {
+	w, h := 256, 128
+	cols := [][3]byte{{0, 0, 0}, {255, 255, 255}, {128, 128, 128}, {0, 0, 255}, {0, 255, 0}, {255, 0, 0}, {40, 200, 120}, {200, 60, 30}}
+	f := make([]byte, w*h*4)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			c := cols[x/32]
+			o := (y*w + x) * 4
+			f[o], f[o+1], f[o+2] = c[0], c[1], c[2]
+		}
+	}
+	planes := func(enc Encoder) []byte {
+		defer enc.Close()
+		b, _, err := enc.Encode(f, w*4, w, h, 0, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return decodeNV12(t, b)
+	}
+	v, err := NewVAAPI(H264Options{Width: w, Height: h, CRF: 18})
+	if err != nil {
+		t.Skip(err)
+	}
+	x, _ := NewH264(H264Options{Width: w, Height: h, CRF: 18})
+	a, b := planes(v), planes(x)
+	for i := range cols {
+		for _, o := range []int{64*w + i*32 + 16, w*h + 32*w + i*32 + 16, w*h + 32*w + i*32 + 17} {
+			if d := int(a[o]) - int(b[o]); d > 3 || d < -3 {
+				t.Fatalf("color %v: vaapi %d x264 %d", cols[i], a[o], b[o])
+			}
+		}
+	}
+}
+
+func decodeNV12(t *testing.T, stream []byte) []byte {
+	p := filepath.Join(t.TempDir(), "c.h264")
+	os.WriteFile(p, stream, 0644)
+	out, err := exec.Command("ffmpeg", "-v", "error", "-i", p, "-f", "rawvideo", "-pix_fmt", "nv12", "-").Output()
+	if err != nil {
+		t.Skip(err)
+	}
+	return out
+}
