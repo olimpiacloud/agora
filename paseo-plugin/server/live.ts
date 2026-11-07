@@ -111,7 +111,16 @@ function onEvent(workspace: string, e: { type: string; cursor?: string; data?: R
   }
 }
 
-async function open(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidth: number) {
+let openChain: Promise<void> = Promise.resolve();
+
+function open(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidth: number): Promise<void> {
+  h.openedAt = Date.now() + 60000;
+  const run = openChain.then(() => openNow(h, cursor, tier, maxWidth));
+  openChain = run.catch(() => {});
+  return run;
+}
+
+async function openNow(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidth: number) {
   const t = TIERS[tier];
   h.openedAt = Date.now();
   const { token } = await call("POST", "/v1/viewer-tokens", { workspace: h.workspace, control: t.control, ttl_seconds: 86400 });
@@ -152,6 +161,15 @@ async function open(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidth: 
     if (h.sock === sock) h.sock = null;
     wake(h);
   };
+  await new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, 1500);
+    const done = () => {
+      clearTimeout(t);
+      resolve();
+    };
+    sock.addEventListener("message", done, { once: true });
+    sock.addEventListener("close", done, { once: true });
+  });
 }
 
 setInterval(() => {
