@@ -1,6 +1,6 @@
 ---
 title: MCP tools
-description: The 50 tools of the agora mcp server, grouped by what they control.
+description: The 52 tools of the agora mcp server, grouped by what they control.
 sidebar:
   icon: wrench
 ---
@@ -67,6 +67,8 @@ These use the cursor's own MPX pointer and keyboard.
 | `cursor_fail` | Finish with an `error`. |
 | `cursor_inbox` | Read messages after `since`. |
 | `human_request` | Ask a human to take over (CAPTCHA, MFA, approval). Then call `events_wait` with `types: "control.returned"`. |
+| `board_read` | Read the workspace's shared board: current claims and posts after `since`. Check it before starting a work item. |
+| `board_post` | Post to the shared board so sibling agents do not duplicate work. `kind`: `claim` (fails if someone else holds or finished the `topic`), `done`, `release`, `finding` or `note`; `topic`, `text`. |
 | `events_wait` | Wait for events: `types` (comma-separated, `*` suffix), `cursor`, `since`, `wait_ms` (default 30000). |
 
 ## Subagents (`spawn`)

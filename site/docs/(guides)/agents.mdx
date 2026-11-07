@@ -104,6 +104,7 @@ What helps:
 - **Wait for events.** `events_wait` and `cursor_wait` block until something happens; never poll in a loop.
 - **Lean subagents.** The default `lean` profile runs Claude Code with `--strict-mcp-config`, no slash commands, no built-in tools, no settings files and a short system prompt, and exposes only the tool groups the cursor needs (`AGORA_TOOLS`) with one-line descriptions (`AGORA_LEAN=1`). Tool definitions shrink from about 5.7k to 2.9k tokens.
 - **Small models for small jobs.** Reading a page or filling a form rarely needs the largest model; pass `model` and `effort: "low"`.
+- **Coordinate through the board.** Parallel subagents `board_read` before starting and `board_post` a `claim`, so two of them never do the same work.
 - **Batch independent calls** in the same turn.
 
 You can apply the same filters to your own MCP setup:

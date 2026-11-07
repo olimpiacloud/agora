@@ -67,6 +67,10 @@ With `launch`, Agora starts the agent process itself:
 | `codex` | `codex exec` with the Agora MCP server configured. |
 | `command` | Any command, with `AGORA_URL`, `AGORA_TOKEN`, `AGORA_CURSOR`, `AGORA_WORKSPACE` and `AGORA_GOAL` in its environment. |
 
+### The shared board
+
+Cursors in a workspace share a **board** to coordinate parallel work. Before starting a work item, an agent reads the board and posts a `claim` on its topic; the claim fails if another live cursor holds it or it is already `done`. Agents post `finding` and `note` posts for their siblings and `release` or mark `done` when they finish. Claims of cursors that ended expire on their own. Subagents launched by Agora are told to use it.
+
 Add `worktree: {repo, branch, base}` to give the child its own git worktree and a port range (`PORT`, `AGORA_PORT_BASE`, `AGORA_PORTS`) for parallel development.
 
 ## Input seats and arbitration

@@ -72,6 +72,8 @@ The daemon serves a JSON API under `/v1` on `127.0.0.1:7788`, plus the dashboard
 | `DELETE /v1/workspaces/{id}/processes/{pid}` | Kill one. |
 | `GET /v1/workspaces/{id}/clipboard` | `{text}`. |
 | `GET /v1/workspaces/{id}/locks` | Current surface locks. |
+| `GET /v1/workspaces/{id}/board` | Shared board: claims and posts after `?since=<seq>` (`limit`). |
+| `POST /v1/workspaces/{id}/board` | `{kind, topic, text}` → `201` post. `kind` is `claim`, `done`, `release`, `finding` or `note`. A claim fails while another live cursor holds the topic or once it is done. |
 
 ### Input
 
@@ -132,7 +134,7 @@ These accept a viewer token, a cursor token of the same workspace (watch only) o
 | --- | --- |
 | `GET /v1/workspaces/{id}/stream/ws` | WebSocket. Binary messages are H.264 frames with a 13-byte header (key flag, 64-bit PTS, 16-bit width and height). Text messages from the client are input events when the token allows control. |
 | `POST /v1/workspaces/{id}/stream/webrtc` | `{sdp, mode}` with an SDP offer → `{sdp, viewer}` with the answer. |
-| `GET /v1/workspaces/{id}/stream/jpeg` | Damage-driven JPEG frames for light clients. |
+| `GET /v1/workspaces/{id}/stream/jpeg` | Damage-driven JPEG frames for light clients; unchanged frames are skipped. `?cursor=<id>` crops to that cursor's window, `?window=<id>` to one window. |
 
 ## Cursors
 
@@ -181,7 +183,7 @@ Operations (`POST /v1/cursors/{id}/{op}`, by the cursor itself, an ancestor or t
 
 Non-admin tokens only see events of their own workspace.
 
-Event types: `workspace.created`, `workspace.state`, `workspace.checkpoint`, `workspace.forked`, `workspace.resumed`, `workspace.recovered`, `workspace.expired`, `workspace.destroyed`, `workspace.budget_exceeded`, `desktop.started`, `desktop.resized`, `desktop.window`, `desktop.windows`, `desktop.screenshot`, `desktop.crashed`, `browser.started`, `browser.stopped`, `browser.crashed`, `browser.tab.created`, `browser.tab.opened`, `browser.tab.navigated`, `browser.tab.closed`, `browser.tab.restored`, `browser.page.loaded`, `browser.dialog.opened`, `browser.dialog.closed`, `browser.filechooser.opened`, `browser.download.*`, `browser.challenge.detected`, `cursor.created`, `cursor.status`, `cursor.progress`, `cursor.action`, `cursor.pointer`, `cursor.message`, `cursor.transferred`, `cursor.ended`, `cursor.deleted`, `agent.launched`, `agent.usage`, `agent.exited`, `control.acquired`, `control.released`, `control.lost`, `control.taken`, `control.returned`, `human.requested`, `process.started`, `process.exited`, `viewer.attached`, `viewer.detached`, `stream.state`, `scheduler.suspend`, `scheduler.tab_closed`, `worktree.created`, `worktree.removed`.
+Event types: `workspace.created`, `workspace.state`, `workspace.checkpoint`, `workspace.forked`, `workspace.resumed`, `workspace.recovered`, `workspace.expired`, `workspace.destroyed`, `workspace.budget_exceeded`, `desktop.started`, `desktop.resized`, `desktop.window`, `desktop.windows`, `desktop.screenshot`, `desktop.crashed`, `browser.started`, `browser.stopped`, `browser.crashed`, `browser.tab.created`, `browser.tab.opened`, `browser.tab.navigated`, `browser.tab.closed`, `browser.tab.restored`, `browser.page.loaded`, `browser.dialog.opened`, `browser.dialog.closed`, `browser.filechooser.opened`, `browser.download.*`, `browser.challenge.detected`, `cursor.created`, `cursor.status`, `cursor.progress`, `cursor.action`, `cursor.pointer`, `cursor.message`, `cursor.transferred`, `cursor.ended`, `cursor.deleted`, `board.post`, `agent.launched`, `agent.usage`, `agent.exited`, `control.acquired`, `control.released`, `control.lost`, `control.taken`, `control.returned`, `human.requested`, `process.started`, `process.exited`, `viewer.attached`, `viewer.detached`, `stream.state`, `scheduler.suspend`, `scheduler.tab_closed`, `worktree.created`, `worktree.removed`.
 
 ## Worktrees
 
