@@ -107,7 +107,7 @@ func TestVAAPIEncodeDecode(t *testing.T) {
 		last := y[(n-1)*w*h:]
 		for i := 0; i < w*h; i += 7 {
 			o := i * 4
-			want := (66*int(ref[o+2]) + 129*int(ref[o+1]) + 25*int(ref[o]) + 128) >> 8 + 16
+			want := (66*int(ref[o+2])+129*int(ref[o+1])+25*int(ref[o])+128)>>8 + 16
 			d := int(last[i]) - want
 			if d < 0 {
 				d = -d
