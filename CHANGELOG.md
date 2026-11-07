@@ -4,7 +4,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-11-06
 
 First public release.
 
