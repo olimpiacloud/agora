@@ -145,7 +145,11 @@ func browse(id int, agent *client.Client, local string, real bool, end time.Time
 			act("screenshot", map[string]any{"action": "screenshot"})
 		}
 		sleep(end, time.Duration(500+rand.IntN(1500))*time.Millisecond)
-		act("close", map[string]any{"action": "close"})
+		for t := time.Now(); time.Since(t) < time.Minute; time.Sleep(time.Second) {
+			if do(agent, "tab.close", "POST", "/v1/workspaces/"+ws+"/tabs/"+target, map[string]any{"action": "close"}) != nil {
+				break
+			}
+		}
 		sleep(end, time.Duration(300+rand.IntN(700))*time.Millisecond)
 	}
 }
@@ -222,7 +226,7 @@ func wsView(tok string, d time.Duration, interact bool) {
 	c.SetReadLimit(64 << 20)
 	if interact {
 		go func() {
-			for i := 0; ctx.Err() == nil; i++ {
+			for i := 0; ctx.Err() == nil && i < 20; i++ {
 				c.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"t":"move","x":%d,"y":%d}`, 200+i%600, 200+i%400)))
 				time.Sleep(150 * time.Millisecond)
 			}
