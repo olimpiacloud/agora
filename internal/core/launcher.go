@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -59,6 +60,8 @@ func (t *tailBuf) String() string {
 	return t.buf.String()
 }
 
+const DefaultLeanModel = "sonnet"
+
 func (m *Manager) agentCommand(c *Cursor, tok string) ([]string, []string, error) {
 	l := c.Launch
 	bin := m.cfg.AgoraBinary
@@ -90,8 +93,7 @@ func (m *Manager) agentCommand(c *Cursor, tok string) ([]string, []string, error
 		mcpEnv["AGORA_TOOLS"] = strings.Join(groups, ",")
 		mcpEnv["AGORA_LEAN"] = "1"
 	}
-	mcpCfg := map[string]any{"mcpServers": map[string]any{"agora": map[string]any{"command": bin, "args": []string{"mcp"}, "env": mcpEnv}}}
-	sys := fmt.Sprintf("You are Agora cursor %s (%q) working in Agora workspace %s. Use the agora MCP tools to see and control the desktop and browser. Coordinate with sibling agents through the shared board: board_read before starting a work item, board_post kind=claim to take it (skip it if the claim fails), kind=done when finished. Report progress with cursor_report and finish by calling cursor_complete with a concise structured result (or cursor_fail). If a CAPTCHA or login needs a human, call cursor_status with status needs_human and wait_events for control.returned.", c.ID, c.Name, c.Workspace)
+	sys := fmt.Sprintf("You are Agora cursor %s (%q) working in Agora workspace %s. Use the agora MCP tools to see and control the desktop and browser. Coordinate with sibling agents through the shared board: board_read before starting a work item, board_post kind=claim to take it (skip it if the claim fails), kind=done when finished. Report progress with cursor_report and finish by calling cursor_complete with a concise structured result (or cursor_fail). If a CAPTCHA or login needs a human, call human_request, then events_wait with types control.returned.", c.ID, c.Name, c.Workspace)
 	lean := fmt.Sprintf(`You are an autonomous agent (Agora cursor %s, %q) working on a shared Linux desktop with Chromium. You act only through the agora tools. Be fast and economical:
 - Open your own tab with browser_open and keep using its target.
 - Action tools (navigate, click, fill, type, press, select) already return what is visible afterwards. Do not call browser_snapshot after them unless you need offscreen content.
@@ -103,30 +105,57 @@ func (m *Manager) agentCommand(c *Cursor, tok string) ([]string, []string, error
 - Finish with cursor_complete (structured result) or cursor_fail. Keep your final text to one line.`, c.ID, c.Name)
 	switch l.Adapter {
 	case "claude", "claude-code":
-		mb, _ := json.Marshal(mcpCfg)
+		dir := filepath.Join(m.cfg.Home, "agents", c.ID)
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return nil, nil, err
+		}
+		cfgPath := filepath.Join(dir, "mcp.json")
+		mb, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"agora": map[string]any{"command": bin, "args": []string{"mcp"}, "env": mcpEnv}}})
+		if err := os.WriteFile(cfgPath, mb, 0600); err != nil {
+			return nil, nil, err
+		}
 		var args []string
 		if full {
-			args = []string{"claude", "-p", prompt, "--mcp-config", string(mb), "--append-system-prompt", sys, "--allowedTools", "mcp__agora__*", "--output-format", "json"}
+			args = []string{"claude", "-p", prompt, "--mcp-config", cfgPath, "--append-system-prompt", sys, "--allowedTools", "mcp__agora__*", "--output-format", "json"}
 		} else {
-			args = []string{"claude", "-p", prompt, "--mcp-config", string(mb), "--strict-mcp-config", "--disable-slash-commands", "--tools", "", "--setting-sources", "", "--system-prompt", lean, "--allowedTools", "mcp__agora__*", "--output-format", "json"}
+			args = []string{"claude", "-p", prompt, "--mcp-config", cfgPath, "--strict-mcp-config", "--disable-slash-commands", "--tools", "", "--setting-sources", "", "--system-prompt", lean, "--allowedTools", "mcp__agora__*", "--output-format", "json"}
 		}
-		if l.Model != "" {
-			args = append(args, "--model", l.Model)
+		model := l.Model
+		if model == "" && !full {
+			model = DefaultLeanModel
+		}
+		if model != "" {
+			args = append(args, "--model", model)
 		}
 		if l.Effort != "" {
 			args = append(args, "--effort", l.Effort)
 		}
 		return args, env, nil
 	case "codex":
-		args := []string{"codex", "exec", "--skip-git-repo-check",
+		names := []string{}
+		for k, v := range mcpEnv {
+			names = append(names, fmt.Sprintf("%q", k))
+			if k != "AGORA_URL" && k != "AGORA_TOKEN" {
+				env = append(env, k+"="+v)
+			}
+		}
+		sort.Strings(names)
+		args := []string{"codex", "exec", "--skip-git-repo-check", "--json",
 			"-c", fmt.Sprintf("mcp_servers.agora.command=%q", bin),
 			"-c", `mcp_servers.agora.args=["mcp"]`,
-			"-c", fmt.Sprintf("mcp_servers.agora.env={AGORA_URL=%q,AGORA_TOKEN=%q}", m.cfg.ListenURL, tok),
+			"-c", "mcp_servers.agora.env_vars=[" + strings.Join(names, ",") + "]",
 		}
 		if l.Model != "" {
 			args = append(args, "-m", l.Model)
 		}
-		args = append(args, sys+"\n\nTask: "+prompt)
+		if l.Effort != "" {
+			args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", l.Effort))
+		}
+		instr := sys
+		if !full {
+			instr = lean
+		}
+		args = append(args, instr+"\n\nTask: "+prompt)
 		return args, env, nil
 	case "command", "":
 		if len(l.Command) == 0 {
@@ -174,6 +203,7 @@ func (m *Manager) launchAgent(id, tok string) error {
 		if logf != nil {
 			logf.Close()
 		}
+		os.Remove(filepath.Join(dir, "mcp.json"))
 		return err
 	}
 	lp := &launchProc{cmd: cmd}
@@ -191,6 +221,7 @@ func (m *Manager) launchAgent(id, tok string) error {
 		if logf != nil {
 			logf.Close()
 		}
+		os.Remove(filepath.Join(dir, "mcp.json"))
 		m.mu.Lock()
 		delete(m.launches, id)
 		m.mu.Unlock()
@@ -203,7 +234,11 @@ func (m *Manager) launchAgent(id, tok string) error {
 			}
 		}
 		out := strings.TrimSpace(stdout.String())
-		if u, text := parseClaudeResult(out); u != nil {
+		u, text := parseClaudeResult(out)
+		if u == nil {
+			u, text = parseCodexResult(out)
+		}
+		if u != nil {
 			out = text
 			m.mu.Lock()
 			if cc := m.cursors[id]; cc != nil {
@@ -277,6 +312,51 @@ func parseClaudeResult(out string) (*Usage, string) {
 		}
 	}
 	return nil, ""
+}
+
+func parseCodexResult(out string) (*Usage, string) {
+	var u Usage
+	text := ""
+	found := false
+	for _, l := range strings.Split(out, "\n") {
+		l = strings.TrimSpace(l)
+		if !strings.HasPrefix(l, "{") {
+			continue
+		}
+		var ev struct {
+			Type  string `json:"type"`
+			Usage *struct {
+				In     int64 `json:"input_tokens"`
+				Cached int64 `json:"cached_input_tokens"`
+				Out    int64 `json:"output_tokens"`
+			} `json:"usage"`
+			Item *struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"item"`
+		}
+		if json.Unmarshal([]byte(l), &ev) != nil {
+			continue
+		}
+		switch ev.Type {
+		case "turn.completed":
+			if ev.Usage != nil {
+				found = true
+				u.Turns++
+				u.InputTokens += ev.Usage.In - ev.Usage.Cached
+				u.CacheReadTokens += ev.Usage.Cached
+				u.OutputTokens += ev.Usage.Out
+			}
+		case "item.completed":
+			if ev.Item != nil && (ev.Item.Type == "agent_message" || ev.Item.Type == "assistant_message") && ev.Item.Text != "" {
+				text = ev.Item.Text
+			}
+		}
+	}
+	if !found {
+		return nil, ""
+	}
+	return &u, text
 }
 
 func decodeClaudeResult(l string) (*Usage, string, bool) {
