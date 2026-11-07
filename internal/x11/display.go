@@ -226,6 +226,8 @@ func (d *Display) Env() []string {
 	return []string{"DISPLAY=" + d.Name(), "XAUTHORITY=" + d.AuthFile}
 }
 
+func (d *Display) Socket() string { return socketPath(d.Num) }
+
 func (d *Display) Root() xproto.Window { return d.root }
 
 func (d *Display) Conn() *xgb.Conn { return d.conn }

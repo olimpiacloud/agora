@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/olimpiacloud/agora/internal/sandbox"
 )
 
 type LaunchOptions struct {
@@ -28,6 +30,7 @@ type LaunchOptions struct {
 	LogPath     string
 	StartURLs   []string
 	CgroupFD    int
+	Wrap        []string
 }
 
 type TargetInfo struct {
@@ -84,7 +87,7 @@ func Launch(ctx context.Context, o LaunchOptions) (*Browser, error) {
 		if len(parts) > 1 {
 			var pid int
 			fmt.Sscanf(parts[len(parts)-1], "%d", &pid)
-			if pid > 0 && syscall.Kill(pid, 0) == nil {
+			if pid > 0 && len(o.Wrap) == 0 && syscall.Kill(pid, 0) == nil {
 				return nil, fmt.Errorf("profile %s is in use by pid %d", o.UserDataDir, pid)
 			}
 		}
@@ -132,13 +135,16 @@ func Launch(ctx context.Context, o LaunchOptions) (*Browser, error) {
 		return nil, err
 	}
 	cmd := exec.Command(o.Binary, args...)
+	attr := &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
+	if len(o.Wrap) > 0 {
+		cmd = exec.Command(o.Wrap[0], append(append(o.Wrap[1:len(o.Wrap):len(o.Wrap)], o.Binary), args...)...)
+		attr = sandbox.Attr()
+	} else if o.Uid != 0 && uint32(os.Getuid()) != o.Uid {
+		attr.Credential = &syscall.Credential{Uid: o.Uid, Gid: o.Gid}
+	}
 	cmd.ExtraFiles = []*os.File{toChrome, fromChrome}
 	cmd.Env = o.Env
 	cmd.Dir = o.UserDataDir
-	attr := &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
-	if o.Uid != 0 && uint32(os.Getuid()) != o.Uid {
-		attr.Credential = &syscall.Credential{Uid: o.Uid, Gid: o.Gid}
-	}
 	if o.CgroupFD > 0 {
 		attr.UseCgroupFD = true
 		attr.CgroupFD = o.CgroupFD

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/olimpiacloud/agora/internal/browser"
+	"github.com/olimpiacloud/agora/internal/sandbox"
 	"github.com/olimpiacloud/agora/internal/stream"
 	"github.com/olimpiacloud/agora/internal/x11"
 )
@@ -291,7 +292,14 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 	}
 	cgfd, release := r.cgroupFD()
 	defer release()
-	b, err := browser.Launch(ctx, browser.LaunchOptions{CgroupFD: cgfd, Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: cfg.BrowserArgs, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log")})
+	var err error
+	var wrap []string
+	if cfg.Sandbox {
+		if wrap, err = r.sandboxWrap(pdir); err != nil {
+			return nil, err
+		}
+	}
+	b, err := browser.Launch(ctx, browser.LaunchOptions{Wrap: wrap, CgroupFD: cgfd, Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: cfg.BrowserArgs, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log")})
 	if err != nil {
 		return nil, err
 	}
@@ -324,6 +332,24 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 		go r.restoreTabs(b, restore)
 	}
 	return b, nil
+}
+
+func (r *Runtime) sandboxWrap(extra ...string) ([]string, error) {
+	m := r.m
+	if m.uid == 0 {
+		return nil, errors.New("sandbox needs the daemon to run as root with an apps user")
+	}
+	self := m.cfg.AgoraBinary
+	if self == "" {
+		self, _ = os.Executable()
+	}
+	binds := append([]string{m.wsDir(r.id)}, extra...)
+	r.mu.Lock()
+	if r.display != nil {
+		binds = append(binds, r.display.Socket())
+	}
+	r.mu.Unlock()
+	return sandbox.Wrap(self, sandbox.Spec{Uid: m.uid, Gid: m.gid, Binds: binds, Hide: []string{m.cfg.Home}}), nil
 }
 
 func (r *Runtime) restoreTabs(b *browser.Browser, tabs []TabRecord) {

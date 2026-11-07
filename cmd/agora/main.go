@@ -19,6 +19,7 @@ import (
 	"github.com/olimpiacloud/agora/internal/client"
 	"github.com/olimpiacloud/agora/internal/core"
 	"github.com/olimpiacloud/agora/internal/mcp"
+	"github.com/olimpiacloud/agora/internal/sandbox"
 	"github.com/olimpiacloud/agora/internal/stream"
 	"github.com/olimpiacloud/agora/web"
 )
@@ -41,6 +42,8 @@ func main() {
 	switch os.Args[1] {
 	case "serve":
 		serve(os.Args[2:])
+	case sandbox.Cmd:
+		sandbox.Main(os.Args[2:])
 	case "mcp":
 		c := client.FromEnv()
 		if err := mcp.New(c).Serve(context.Background(), os.Stdin); err != nil {

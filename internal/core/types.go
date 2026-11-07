@@ -48,6 +48,7 @@ type WorkspaceConfig struct {
 	BrowserArgs   []string `json:"browser_args,omitempty"`
 	Retention     string   `json:"retention,omitempty"`
 	AutostartURLs []string `json:"autostart_urls,omitempty"`
+	Sandbox       bool     `json:"sandbox,omitempty"`
 }
 
 type TabRecord struct {

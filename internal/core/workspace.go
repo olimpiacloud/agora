@@ -11,6 +11,8 @@ import (
 	"sort"
 	"syscall"
 	"time"
+
+	"github.com/olimpiacloud/agora/internal/sandbox"
 )
 
 var nameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
@@ -485,12 +487,22 @@ func (r *Runtime) launch(spec AppSpec) (*Proc, error) {
 		spec.ID = NewID("app")
 	}
 	cmd := exec.Command(spec.Command, spec.Args...)
-	cmd.Env = r.appEnv()
-	cmd.Dir = filepath.Join(r.m.wsDir(r.id), "home")
 	attr := &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
-	if r.m.uid != 0 {
+	r.m.mu.Lock()
+	sandboxed := r.m.ws[r.id] != nil && r.m.ws[r.id].Config.Sandbox
+	r.m.mu.Unlock()
+	if sandboxed {
+		wrap, err := r.sandboxWrap()
+		if err != nil {
+			return nil, err
+		}
+		cmd = exec.Command(wrap[0], append(append(wrap[1:], spec.Command), spec.Args...)...)
+		attr = sandbox.Attr()
+	} else if r.m.uid != 0 {
 		attr.Credential = &syscall.Credential{Uid: uint32(r.m.uid), Gid: uint32(r.m.gid)}
 	}
+	cmd.Env = r.appEnv()
+	cmd.Dir = filepath.Join(r.m.wsDir(r.id), "home")
 	cgfd, release := r.cgroupFD()
 	defer release()
 	if cgfd > 0 {
