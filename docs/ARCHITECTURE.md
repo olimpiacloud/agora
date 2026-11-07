@@ -18,7 +18,7 @@ A Go daemon (a modular monolith) that runs **one virtual X server (Xvfb) per act
 | Headless Wayland (wlroots/sway, Weston) | Native multi-seat and per-toplevel capture are attractive, but there is no mature Go client for per-seat virtual pointer/keyboard or screencopy, and Chromium and X11 apps end up on Xwayland anyway. MPX on Xvfb gave truly concurrent input with much less risk. The graphics backend is isolated in `internal/x11` so a Wayland one can be added. |
 | Xpra | Very complete per-window remoting, but it is a whole Python stack with its own protocol and client; it duplicates what Agora needs to control (damage, encoding, per-agent input). |
 | VNC/noVNC | The baseline: one server per desktop, framebuffer polling, no notion of agents or multiple pointers. |
-| One Chromium per agent / one container per cursor | What the design rules out; the benchmark shows the cost (about 4.6x the memory with 5 agents). |
+| One Chromium per agent / one container per cursor | What the design rules out; the benchmark shows the cost (about 4.5x the memory with 5 agents). |
 | Playwright | Not needed: CDP over a pipe covers what is used, and Agora's own semantic layer is more compact for LLMs. |
 
 ## Known limits
