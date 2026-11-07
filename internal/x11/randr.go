@@ -14,7 +14,7 @@ func (d *Display) SetSize(w, h int) error {
 
 func (d *Display) setSize(w, h int) error {
 	c := d.conn
-	if err := randr.Init(c); err != nil {
+	if err := extInit(randr.Init, c); err != nil {
 		return err
 	}
 	if _, err := randr.QueryVersion(c, 1, 5).Reply(); err != nil {

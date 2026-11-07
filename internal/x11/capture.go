@@ -53,7 +53,7 @@ func (d *Display) NewCapturer() (*Capturer, error) {
 		return nil, err
 	}
 	cp := &Capturer{d: d, c: c}
-	if err := shm.Init(c); err == nil {
+	if err := extInit(shm.Init, c); err == nil {
 		size := 3840 * 2160 * 4
 		id, err := unix.SysvShmGet(unix.IPC_PRIVATE, size, unix.IPC_CREAT|0600)
 		if err == nil {
@@ -152,7 +152,7 @@ func (cp *Capturer) GrabWindow(id uint32, dst *Frame) (*Frame, error) {
 	defer cp.mu.Unlock()
 	w := xproto.Window(id)
 	if !cp.redirect {
-		if err := composite.Init(cp.c); err != nil {
+		if err := extInit(composite.Init, cp.c); err != nil {
 			return nil, err
 		}
 		composite.QueryVersion(cp.c, 0, 4).Reply()
@@ -191,7 +191,7 @@ func (d *Display) WatchDamage() (*DamageWatcher, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := damage.Init(c); err != nil {
+	if err := extInit(damage.Init, c); err != nil {
 		c.Close()
 		return nil, err
 	}
@@ -199,7 +199,7 @@ func (d *Display) WatchDamage() (*DamageWatcher, error) {
 		c.Close()
 		return nil, err
 	}
-	if err := xfixes.Init(c); err != nil {
+	if err := extInit(xfixes.Init, c); err != nil {
 		c.Close()
 		return nil, err
 	}

@@ -254,3 +254,11 @@ func (d *Display) Close() {
 	}
 	os.Remove(d.AuthFile)
 }
+
+var extMu sync.Mutex
+
+func extInit(f func(*xgb.Conn) error, c *xgb.Conn) error {
+	extMu.Lock()
+	defer extMu.Unlock()
+	return f(c)
+}
