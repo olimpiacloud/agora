@@ -53,7 +53,13 @@ func (d *Display) NewSeat(name string) (*Seat, error) {
 	if ptr == 0 {
 		return nil, fmt.Errorf("master %q not found", name)
 	}
-	return d.openSeat(name, ptr, kbd, true)
+	st, err := d.openSeat(name, ptr, kbd, true)
+	if err != nil {
+		d.mu.Lock()
+		xiRemoveMaster(d.conn, ptr, 2, 3)
+		d.mu.Unlock()
+	}
+	return st, err
 }
 
 func (d *Display) openSeat(name string, ptr, kbd uint16, owned bool) (*Seat, error) {

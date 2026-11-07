@@ -2,6 +2,7 @@ package x11
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -15,13 +16,13 @@ type Clipboard struct {
 	win     xproto.Window
 	mu      sync.Mutex
 	content string
-	owned   bool
 	clip    xproto.Atom
 	primary xproto.Atom
 	utf8    xproto.Atom
 	targets xproto.Atom
 	prop    xproto.Atom
 	text    xproto.Atom
+	incr    xproto.Atom
 	reply   chan string
 }
 
@@ -36,17 +37,21 @@ func (d *Display) NewClipboard() (*Clipboard, error) {
 		c.Close()
 		return nil, err
 	}
-	cb := &Clipboard{d: d, c: c, win: w, clip: atom(c, "CLIPBOARD"), primary: xproto.AtomPrimary, utf8: atom(c, "UTF8_STRING"), targets: atom(c, "TARGETS"), prop: atom(c, "AGORA_SEL"), text: atom(c, "TEXT"), reply: make(chan string, 1)}
+	cb := &Clipboard{d: d, c: c, win: w, clip: atom(c, "CLIPBOARD"), primary: xproto.AtomPrimary, utf8: atom(c, "UTF8_STRING"), targets: atom(c, "TARGETS"), prop: atom(c, "AGORA_SEL"), text: atom(c, "TEXT"), incr: atom(c, "INCR"), reply: make(chan string, 1)}
 	go cb.loop()
 	return cb, nil
 }
 
 func (cb *Clipboard) Close() { cb.c.Close() }
 
+const MaxClipboard = 256<<10 - 64
+
 func (cb *Clipboard) Set(s string) error {
+	if len(s) > MaxClipboard {
+		return fmt.Errorf("clipboard text is %d bytes; the limit is %d", len(s), MaxClipboard)
+	}
 	cb.mu.Lock()
 	cb.content = s
-	cb.owned = true
 	cb.mu.Unlock()
 	for _, sel := range []xproto.Atom{cb.clip, cb.primary} {
 		if err := xproto.SetSelectionOwnerChecked(cb.c, cb.win, sel, xproto.TimeCurrentTime).Check(); err != nil {
@@ -92,7 +97,7 @@ func (cb *Clipboard) loop() {
 			s := ""
 			if e.Property != 0 {
 				r, err := xproto.GetProperty(cb.c, true, cb.win, cb.prop, xproto.GetPropertyTypeAny, 0, 1<<20).Reply()
-				if err == nil {
+				if err == nil && r.Type != cb.incr {
 					s = string(r.Value)
 				}
 			}
@@ -122,10 +127,6 @@ func (cb *Clipboard) loop() {
 			}
 			n := xproto.SelectionNotifyEvent{Time: e.Time, Requestor: e.Requestor, Selection: e.Selection, Target: e.Target, Property: prop}
 			xproto.SendEvent(cb.c, false, e.Requestor, 0, string(n.Bytes()))
-		case xproto.SelectionClearEvent:
-			cb.mu.Lock()
-			cb.owned = false
-			cb.mu.Unlock()
 		}
 	}
 }
