@@ -90,7 +90,7 @@ func TestB_FiveSubagents(t *testing.T) {
 	ws := h.workspace("swarm")
 	mainID, mainC := h.cursor(h.admin, map[string]any{"name": "main", "workspace": ws, "goal": "coordinate"})
 	h.tab(mainC, ws, "about:blank")
-	before := countProcs(t, "Xvfb :")
+	before := countProcs(t, "Xvfb .*"+h.home)
 	type res struct {
 		id  string
 		err error
@@ -155,7 +155,7 @@ func TestB_FiveSubagents(t *testing.T) {
 			t.Fatalf("sub-%d bad result: %v", i, c)
 		}
 	}
-	after := countProcs(t, "Xvfb :")
+	after := countProcs(t, "Xvfb .*"+h.home)
 	browsers := countProcs(t, "remote-debugging-pipe --user-data-dir="+h.home)
 	t.Logf("5 subagents done in %v; Xvfb processes before=%d after=%d; browser instances for this home=%d", el, before, after, browsers)
 	if after != before || browsers != 1 {
