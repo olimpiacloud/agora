@@ -7,7 +7,7 @@ const HOME = process.env.AGORA_HOME || "/var/lib/agora";
 const STATE_DIR = join(homedir(), ".agora-paseo");
 const STATE_FILE = join(STATE_DIR, "state.json");
 
-export const AGORA_BIN = ["/usr/local/bin/agora", "/projects/agora/bin/agora"].find((p) => existsSync(p)) || "agora";
+export const AGORA_BIN = process.env.AGORA_BIN || (existsSync("/usr/local/bin/agora") ? "/usr/local/bin/agora" : "agora");
 
 interface State {
   workspaces: Record<string, string>;
