@@ -122,8 +122,11 @@ function open(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidth: number
 
 async function openNow(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidth: number) {
   const t = TIERS[tier];
+  const alive = () => hubs.get(h.key) === h && !h.sock;
+  if (!alive()) return;
   h.openedAt = Date.now();
   const { token } = await call("POST", "/v1/viewer-tokens", { workspace: h.workspace, control: t.control, ttl_seconds: 86400 });
+  if (!alive()) return;
   const q = new URLSearchParams({ fps: String(t.fps), max_width: String(maxWidth), quality: tier === "full" ? "62" : "55", token });
   if (cursor) q.set("cursor", cursor);
   const sock = new WebSocket(wsURL(`/v1/workspaces/${h.workspace}/stream/jpeg?${q}`));
