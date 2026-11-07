@@ -5,3 +5,10 @@ dist
 public/install.sh
 public/uninstall.sh
 .astro
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example

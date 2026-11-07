@@ -1,1 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 54h48"/><path d="M14 54V30"/><path d="M26 54V30"/><path d="M38 54V30"/><path d="M50 54V30"/><path d="M8 26 32 10l24 16z"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="currentColor" aria-label="Agora">
+  <path d="M6 12h52v7H6zM10 20h9v29h-9zM27 20h9v29h-9zM6 50h32v6H6z"/>
+  <path d="M41 23v29l6-7 5 10 6-3-5-10 9-1z"/>
+</svg>

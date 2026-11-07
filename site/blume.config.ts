@@ -6,7 +6,7 @@ export default defineConfig({
     "Agora is an agent-native desktop runtime: one Linux desktop and one Chromium per workspace, shared by many AI agents with their own cursors, input seats and tabs. Open source, by Olimpia.",
   logo: {
     image: "/logo.svg",
-    text: "Agora",
+    text: "Agora by Olimpia",
     href: "/",
   },
   github: {
@@ -52,7 +52,7 @@ export default defineConfig({
     },
   },
   seo: {
-    og: { palette: { background: "#efe9dd", foreground: "#2b2420", accent: "#9c4a2b" } },
+    og: { logo: "/logo.svg", palette: { background: "#efe9dd", foreground: "#2b2420", accent: "#9c4a2b" } },
   },
   lastModified: "git",
   deployment: {
