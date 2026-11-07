@@ -60,6 +60,9 @@ agora api POST /v1/workspaces '{"name":"demo"}'
 | `AGORA_HOME` | all | State directory. |
 | `AGORA_ALLOW_PUBLIC` | `serve` | `1` allows binding to non-loopback addresses. |
 | `AGORA_CGROUPS` | `serve` | `off` disables per-workspace cgroups. |
+| `AGORA_ENCODER` | `serve` | H.264 encoder: `auto` (default: VAAPI hardware encoding when a GPU supports it, otherwise or on any failure x264), `vaapi` (hardware only, no fallback) or `x264`. |
+| `AGORA_VAAPI_DEVICE` | `serve` | DRM render node for VAAPI. Default `/dev/dri/renderD128`. |
+| `AGORA_VAAPI_VPP` | `serve` | `0` converts colours on the CPU instead of the GPU. |
 | `AGORA_TOOLS` | `mcp` | Comma-separated tool groups to expose: `browser`, `browserx`, `desktop`, `spawn`, `workspace`, `process`. Default: all. |
 | `AGORA_LEAN` | `mcp` | `1` shortens tool descriptions to one sentence. |
 

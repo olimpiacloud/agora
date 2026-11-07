@@ -46,10 +46,10 @@ For permanent remote access, put Agora behind an authenticated tunnel such as Cl
 
 ## Build from source
 
-You need Go, a C toolchain and the x264 headers (Agora encodes H.264 through cgo).
+You need Go, a C toolchain and the x264 and libva headers (Agora encodes H.264 through cgo; libva is loaded at runtime only if present, for GPU encoding).
 
 ```bash
-sudo apt install xvfb libx264-dev pkg-config build-essential
+sudo apt install xvfb libx264-dev libva-dev pkg-config build-essential
 git clone https://github.com/olimpiacloud/agora && cd agora
 go build -o agora ./cmd/agora
 sudo install -m 0755 agora /usr/local/bin/agora
