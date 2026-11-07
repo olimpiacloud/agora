@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/jezek/xgb/randr"
-	"github.com/jezek/xgb/xproto"
 )
 
 func (d *Display) SetSize(w, h int) error {
@@ -72,12 +71,4 @@ func (d *Display) setSize(w, h int) error {
 	}
 	d.Width, d.Height = w, h
 	return nil
-}
-
-func (d *Display) Size() (int, int) {
-	g, err := xproto.GetGeometry(d.conn, xproto.Drawable(d.root)).Reply()
-	if err != nil {
-		return d.Width, d.Height
-	}
-	return int(g.Width), int(g.Height)
 }

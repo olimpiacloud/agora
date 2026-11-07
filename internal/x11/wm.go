@@ -116,12 +116,6 @@ func (w *WM) SetLayout(l Layout) {
 	w.relayout()
 }
 
-func (w *WM) Layout() Layout {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.layout
-}
-
 func (w *WM) Close() {
 	xproto.DestroyWindow(w.c, w.check)
 	w.c.Close()
@@ -191,16 +185,6 @@ func (w *WM) updateClientList() {
 	if w.OnChange != nil {
 		go w.OnChange()
 	}
-}
-
-func (w *WM) Clients() []uint32 {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	out := make([]uint32, 0, len(w.clients))
-	for _, c := range w.clients {
-		out = append(out, uint32(c))
-	}
-	return out
 }
 
 func (w *WM) relayout() {

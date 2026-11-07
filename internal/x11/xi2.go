@@ -134,17 +134,6 @@ func xiGetFocus(c *xgb.Conn, dev uint16) (xproto.Window, error) {
 	return xproto.Window(xgb.Get32(r[8:])), nil
 }
 
-func xiWarpPointer(c *xgb.Conn, dst xproto.Window, x, y int, dev uint16) error {
-	buf := xiHeader(c, 41, 36)
-	xgb.Put32(buf[8:], uint32(dst))
-	xgb.Put32(buf[24:], uint32(int32(x)<<16))
-	xgb.Put32(buf[28:], uint32(int32(y)<<16))
-	xgb.Put16(buf[32:], dev)
-	ck := c.NewCookie(true, false)
-	c.NewRequest(buf, ck)
-	return ck.Check()
-}
-
 func xiQueryPointer(c *xgb.Conn, win xproto.Window, dev uint16) (x, y int, child xproto.Window, err error) {
 	buf := xiHeader(c, 40, 12)
 	xgb.Put32(buf[4:], uint32(win))
