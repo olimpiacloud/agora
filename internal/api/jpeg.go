@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"hash/maphash"
 	"image"
 	"image/jpeg"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -50,6 +52,15 @@ func (s *Server) streamJPEG(w http.ResponseWriter, r *http.Request, p *Principal
 			return
 		}
 	}
+	key := jpegKey{d: d, cursor: cursorID, win: winID, fps: fps, maxW: maxW, quality: quality}
+	sub, err := jpegSubscribe(ws, key, func(ctx context.Context, pub func(bool, []byte)) {
+		s.produceJPEG(ctx, ws, d, cursorID, winID, fps, maxW, quality, pub)
+	})
+	if err != nil {
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": err.Error()})
+		return
+	}
+	defer sub.close()
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
 		return
@@ -81,6 +92,152 @@ func (s *Server) streamJPEG(w http.ResponseWriter, r *http.Request, p *Principal
 			}
 		}
 	}()
+	var regionSeq, frameSeq int64
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-sub.notify:
+		}
+		region, rs, frame, fs, dead := sub.p.snapshot()
+		if dead {
+			return
+		}
+		if rs != regionSeq && region != nil {
+			if send(region) != nil {
+				return
+			}
+			regionSeq = rs
+		}
+		if fs != frameSeq && frame != nil {
+			wctx, wc := context.WithTimeout(ctx, 10*time.Second)
+			err := c.Write(wctx, websocket.MessageBinary, frame)
+			wc()
+			if err != nil {
+				return
+			}
+			frameSeq = fs
+		}
+	}
+}
+
+const maxJPEGViewers = 32
+
+type jpegKey struct {
+	d                  *x11.Display
+	cursor             string
+	win                uint64
+	fps, maxW, quality int
+}
+
+type jpegProducer struct {
+	mu        sync.Mutex
+	subs      map[*jpegSub]struct{}
+	region    []byte
+	frame     []byte
+	regionSeq int64
+	frameSeq  int64
+	dead      bool
+	cancel    context.CancelFunc
+}
+
+type jpegSub struct {
+	ws     string
+	key    jpegKey
+	p      *jpegProducer
+	notify chan struct{}
+	once   sync.Once
+}
+
+var jpegHub = struct {
+	sync.Mutex
+	prods map[jpegKey]*jpegProducer
+	views map[string]int
+}{prods: map[jpegKey]*jpegProducer{}, views: map[string]int{}}
+
+func (p *jpegProducer) snapshot() ([]byte, int64, []byte, int64, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.region, p.regionSeq, p.frame, p.frameSeq, p.dead
+}
+
+func (p *jpegProducer) wake() {
+	for s := range p.subs {
+		select {
+		case s.notify <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (p *jpegProducer) publish(text bool, b []byte) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if text {
+		p.region = b
+		p.regionSeq++
+	} else {
+		p.frame = b
+		p.frameSeq++
+	}
+	p.wake()
+}
+
+func jpegSubscribe(ws string, key jpegKey, run func(context.Context, func(bool, []byte))) (*jpegSub, error) {
+	jpegHub.Lock()
+	defer jpegHub.Unlock()
+	if jpegHub.views[ws] >= maxJPEGViewers {
+		return nil, fmt.Errorf("too many JPEG viewers on this workspace (max %d)", maxJPEGViewers)
+	}
+	jpegHub.views[ws]++
+	p := jpegHub.prods[key]
+	if p == nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		p = &jpegProducer{subs: map[*jpegSub]struct{}{}, cancel: cancel}
+		jpegHub.prods[key] = p
+		go func() {
+			run(ctx, p.publish)
+			jpegHub.Lock()
+			if jpegHub.prods[key] == p {
+				delete(jpegHub.prods, key)
+			}
+			jpegHub.Unlock()
+			p.mu.Lock()
+			p.dead = true
+			p.wake()
+			p.mu.Unlock()
+			cancel()
+		}()
+	}
+	sub := &jpegSub{ws: ws, key: key, p: p, notify: make(chan struct{}, 1)}
+	p.mu.Lock()
+	p.subs[sub] = struct{}{}
+	sub.notify <- struct{}{}
+	p.mu.Unlock()
+	return sub, nil
+}
+
+func (s *jpegSub) close() {
+	s.once.Do(func() {
+		jpegHub.Lock()
+		defer jpegHub.Unlock()
+		if jpegHub.views[s.ws]--; jpegHub.views[s.ws] <= 0 {
+			delete(jpegHub.views, s.ws)
+		}
+		s.p.mu.Lock()
+		delete(s.p.subs, s)
+		empty := len(s.p.subs) == 0
+		s.p.mu.Unlock()
+		if empty {
+			if jpegHub.prods[s.key] == s.p {
+				delete(jpegHub.prods, s.key)
+			}
+			s.p.cancel()
+		}
+	})
+}
+
+func (s *Server) produceJPEG(ctx context.Context, ws string, d *x11.Display, cursorID string, winID uint64, fps, maxW, quality int, pub func(bool, []byte)) {
 	cp, err := d.NewCapturer()
 	if err != nil {
 		return
@@ -135,9 +292,7 @@ func (s *Server) streamJPEG(w http.ResponseWriter, r *http.Request, p *Principal
 		}
 		if region != sent {
 			msg, _ := json.Marshal(map[string]any{"type": "region", "x": region.Min.X, "y": region.Min.Y, "w": frame.Width, "h": frame.Height, "screen_w": d.Width, "screen_h": d.Height})
-			if send(msg) != nil {
-				return
-			}
+			pub(true, msg)
 			sent = region
 			lastSum = 0
 		}
@@ -153,17 +308,12 @@ func (s *Server) streamJPEG(w http.ResponseWriter, r *http.Request, p *Principal
 		if err := jpeg.Encode(&buf, out, &jpeg.Options{Quality: quality}); err != nil {
 			continue
 		}
-		b := buf.Bytes()
+		b := bytes.Clone(buf.Bytes())
 		binary.BigEndian.PutUint16(b[0:], uint16(out.Bounds().Dx()))
 		binary.BigEndian.PutUint16(b[2:], uint16(out.Bounds().Dy()))
 		binary.BigEndian.PutUint16(b[4:], uint16(frame.Width))
 		binary.BigEndian.PutUint16(b[6:], uint16(frame.Height))
-		wctx, wc := context.WithTimeout(ctx, 10*time.Second)
-		err = c.Write(wctx, websocket.MessageBinary, b)
-		wc()
-		if err != nil {
-			return
-		}
+		pub(false, b)
 		last = time.Now()
 	}
 }
