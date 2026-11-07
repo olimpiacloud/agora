@@ -13,15 +13,27 @@ sidebar:
 - **Xvfb.**
 - Acceso root (`sudo`) para instalar el binario, el usuario de sistema `agora` y el servicio.
 
-El instalador se encarga de Xvfb y del usuario de sistema. Si te falta Chrome o Chromium, te dice cómo instalarlo.
+El instalador se encarga de todo: Xvfb, VA-API, Google Chrome (Chromium en arm64) y el usuario de sistema.
 
 ## Instalación en una línea [#one-line-install]
 
 ```bash
-curl -fsSL https://agora.olimpia.dev/install.sh | sh
+curl -fsSL https://agora.olimpia.dev/install.sh | sudo sh
 ```
 
-Descarga la última versión para tu arquitectura, instala `/usr/local/bin/agora`, crea el usuario sin privilegios `agora` que corre las apps y los navegadores, y habilita el servicio de systemd `agora`. Si preferís, leé el script antes: [agora.olimpia.dev/install.sh](https://agora.olimpia.dev/install.sh).
+Descarga la última versión para tu arquitectura y verifica su SHA-256 (o compila desde el código fuente si todavía no hay ninguna versión publicada), instala `/usr/local/bin/agora`, crea el usuario sin privilegios `agora` que corre las apps y los navegadores, y habilita el servicio de systemd `agora`. Si lo volvés a correr, actualiza en el lugar y reinicia el servicio solo si algo cambió. Si preferís, leé el script antes: [agora.olimpia.dev/install.sh](https://agora.olimpia.dev/install.sh).
+
+Si Claude Code, Codex o Paseo están instalados para el usuario que corrió `sudo`, también registra el servidor MCP de Agora (`agora mcp`), instala el skill de Agora e instala el plugin de Paseo.
+
+Pasá las opciones después de `sh -s --`, por ejemplo `curl -fsSL https://agora.olimpia.dev/install.sh | sudo sh -s -- --no-agents`:
+
+| Opción | Qué hace |
+| --- | --- |
+| `--version vX.Y.Z` | Instala esta versión en lugar de la última. |
+| `--prefix DIR` | Instala en `DIR` en lugar de `/usr/local`. |
+| `--source DIR` | Compila desde un checkout local en lugar de descargar. |
+| `--no-agents` | No configura Claude Code, Codex, el skill ni Paseo. |
+| `--no-paseo` | No instala el plugin de Paseo. |
 
 Comprobá que el daemon esté levantado y mostrá tu token de administrador:
 
@@ -47,13 +59,13 @@ Para tener acceso remoto permanente, poné Agora detrás de un túnel autenticad
 
 ## Compilar desde el código fuente [#build-from-source]
 
-Necesitás Go, un toolchain de C y los headers de x264 (Agora codifica H.264 a través de cgo).
+Necesitás Go, un toolchain de C y los headers de x264 y libva (Agora codifica H.264 a través de cgo, con VA-API para codificar por GPU cuando hay un dispositivo disponible).
 
 ```bash
-sudo apt install xvfb libx264-dev pkg-config build-essential
+sudo apt install xvfb libx264-dev libva-dev pkg-config build-essential
 git clone https://github.com/olimpiacloud/agora && cd agora
-go build -o agora ./cmd/agora
-sudo install -m 0755 agora /usr/local/bin/agora
+make build
+sudo install -m 0755 bin/agora /usr/local/bin/agora
 sudo useradd --system --create-home --home-dir /var/lib/agora-apps --shell /usr/sbin/nologin agora
 sudo cp deploy/agora.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now agora

@@ -1,7 +1,7 @@
 export type Locale = "en" | "es";
 
 const commands = {
-  install: "curl -fsSL https://agora.olimpia.dev/install.sh | sh",
+  install: "curl -fsSL https://agora.olimpia.dev/install.sh | sudo sh",
   claude: "claude mcp add agora -s user -- agora mcp",
   codex: "codex mcp add agora -- agora mcp",
   skill: "bunx skills add olimpiacloud/agora-skills",

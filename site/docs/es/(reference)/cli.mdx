@@ -59,6 +59,9 @@ agora api POST /v1/workspaces '{"name":"demo"}'
 | `AGORA_HOME` | todos | Directorio de estado. |
 | `AGORA_ALLOW_PUBLIC` | `serve` | Con `1` se puede escuchar en direcciones que no son loopback. |
 | `AGORA_CGROUPS` | `serve` | Con `off` se desactivan los cgroups por workspace. |
+| `AGORA_ENCODER` | `serve` | Codificador H.264: `auto` (por defecto: codifica por hardware con VAAPI cuando hay una GPU que lo soporta; si no, o ante cualquier falla, usa x264), `vaapi` (solo hardware, sin alternativa) o `x264`. |
+| `AGORA_VAAPI_DEVICE` | `serve` | Nodo de render DRM para VAAPI. Por defecto, `/dev/dri/renderD128`. |
+| `AGORA_VAAPI_VPP` | `serve` | Con `0` los colores se convierten en la CPU en vez de en la GPU. |
 | `AGORA_TOOLS` | `mcp` | Grupos de herramientas a exponer, separados por comas: `browser`, `browserx`, `desktop`, `spawn`, `workspace`, `process`. Por defecto, todos. |
 | `AGORA_LEAN` | `mcp` | Con `1` las descripciones de las herramientas se acortan a una sola oración. |
 
