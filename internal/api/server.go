@@ -138,7 +138,15 @@ func (s *Server) routes() {
 		writeJSON(w, 200, map[string]any{"ok": true, "version": core.Version})
 	})
 	m.HandleFunc("GET /v1/system", s.h(func(w http.ResponseWriter, r *http.Request, p *Principal) {
-		writeJSON(w, 200, s.m.System())
+		sys := s.m.System()
+		if !p.Admin {
+			for id := range sys.Usage {
+				if !p.CanWorkspace(id) {
+					delete(sys.Usage, id)
+				}
+			}
+		}
+		writeJSON(w, 200, sys)
 	}, false))
 	m.HandleFunc("GET /v1/me", s.h(func(w http.ResponseWriter, r *http.Request, p *Principal) {
 		writeJSON(w, 200, map[string]any{"admin": p.Admin, "cursor": p.Cursor})
@@ -171,6 +179,10 @@ func (s *Server) routes() {
 		}
 		if p.Cursor != nil {
 			req.Owner = p.Cursor.ID
+			if len(req.Config.BrowserArgs) > 0 || req.Config.Profile != "" {
+				writeErr(w, fmt.Errorf("%w: only the admin can set browser_args or profile", core.ErrForbidden))
+				return
+			}
 		}
 		ws, err := s.m.CreateWorkspace(r.Context(), req)
 		if err != nil {
@@ -439,7 +451,13 @@ func (s *Server) routes() {
 		writeJSON(w, 201, wt)
 	}, false))
 	m.HandleFunc("GET /v1/worktrees", s.h(func(w http.ResponseWriter, r *http.Request, p *Principal) {
-		writeJSON(w, 200, s.m.ListWorktrees())
+		out := []*core.Worktree{}
+		for _, wt := range s.m.ListWorktrees() {
+			if p.Admin || (p.Cursor != nil && (wt.Workspace == p.Cursor.Workspace && wt.Workspace != "" || s.m.IsAncestor(p.Cursor.ID, wt.Cursor))) {
+				out = append(out, wt)
+			}
+		}
+		writeJSON(w, 200, out)
 	}, false))
 	m.HandleFunc("DELETE /v1/worktrees/{id}", s.admin(func(w http.ResponseWriter, r *http.Request, p *Principal) {
 		if err := s.m.RemoveWorktree(r.Context(), r.PathValue("id"), r.URL.Query().Get("force") == "1"); err != nil {
@@ -565,8 +583,12 @@ func (s *Server) createCursor(w http.ResponseWriter, r *http.Request, p *Princip
 		if req.Parent == "" || !s.m.IsAncestor(p.Cursor.ID, req.Parent) {
 			req.Parent = p.Cursor.ID
 		}
-		if req.Workspace != "" && req.Workspace != p.Cursor.Workspace && !p.Cursor.Can("workspace") {
-			writeErr(w, fmt.Errorf("%w: cannot place subagent in another workspace", core.ErrForbidden))
+		if req.Workspace != "" && req.Workspace != p.Cursor.Workspace && !s.ownsWorkspace(p, req.Workspace) {
+			writeErr(w, fmt.Errorf("%w: cannot place subagent in a workspace you did not create", core.ErrForbidden))
+			return
+		}
+		if req.Launch != nil && (req.Launch.Adapter == "command" || req.Launch.Adapter == "" || len(req.Launch.Command) > 0 || len(req.Launch.Env) > 0) {
+			writeErr(w, fmt.Errorf("%w: subagents may only be launched with the claude or codex adapter, without command or env", core.ErrForbidden))
 			return
 		}
 	}
@@ -591,8 +613,8 @@ func (s *Server) cursorOp(w http.ResponseWriter, r *http.Request, p *Principal) 
 	isSelf := p.Cursor != nil && p.Cursor.ID == id
 	ancestor := p.Cursor != nil && s.m.IsAncestor(p.Cursor.ID, id)
 	if op == "message" {
-		if !p.Admin && p.Cursor == nil {
-			writeErr(w, core.ErrForbidden)
+		if !p.Admin && !s.canMessage(p, id) {
+			writeErr(w, fmt.Errorf("%w: cursor %s is outside your workspace and tree", core.ErrForbidden, id))
 			return
 		}
 	} else if !p.Admin && !ancestor {
@@ -645,6 +667,16 @@ func (s *Server) cursorOp(w http.ResponseWriter, r *http.Request, p *Principal) 
 		from := defStr(p.CursorID(), "admin")
 		res, err = s.m.SendMessage(from, id, body.Body)
 	case "transfer":
+		if !p.Admin {
+			if body.Workspace != nil && *body.Workspace != p.Cursor.Workspace {
+				err = fmt.Errorf("%w: cursors may only transfer into their own workspace", core.ErrForbidden)
+				break
+			}
+			if body.Parent != nil && (*body.Parent == "" || !s.m.IsAncestor(p.Cursor.ID, *body.Parent)) {
+				err = fmt.Errorf("%w: new parent must be you or one of your descendants", core.ErrForbidden)
+				break
+			}
+		}
 		res, err = s.m.Transfer(id, body.TransferReq)
 	case "wait":
 		var cs []*core.Cursor
@@ -662,6 +694,25 @@ func (s *Server) cursorOp(w http.ResponseWriter, r *http.Request, p *Principal) 
 		return
 	}
 	writeJSON(w, 200, res)
+}
+
+func (s *Server) ownsWorkspace(p *Principal, ws string) bool {
+	if p.Cursor == nil || !p.Cursor.Can("workspace") {
+		return false
+	}
+	w, err := s.m.GetWorkspace(ws)
+	return err == nil && w.Owner != "" && s.m.IsAncestor(p.Cursor.ID, w.Owner)
+}
+
+func (s *Server) canMessage(p *Principal, id string) bool {
+	if p.Cursor == nil {
+		return false
+	}
+	if s.m.IsAncestor(p.Cursor.ID, id) || s.m.IsAncestor(id, p.Cursor.ID) {
+		return true
+	}
+	c, err := s.m.GetCursor(id)
+	return err == nil && c.Workspace != "" && c.Workspace == p.Cursor.Workspace
 }
 
 func (s *Server) eventFilter(r *http.Request, p *Principal) (core.Filter, error) {
@@ -685,6 +736,12 @@ func (s *Server) eventFilter(r *http.Request, p *Principal) (core.Filter, error)
 		if f.Workspace != ws {
 			return f, core.ErrForbidden
 		}
+		if ws == "" {
+			if p.Cursor == nil {
+				return f, core.ErrForbidden
+			}
+			f.Cursor = p.Cursor.ID
+		}
 	}
 	return f, nil
 }
@@ -700,13 +757,17 @@ func (s *Server) pollEvents(w http.ResponseWriter, r *http.Request, p *Principal
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
+	if waitMs > 120000 {
+		waitMs = 120000
+	}
+	var ch <-chan *core.Event
+	if waitMs > 0 {
+		var unsub func()
+		ch, unsub = s.m.Bus.Subscribe(core.Filter{Workspace: f.Workspace, Cursor: f.Cursor, Types: f.Types}, 64)
+		defer unsub()
+	}
 	evs := s.m.Bus.Recent(f, limit)
 	if len(evs) == 0 && waitMs > 0 {
-		if waitMs > 120000 {
-			waitMs = 120000
-		}
-		ch, unsub := s.m.Bus.Subscribe(f, 64)
-		defer unsub()
 		select {
 		case e := <-ch:
 			evs = append(evs, e)

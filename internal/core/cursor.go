@@ -108,22 +108,27 @@ func (m *Manager) CreateCursor(ctx context.Context, req CreateCursorReq) (*Curso
 			n++
 		}
 	}
-	m.mu.Unlock()
 	if req.Name == "" {
 		req.Name = id
 	}
 	tok := NewSecret()
 	now := time.Now().UTC()
 	c := &Cursor{ID: id, Name: req.Name, Kind: req.Kind, Parent: req.Parent, Root: root, Depth: depth, Agent: req.Agent, Goal: req.Goal, Status: CursorPending, Workspace: req.Workspace, Permissions: req.Permissions, Budget: req.Budget, Color: palette[n%len(palette)], Created: now, Updated: now, TokenHash: hashToken(tok), Launch: req.Launch, Labels: req.Labels}
+	m.cursors[id] = c
+	m.mu.Unlock()
 	if req.Worktree != nil {
 		wt, err := m.CreateWorktree(ctx, *req.Worktree, id, req.Workspace)
 		if err != nil {
+			m.mu.Lock()
+			delete(m.cursors, id)
+			m.mu.Unlock()
 			return nil, "", err
 		}
+		m.mu.Lock()
 		c.Worktree = wt.ID
+		m.mu.Unlock()
 	}
 	m.mu.Lock()
-	m.cursors[id] = c
 	m.tokens[c.TokenHash] = id
 	m.saveCursor(c)
 	cp := *c
@@ -206,6 +211,10 @@ func (m *Manager) ListCursors(q CursorQuery) []*Cursor {
 func (m *Manager) IsAncestor(anc, id string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.ancestorLocked(anc, id)
+}
+
+func (m *Manager) ancestorLocked(anc, id string) bool {
 	for i := 0; i < 32 && id != ""; i++ {
 		if id == anc {
 			return true
@@ -285,6 +294,10 @@ func (m *Manager) Complete(id string, result json.RawMessage) error {
 		m.mu.Unlock()
 		return ErrNotFound
 	}
+	if c.Status.Terminal() {
+		m.mu.Unlock()
+		return fmt.Errorf("cursor already %s", c.Status)
+	}
 	c.Result = result
 	m.mu.Unlock()
 	return m.setCursorStatus(id, CursorDone, "", false)
@@ -296,6 +309,10 @@ func (m *Manager) Fail(id, msg string) error {
 	if c == nil {
 		m.mu.Unlock()
 		return ErrNotFound
+	}
+	if c.Status.Terminal() {
+		m.mu.Unlock()
+		return fmt.Errorf("cursor already %s", c.Status)
 	}
 	c.Error = msg
 	m.mu.Unlock()
@@ -375,6 +392,9 @@ func (m *Manager) Transfer(id string, t TransferReq) (*Cursor, error) {
 		if p := m.cursors[*t.Parent]; p == nil && *t.Parent != "" {
 			m.mu.Unlock()
 			return nil, fmt.Errorf("parent: %w", ErrNotFound)
+		} else if p != nil && m.ancestorLocked(id, p.ID) {
+			m.mu.Unlock()
+			return nil, fmt.Errorf("parent %s is %s itself or one of its descendants", p.ID, id)
 		} else if p != nil {
 			c.Parent = p.ID
 			c.Root = p.Root
