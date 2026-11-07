@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Cursor, Lock } from './api'
+import { getToken, mintViewer, type Cursor, type Lock } from './api'
 import { DesktopSession, keyName, type Mode, type Transport } from './transport'
 
 interface Overlay {
@@ -90,7 +90,7 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
           setStatus('session ended: ' + m.reason)
         }
       },
-    }, transport, mode)
+    }, transport, mode, getToken() ? () => mintViewer(ws, control) : undefined)
     sess.current = s
     s.start()
     const t = setInterval(() => setStats({ ...s.stats }), 1000)

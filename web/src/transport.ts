@@ -31,6 +31,7 @@ export class DesktopSession {
   private pingT = 0
   private pingTimer?: number
   private retry = 0
+  private tokenAt = Date.now()
   stats: SessionStats = { transport: 'connecting', fps: 0, kbps: 0, rtt: 0, width: 0, height: 0 }
 
   constructor(
@@ -41,16 +42,26 @@ export class DesktopSession {
     private cb: SessionCallbacks,
     private prefer: Transport | 'auto',
     private mode: Mode,
+    private refresh?: () => Promise<string>,
   ) {}
 
   async start() {
-    this.closed = false
+    if (this.closed) return
+    if (this.refresh && (this.retry > 0 || Date.now() - this.tokenAt > 50 * 60 * 1000)) {
+      try {
+        this.token = await this.refresh()
+        this.tokenAt = Date.now()
+      } catch {}
+      if (this.closed) return
+    }
     if (this.prefer !== 'ws') {
       try {
         await this.startRTC()
+        if (this.closed) this.cleanupRTC()
         return
       } catch (e) {
         this.cleanupRTC()
+        if (this.closed) return
         if (this.prefer === 'webrtc') {
           this.cb.onStatus('WebRTC failed: ' + (e as Error).message)
           this.scheduleRetry()
@@ -108,6 +119,7 @@ export class DesktopSession {
   }
 
   private startWS() {
+    if (this.closed) return
     this.stats.transport = 'ws'
     this.video.style.display = 'none'
     this.canvas.style.display = 'block'
