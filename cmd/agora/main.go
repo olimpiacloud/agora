@@ -108,7 +108,8 @@ func serve(args []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	srv := &http.Server{Addr: *listen, Handler: api.New(m, auth, web.FS()), ReadHeaderTimeout: 10 * time.Second}
+	base, stop := context.WithCancel(context.Background())
+	srv := &http.Server{Addr: *listen, Handler: api.New(m, auth, web.FS()), ReadHeaderTimeout: 10 * time.Second, BaseContext: func(net.Listener) context.Context { return base }}
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
 		log.Fatal(err)
@@ -119,8 +120,9 @@ func serve(args []string) {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 	log.Printf("shutting down: checkpointing workspaces")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	stop()
 	srv.Shutdown(ctx)
 	m.Shutdown()
 }
