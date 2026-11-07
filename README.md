@@ -49,11 +49,11 @@ Ubuntu or Debian, amd64 or arm64:
 curl -fsSL https://raw.githubusercontent.com/olimpiacloud/agora/main/scripts/install.sh | sudo sh
 ```
 
-The installer is idempotent. It installs Xvfb and Google Chrome (Chromium on arm64), creates the unprivileged `agora` user, downloads the release binary and checks its SHA-256 (or builds from source when there is no release), installs `/usr/local/bin/agora` and the `agora.service` systemd unit, and starts it. If Claude Code, Codex or Paseo are installed it registers the Agora MCP server, the Agora skill and the Paseo plugin. Options: `--version vX.Y.Z`, `--prefix DIR`, `--no-agents`, `--no-paseo`.
+The installer is idempotent. It installs Xvfb, VA-API and Google Chrome (Chromium on arm64), creates the unprivileged `agora` user, downloads the release binary and checks its SHA-256 (or builds from source when there is no release), installs `/usr/local/bin/agora` and the `agora.service` systemd unit, and starts it. If Claude Code, Codex or Paseo are installed it registers the Agora MCP server, the Agora skill and the Paseo plugin. Options: `--version vX.Y.Z`, `--prefix DIR`, `--no-agents`, `--no-paseo`.
 
 Uninstall with `scripts/uninstall.sh`. It stops and removes the service, the binary and the agent configuration. `--purge` also deletes `/var/lib/agora` (every workspace and browser profile) and the `agora` user.
 
-From source: `make build` (needs Go, `pkg-config` and `libx264-dev`), then copy `bin/agora` and `deploy/agora.service`.
+From source: `make build` (needs Go, `pkg-config`, `libx264-dev` and `libva-dev`), then copy `bin/agora` and `deploy/agora.service`.
 
 ## Quickstart
 

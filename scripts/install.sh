@@ -82,7 +82,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 install_deps() {
 	say "Installing dependencies"
 	missing=
-	for p in xvfb ca-certificates curl; do
+	for p in xvfb libva2 libva-drm2 ca-certificates curl; do
 		dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "ok installed" || missing="$missing $p"
 	done
 	[ -z "$missing" ] || apt_install $missing
@@ -133,7 +133,7 @@ download_release() {
 
 build_from_source() {
 	say "Building Agora from source"
-	apt_install build-essential pkg-config libx264-dev git
+	apt_install build-essential pkg-config libx264-dev libva-dev git
 	if [ -z "$SOURCE" ]; then
 		SOURCE="$TMP/agora"
 		ref=${VERSION:-main}

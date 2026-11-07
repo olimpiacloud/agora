@@ -5,14 +5,14 @@ Thanks for your interest. Issues and PRs are welcome; code, docs, error messages
 ## Requirements
 
 - Linux x86_64 or arm64. Agora drives Xvfb, MPX and cgroups, so it does not run on macOS or Windows (a Linux VM works).
-- Go (the version in `go.mod`), a C compiler, `pkg-config` and `libx264-dev` (the encoder is cgo).
+- Go (the version in `go.mod`), a C compiler, `pkg-config`, `libx264-dev` and `libva-dev` (the encoders are cgo).
 - `xvfb` and Google Chrome or Chromium for the e2e tests and for running the daemon.
 - [Bun](https://bun.sh) for the dashboard (`web/`) and the Paseo plugin (`paseo-plugin/`).
 
 On Ubuntu or Debian:
 
 ```
-sudo apt install build-essential pkg-config libx264-dev xvfb
+sudo apt install build-essential pkg-config libx264-dev libva-dev xvfb
 ```
 
 ## Build and test
@@ -51,7 +51,7 @@ AGORA_URL=http://127.0.0.1:7799 AGORA_TOKEN=$(cat /tmp/agora-dev/admin.token) bi
 
 ## Releases
 
-Versions follow [semver](https://semver.org/). To release, move the `Unreleased` entries in `CHANGELOG.md` under a new `## [X.Y.Z] - YYYY-MM-DD` heading, merge, then push a `vX.Y.Z` tag. The `release` workflow builds `linux/amd64` and `linux/arm64` binaries (x264 linked statically, glibc 2.36 or newer), embeds the version, and publishes a GitHub release with the tarballs, `SHA256SUMS` and that `CHANGELOG.md` section as notes.
+Versions follow [semver](https://semver.org/). To release, move the `Unreleased` entries in `CHANGELOG.md` under a new `## [X.Y.Z] - YYYY-MM-DD` heading, merge, then push a `vX.Y.Z` tag. The `release` workflow builds `linux/amd64` and `linux/arm64` binaries on Debian 12 with `scripts/release-build.sh` (x264 linked statically; they need glibc 2.36 or newer, `libva2` and `libva-drm2`), embeds the version, and publishes a GitHub release with the tarballs, `SHA256SUMS` and that `CHANGELOG.md` section as notes.
 
 ## Security
 

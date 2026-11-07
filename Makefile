@@ -7,7 +7,7 @@ LDFLAGS := -s -w -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PK
 .PHONY: build web test vet fmt
 
 build:
-	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/agora ./cmd/agora
+	PKG_CONFIG=$(or $(PKG_CONFIG),pkg-config) go build -trimpath -ldflags "$(LDFLAGS)" -o bin/agora ./cmd/agora
 
 web:
 	cd web && bun install --frozen-lockfile && bun run build
