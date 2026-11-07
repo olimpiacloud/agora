@@ -45,6 +45,9 @@ type Stats struct {
 	Height    int     `json:"height"`
 	Mode      Mode    `json:"mode"`
 	Starts    int64   `json:"starts"`
+	Encoder   string  `json:"encoder,omitempty"`
+	LatencyMs float64 `json:"latency_ms_avg"`
+	Fallbacks int64   `json:"encoder_fallbacks,omitempty"`
 }
 
 type Engine struct {
@@ -62,6 +65,10 @@ type Engine struct {
 	starts   atomic.Int64
 	encNs    atomic.Int64
 	capNs    atomic.Int64
+	latNs    atomic.Int64
+	latN     atomic.Int64
+	fallback atomic.Int64
+	encName  atomic.Value
 	lastFPS  atomic.Int64
 	OnState  func(running bool)
 	interact atomic.Int64
@@ -153,10 +160,14 @@ func (e *Engine) Stats() Stats {
 	w, h := e.w, e.h
 	e.mu.Unlock()
 	f := e.frames.Load()
-	s := Stats{Running: r, Sinks: n, Frames: f, Bytes: e.bytes.Load(), Keyframes: e.keys.Load(), Mode: m, Width: w, Height: h, Starts: e.starts.Load(), FPS: float64(e.lastFPS.Load()) / 10}
+	s := Stats{Running: r, Sinks: n, Frames: f, Bytes: e.bytes.Load(), Keyframes: e.keys.Load(), Mode: m, Width: w, Height: h, Starts: e.starts.Load(), FPS: float64(e.lastFPS.Load()) / 10, Fallbacks: e.fallback.Load()}
+	s.Encoder, _ = e.encName.Load().(string)
 	if f > 0 {
 		s.EncodeMs = float64(e.encNs.Load()) / float64(f) / 1e6
 		s.CaptureMs = float64(e.capNs.Load()) / float64(f) / 1e6
+	}
+	if ln := e.latN.Load(); ln > 0 {
+		s.LatencyMs = float64(e.latNs.Load()) / float64(ln) / 1e6
 	}
 	return s
 }
@@ -199,7 +210,7 @@ func (e *Engine) loop(stop, done chan struct{}) {
 		return
 	}
 	defer dw.Close()
-	var enc *media.H264Encoder
+	var enc media.Encoder
 	defer func() {
 		if enc != nil {
 			enc.Close()
@@ -212,11 +223,16 @@ func (e *Engine) loop(stop, done chan struct{}) {
 	last := time.Time{}
 	fpsWin := time.Now()
 	fpsCount := 0
+	var glass time.Time
+	failures := 0
 	for {
 		select {
 		case <-stop:
 			return
 		case <-dw.C:
+			if glass.IsZero() {
+				glass = time.Now()
+			}
 		case <-e.wake:
 		}
 		sinks, mode := e.snapshotSinks()
@@ -237,10 +253,11 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			if enc != nil {
 				enc.Close()
 			}
-			enc, err = media.NewH264(media.H264Options{Width: w, Height: h, FPS: fps, CRF: crf, MaxKbps: kbps})
+			enc, err = media.NewEncoder(media.H264Options{Width: w, Height: h, FPS: fps, CRF: crf, MaxKbps: kbps})
 			if err != nil {
 				return
 			}
+			e.encName.Store(enc.Name())
 			e.mu.Lock()
 			e.w, e.h = w&^1, h&^1
 			e.mu.Unlock()
@@ -279,6 +296,7 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			}
 			if x1-x0 < 2 || y1-y0 < 2 {
 				if !key {
+					glass = time.Time{}
 					continue
 				}
 				x1, y1 = x0, y0
@@ -297,8 +315,27 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			}
 		}
 		t2 := time.Now()
-		if err != nil || len(data) == 0 {
+		if err != nil {
+			media.EncoderFailed(enc, err)
+			enc.Close()
+			enc = nil
+			e.fallback.Add(1)
+			if failures++; failures > 5 {
+				return
+			}
+			needFull = true
+			e.keyReq.Store(true)
+			e.poke()
 			continue
+		}
+		failures = 0
+		if len(data) == 0 {
+			continue
+		}
+		if !glass.IsZero() {
+			e.latNs.Add(int64(t2.Sub(glass)))
+			e.latN.Add(1)
+			glass = time.Time{}
 		}
 		dur := now.Sub(last)
 		if last.IsZero() || dur > time.Second {

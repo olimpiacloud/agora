@@ -6,6 +6,14 @@ import (
 )
 
 func BGRXToI420(src []byte, stride, sw, sh int, y []byte, ys int, u, v []byte, uvs int, w, h int) {
+	bgrxToYUV(src, stride, sw, sh, y, ys, u, v, uvs, 1, w, h)
+}
+
+func BGRXToNV12(src []byte, stride, sw, sh int, y []byte, ys int, uv []byte, uvs int, w, h int) {
+	bgrxToYUV(src, stride, sw, sh, y, ys, uv, uv[1:], uvs, 2, w, h)
+}
+
+func bgrxToYUV(src []byte, stride, sw, sh int, y []byte, ys int, u, v []byte, uvs, step int, w, h int) {
 	workers := runtime.NumCPU()
 	if workers > 4 {
 		workers = 4
@@ -69,8 +77,8 @@ func BGRXToI420(src []byte, stride, sw, sh int, y []byte, ys int, u, v []byte, u
 					gg := int(r0w[a+1]) + int(r0w[b2+1]) + int(r1w[c+1]) + int(r1w[d+1])
 					rr := int(r0w[a+2]) + int(r0w[b2+2]) + int(r1w[c+2]) + int(r1w[d+2])
 					bb, gg, rr = bb>>2, gg>>2, rr>>2
-					ur[cx] = byte(((-38*rr - 74*gg + 112*bb + 128) >> 8) + 128)
-					vr[cx] = byte(((112*rr - 94*gg - 18*bb + 128) >> 8) + 128)
+					ur[cx*step] = byte(((-38*rr - 74*gg + 112*bb + 128) >> 8) + 128)
+					vr[cx*step] = byte(((112*rr - 94*gg - 18*bb + 128) >> 8) + 128)
 				}
 			}
 		}(r0, r1)
@@ -79,6 +87,14 @@ func BGRXToI420(src []byte, stride, sw, sh int, y []byte, ys int, u, v []byte, u
 }
 
 func BGRXRectToI420(src []byte, stride int, rx, ry, rw, rh int, y []byte, ys int, u, v []byte, uvs int) {
+	bgrxRectToYUV(src, stride, rx, ry, rw, rh, y, ys, u, v, uvs, 1)
+}
+
+func BGRXRectToNV12(src []byte, stride int, rx, ry, rw, rh int, y []byte, ys int, uv []byte, uvs int) {
+	bgrxRectToYUV(src, stride, rx, ry, rw, rh, y, ys, uv, uv[1:], uvs, 2)
+}
+
+func bgrxRectToYUV(src []byte, stride int, rx, ry, rw, rh int, y []byte, ys int, u, v []byte, uvs, step int) {
 	workers := runtime.NumCPU()
 	if workers > 4 {
 		workers = 4
@@ -106,8 +122,8 @@ func BGRXRectToI420(src []byte, stride int, rx, ry, rw, rh int, y []byte, ys int
 				r1 := src[(cy*2+1)*stride:]
 				y0 := y[(ry+cy*2)*ys+rx:]
 				y1 := y[(ry+cy*2+1)*ys+rx:]
-				ur := u[(ry/2+cy)*uvs+rx/2:]
-				vr := v[(ry/2+cy)*uvs+rx/2:]
+				ur := u[(ry/2+cy)*uvs+rx/2*step:]
+				vr := v[(ry/2+cy)*uvs+rx/2*step:]
 				for cx := 0; cx < rw/2; cx++ {
 					o := cx * 8
 					b00, g00, r00 := int(r0[o]), int(r0[o+1]), int(r0[o+2])
@@ -121,8 +137,8 @@ func BGRXRectToI420(src []byte, stride int, rx, ry, rw, rh int, y []byte, ys int
 					bb := (b00 + b01 + b10 + b11) >> 2
 					gg := (g00 + g01 + g10 + g11) >> 2
 					rr := (r00 + r01 + r10 + r11) >> 2
-					ur[cx] = byte(((-38*rr - 74*gg + 112*bb + 128) >> 8) + 128)
-					vr[cx] = byte(((112*rr - 94*gg - 18*bb + 128) >> 8) + 128)
+					ur[cx*step] = byte(((-38*rr - 74*gg + 112*bb + 128) >> 8) + 128)
+					vr[cx*step] = byte(((112*rr - 94*gg - 18*bb + 128) >> 8) + 128)
 				}
 			}
 		}(c0, c1)

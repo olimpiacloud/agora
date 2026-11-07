@@ -24,7 +24,7 @@ static cenc *cenc_open(int w, int h, int fps, int crf, int maxkbps, int threads)
 	e->param.i_fps_den = 1;
 	e->param.i_timebase_num = 1;
 	e->param.i_timebase_den = 1000;
-	e->param.b_vfr_input = 1;
+	e->param.b_vfr_input = 0;
 	e->param.b_repeat_headers = 1;
 	e->param.b_annexb = 1;
 	e->param.i_keyint_max = X264_KEYINT_MAX_INFINITE;
@@ -96,7 +96,7 @@ type H264Encoder struct {
 	out  []byte
 }
 
-func NewH264(o H264Options) (*H264Encoder, error) {
+func (o H264Options) withDefaults() H264Options {
 	if o.FPS == 0 {
 		o.FPS = 30
 	}
@@ -109,6 +109,11 @@ func NewH264(o H264Options) (*H264Encoder, error) {
 	if o.Threads == 0 {
 		o.Threads = 2
 	}
+	return o
+}
+
+func NewH264(o H264Options) (*H264Encoder, error) {
+	o = o.withDefaults()
 	w, h := o.Width&^1, o.Height&^1
 	e := C.cenc_open(C.int(w), C.int(h), C.int(o.FPS), C.int(o.CRF), C.int(o.MaxKbps), C.int(o.Threads))
 	if e == nil {
@@ -116,6 +121,8 @@ func NewH264(o H264Options) (*H264Encoder, error) {
 	}
 	return &H264Encoder{e: e, w: w, h: h, out: make([]byte, w*h*2+65536)}, nil
 }
+
+func (x *H264Encoder) Name() string { return "x264" }
 
 func (x *H264Encoder) Size() (int, int) { return x.w, x.h }
 
