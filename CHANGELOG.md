@@ -17,11 +17,14 @@ First public release.
 - Hybrid control: a compact semantic snapshot with refs (`[e3] button "Sign in"`), clicks by ref or coordinates, fill, select, upload, downloads, dialogs, HTML5 drag, eval, device emulation and an embedded UI audit; pixel control for any X11 app.
 - CAPTCHA and login handoff: challenges are detected, the cursor moves to `needs_human`, a person takes control from the viewer and hands it back, and the agent continues on the same tab and session.
 - Freeze (cgroup freezer or SIGSTOP), suspend (checkpoint and graceful browser close) and resume with parallel tab restore to their owners.
+- Shared workspace board with claims, so parallel subagents do not duplicate work.
+- Optional sandboxed workspaces (`config.sandbox: true`) for untrusted workloads: read-only system, private home, no view of other workspaces.
 - Browsers and apps run as the unprivileged `agora` user with Chrome's sandbox enabled; Chromium is driven over `--remote-debugging-pipe` with no TCP port. The daemon refuses to listen outside loopback.
 
 ### Streaming
 
-- Damage-driven H.264 (x264) over WebRTC (Pion) or WebSocket + WebCodecs, encoded once and fanned out to every viewer; damage-driven JPEG for light clients.
+- VA-API H.264 encoding on the GPU when a device is available (libva loaded at runtime), with automatic fallback to x264.
+- Damage-driven H.264 (x264) over WebRTC (Pion) or WebSocket + WebCodecs, encoded once and fanned out to every viewer; damage-driven JPEG for light clients, shared per display and croppable to a cursor's window.
 - Adaptive frame rate: 30 fps while a human interacts, 15 fps while watching, 8 fps in observation mode. Nothing is captured or encoded without viewers.
 
 ### Integrations
@@ -31,12 +34,12 @@ First public release.
 - Agent launcher for Claude Code, Codex or any command, with a lean Claude Code profile (initial context per subagent down from 66.7k to 7.5k tokens) and per-cursor usage (tokens, turns, cost, duration).
 - Git worktrees with a port range per subagent.
 - Embedded React dashboard and viewer (`agora open` prints a viewer link with a short-lived token).
-- Paseo plugin: live desktop panel, screenshot cards in the chat, and an Agora cursor and MCP server for every Paseo agent.
+- Paseo plugin: live desktop panel, live preview cards and an agent wall, screenshot cards in the chat, and an Agora cursor and MCP server for every Paseo agent.
 - `agora version` prints the version, commit and build date injected at build time.
 
 ### Tooling
 
-- `agora-bench`, a reproducible benchmark against Xvfb + x11vnc + noVNC + Chrome, and an agent token benchmark.
+- `agora-bench`, a reproducible benchmark against Xvfb + x11vnc + noVNC + Chrome, a streaming latency suite, a soak test with leak detection, and an agent token benchmark.
 - `scripts/install.sh` and `scripts/uninstall.sh` for Ubuntu and Debian (amd64 and arm64).
 - CI (vet, gofmt, unit and e2e tests, dashboard build, plugin typecheck) and tagged releases with checksummed binaries.
 

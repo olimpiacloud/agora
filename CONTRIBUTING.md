@@ -51,7 +51,7 @@ AGORA_URL=http://127.0.0.1:7799 AGORA_TOKEN=$(cat /tmp/agora-dev/admin.token) bi
 
 ## Releases
 
-Versions follow [semver](https://semver.org/). To release, move the `Unreleased` entries in `CHANGELOG.md` under a new `## [X.Y.Z] - YYYY-MM-DD` heading, merge, then push a `vX.Y.Z` tag. The `release` workflow builds `linux/amd64` and `linux/arm64` binaries on Debian 12 with `scripts/release-build.sh` (x264 linked statically; they need glibc 2.36 or newer, `libva2` and `libva-drm2`), embeds the version, and publishes a GitHub release with the tarballs, `SHA256SUMS` and that `CHANGELOG.md` section as notes.
+Versions follow [semver](https://semver.org/). To release, move the `Unreleased` entries in `CHANGELOG.md` under a new `## [X.Y.Z] - YYYY-MM-DD` heading, merge, then push a `vX.Y.Z` tag. The `release` workflow builds `linux/amd64` and `linux/arm64` binaries on Debian 12 with `scripts/release-build.sh` (x264 linked statically, libva loaded at runtime when present; they need glibc 2.36 or newer), embeds the version, and publishes a GitHub release with the tarballs, `SHA256SUMS` and that `CHANGELOG.md` section as notes.
 
 ## Security
 
