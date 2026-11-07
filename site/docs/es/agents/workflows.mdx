@@ -86,7 +86,7 @@ desktop_key(keys: "Return")
 desktop_screenshot(window: <id>)                   → check the result
 ```
 
-Las coordenadas de una captura coinciden con las de `desktop_click`, salvo que `max_width` haya escalado la imagen. Usá `control_surface(op: "acquire", surface: "win:<id>", ttl_ms: 60000)` si otros cursores podrían escribir en la misma ventana. El programa tiene que estar instalado en el host de Agora.
+Pasale a `desktop_click` las posiciones de tu última captura tal cual, aunque la imagen esté escalada: Agora las traduce al escritorio. Usá `control_surface(op: "acquire", surface: "win:<id>", ttl_ms: 60000)` si otros cursores podrían escribir en la misma ventana. El programa tiene que estar instalado en el host de Agora.
 
 ## Bifurcar una sesión logueada [#branch-a-logged-in-session]
 

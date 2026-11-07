@@ -14,7 +14,7 @@ Los resultados de las acciones del navegador son texto: `done. now visible:` seg
 | --- | --- |
 | `browser_open` | Abre una pestaña propia, en su propia ventana. `url`, `isolated` (contexto separado), `same_window`. Devuelve el `target` y lo que se ve. |
 | `browser_navigate` | Navega una pestaña, espera a que cargue (`wait`: `load`, `domcontentloaded`, `none`) y devuelve lo que se ve. |
-| `browser_snapshot` | Vista semántica completa de la página, incluido lo que está fuera de pantalla: elementos interactivos con refs `[eN]`, roles, nombres, cajas, más el texto de la página (`max_text`, por defecto 3000). |
+| `browser_snapshot` | Vista semántica completa de la página, incluido lo que está fuera de pantalla: elementos interactivos con refs `[eN]`, roles y nombres, más el texto de la página (`max_text`, por defecto 3000). `boxes: true` agrega la caja de cada elemento en el viewport. |
 | `browser_click` | Hace clic por `ref`, o en `x`,`y` del viewport para canvas, iframes de otro origen y widgets de CAPTCHA. `button`, `count`. |
 | `browser_fill` | Reemplaza el valor de un campo por `ref`. `submit: true` aprieta Enter. |
 | `browser_type` | Escribe tecla por tecla en el elemento con foco (o primero hace clic en `ref`). Funciona en pestañas en segundo plano sin robar el foco. |
@@ -43,7 +43,7 @@ Estas usan el puntero y el teclado MPX propios del cursor.
 
 | Herramienta | Descripción |
 | --- | --- |
-| `desktop_screenshot` | El escritorio, una `window` o una región (`x`, `y`, `w`, `h`). Las coordenadas coinciden con las de `desktop_*`, salvo que `max_width` escale la imagen. |
+| `desktop_screenshot` | El escritorio, una `window` o una región (`x`, `y`, `w`, `h`, en píxeles del escritorio). Por defecto usa `max_width` 1024 y JPEG con `quality` 60. Después, `desktop_click`, `desktop_move`, `desktop_drag` y `desktop_scroll` toman posiciones de esa imagen y Agora las traduce al escritorio. |
 | `desktop_windows` | Ventanas de nivel superior: id, título, clase, geometría. |
 | `desktop_click` | Hace clic en coordenadas de pantalla. Le da foco a la ventana que está debajo y la trae al frente. |
 | `desktop_move` | Mueve el puntero (hover). |
@@ -75,8 +75,8 @@ Estas usan el puntero y el teclado MPX propios del cursor.
 | Herramienta | Descripción |
 | --- | --- |
 | `cursor_spawn` | Crea un hijo con un `goal`, `permissions`, `launch`, `worktree` y `max_children`. Mirá [lanzar subagentes](/agents/tools#subagents). |
-| `cursor_list` | Lista cursores, por `parent`, `workspace` o `active`. |
-| `cursor_get` | Un cursor (`self` para vos mismo). |
+| `cursor_list` | Lista cursores, por `parent`, `workspace` o `active`, con una vista previa del resultado de 300 caracteres. |
+| `cursor_get` | Un cursor con su resultado y su progreso completos (`self` para vos mismo). |
 | `cursor_wait` | Bloquea hasta que los cursores terminen (`all` por defecto true, `timeout_ms` por defecto 10 min). |
 | `cursor_control` | `cancel` (en cascada), `pause`, `resume` o `transfer` de un descendiente. |
 | `cursor_message` | Manda JSON al inbox de otro cursor. |

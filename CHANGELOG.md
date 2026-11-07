@@ -4,6 +4,24 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+### Changed
+
+- Snapshots and observations list elements without their viewport boxes, so the diff after an action skips unchanged elements even after a scroll. `browser_snapshot` takes `boxes: true` to get them back.
+- `desktop_screenshot` defaults to 1024 px wide and JPEG quality 60. `desktop_click`, `desktop_move`, `desktop_drag` and `desktop_scroll` take positions in the last screenshot and the MCP server maps them to the desktop; `browser_click`, `browser_hover`, `browser_drag` and `browser_scroll` do the same with the last `browser_screenshot` of the tab.
+- `cursor_list`, `cursor_wait` and `cursor_spawn` return a short view of each cursor (`cursor_list` with a 300-character result preview); `cursor_get` returns the full result and progress. MCP results are compact JSON.
+- Lean Claude Code subagents default to the `sonnet` model when `launch.model` is not set.
+- Codex subagents get the lean tool profile and the lean prompt, and their token usage is recorded in `cursor.usage`.
+- The Paseo plugin deletes an agent's cursor when Paseo closes or archives the agent, and gives Codex agents the lean tool descriptions.
+
+### Security
+
+- Cursor responses no longer include `token_hash` or `launch.env`, which sibling cursors in the same workspace could read.
+- The cursor token no longer appears in the agent's command line: Claude Code reads it from a `0600` MCP config file that is removed when the agent exits, and Codex from its environment.
+
+### Fixed
+
+- The prompt of `full` profile subagents named a tool that does not exist (`wait_events`).
+
 ## [0.1.0] - 2026-11-06
 
 First public release.

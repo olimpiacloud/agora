@@ -40,7 +40,7 @@ Para trabajo de UI, usá `browser_audit` una vez en lugar de muchas capturas: re
 Usá las herramientas `desktop_*` para todo lo que no sea una página web. Usan el puntero MPX y el teclado propios de tu cursor, así que dos agentes pueden escribir en dos ventanas al mismo tiempo.
 
 1. `desktop_launch` arranca un programa como el usuario de apps sin privilegios, con `DISPLAY` configurado. `restore: true` lo vuelve a lanzar cuando se reanuda el workspace.
-2. Sacá un `desktop_screenshot` para orientarte. Sus coordenadas coinciden con las de las herramientas `desktop_*`, salvo que `max_width` escale la imagen. `desktop_windows` lista las ventanas con sus ids y geometría.
+2. Sacá un `desktop_screenshot` para orientarte. Por defecto es un JPEG de 1024 px, y `desktop_click`, `desktop_move`, `desktop_drag` y `desktop_scroll` toman las posiciones de tu última captura tal cual: Agora las traduce al escritorio. `desktop_windows` lista las ventanas con sus ids y geometría.
 3. Actuá con `desktop_click`, `desktop_type`, `desktop_key`, `desktop_scroll` y `desktop_drag`. `desktop_window` trae al frente, mueve, redimensiona o cierra una ventana.
 4. `desktop_clipboard` lee o escribe el portapapeles.
 
@@ -69,14 +69,14 @@ Creá primero todos los hijos independientes y después llamá a `cursor_wait` u
 
 `cursor_wait` devuelve cada hijo con su `status`, su `result` y, para Claude Code, su `usage` (tokens, turnos, costo y duración). Los hijos corren en paralelo en el mismo workspace, cada uno en su propia ventana y con su propio puesto de entrada.
 
-Otros controles: `cursor_list` y `cursor_get` leen el estado, `cursor_message` manda JSON a la bandeja de entrada de un hijo, y `cursor_control` puede hacer `cancel` (se propaga a todo el subárbol), `pause`, `resume` o `transfer` sobre un descendiente.
+Otros controles: `cursor_list` da un resumen con una vista previa corta del resultado y `cursor_get` el cursor completo, `cursor_message` manda JSON a la bandeja de entrada de un hijo, y `cursor_control` puede hacer `cancel` (se propaga a todo el subárbol), `pause`, `resume` o `transfer` sobre un descendiente.
 
 ### Opciones de launch [#launch-options]
 
 | Campo | Descripción |
 | --- | --- |
 | `adapter` | `claude`, `codex` o `command`. |
-| `model` | Modelo para el CLI del agente. |
+| `model` | Modelo para el CLI del agente. Los agentes lean de Claude Code usan `sonnet` por defecto. |
 | `effort` | `low`, `medium` o `high` (Claude Code). |
 | `prompt` | Reemplaza al goal como prompt. |
 | `command` | Para `command`: el argv a ejecutar. |

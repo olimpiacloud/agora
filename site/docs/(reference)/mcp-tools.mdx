@@ -15,7 +15,7 @@ Results of browser actions are text: `done. now visible:` followed by the visibl
 | --- | --- |
 | `browser_open` | Open a tab you own, in its own window. `url`, `isolated` (separate context), `same_window`. Returns the `target` and what is visible. |
 | `browser_navigate` | Navigate a tab, wait for load (`wait`: `load`, `domcontentloaded`, `none`) and return what is visible. |
-| `browser_snapshot` | Full semantic view of the page, offscreen included: interactive elements with refs `[eN]`, roles, names, boxes, plus page text (`max_text`, default 3000). |
+| `browser_snapshot` | Full semantic view of the page, offscreen included: interactive elements with refs `[eN]`, roles and names, plus page text (`max_text`, default 3000). `boxes: true` adds each element's viewport box. |
 | `browser_click` | Click by `ref`, or at viewport `x`,`y` for canvases, cross-origin iframes and CAPTCHA widgets. `button`, `count`. |
 | `browser_fill` | Replace a field's value by `ref`. `submit: true` presses Enter. |
 | `browser_type` | Type key by key into the focused element (or click `ref` first). Works on background tabs without stealing focus. |
@@ -44,7 +44,7 @@ These use the cursor's own MPX pointer and keyboard.
 
 | Tool | Description |
 | --- | --- |
-| `desktop_screenshot` | Desktop, one `window` or a region (`x`, `y`, `w`, `h`). Coordinates match `desktop_*` unless `max_width` scales the image. |
+| `desktop_screenshot` | Desktop, one `window` or a region (`x`, `y`, `w`, `h`, in desktop pixels). Defaults to `max_width` 1024 and JPEG `quality` 60. Afterwards `desktop_click`, `desktop_move`, `desktop_drag` and `desktop_scroll` take positions in that image and Agora maps them to the desktop. |
 | `desktop_windows` | Top-level windows: id, title, class, geometry. |
 | `desktop_click` | Click at screen coordinates. Focuses and raises the window under it. |
 | `desktop_move` | Move the pointer (hover). |
@@ -76,8 +76,8 @@ These use the cursor's own MPX pointer and keyboard.
 | Tool | Description |
 | --- | --- |
 | `cursor_spawn` | Create a child with a `goal`, `permissions`, `launch`, `worktree` and `max_children`. See [launching subagents](/agents/tools#subagents). |
-| `cursor_list` | List cursors, by `parent`, `workspace` or `active`. |
-| `cursor_get` | One cursor (`self` for yourself). |
+| `cursor_list` | List cursors, by `parent`, `workspace` or `active`, with a 300-character result preview. |
+| `cursor_get` | One cursor with its full result and progress (`self` for yourself). |
 | `cursor_wait` | Block until cursors finish (`all` default true, `timeout_ms` default 10 min). |
 | `cursor_control` | `cancel` (cascades), `pause`, `resume` or `transfer` a descendant. |
 | `cursor_message` | Send JSON to another cursor's inbox. |

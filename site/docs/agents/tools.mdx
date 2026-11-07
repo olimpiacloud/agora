@@ -38,7 +38,7 @@ For UI work, use `browser_audit` once instead of many screenshots: it checks ove
 Use `desktop_*` tools for anything that is not a web page. They use your cursor's own MPX pointer and keyboard, so two agents can type into two windows at the same time.
 
 1. `desktop_launch` starts a program as the unprivileged apps user, with `DISPLAY` set. `restore: true` relaunches it when the workspace resumes.
-2. Take one `desktop_screenshot` to orient. Its coordinates match the `desktop_*` tools unless `max_width` scales the image. `desktop_windows` lists windows with their ids and geometry.
+2. Take one `desktop_screenshot` to orient. It is a 1024 px JPEG by default, and `desktop_click`, `desktop_move`, `desktop_drag` and `desktop_scroll` take positions in your last screenshot as they are: Agora maps them to the desktop. `desktop_windows` lists windows with their ids and geometry.
 3. Act with `desktop_click`, `desktop_type`, `desktop_key`, `desktop_scroll` and `desktop_drag`. `desktop_window` raises, moves, resizes or closes a window.
 4. `desktop_clipboard` gets or sets the clipboard.
 
@@ -67,14 +67,14 @@ Spawn all independent children first, then call `cursor_wait` once with every id
 
 `cursor_wait` returns each child with its `status`, `result` and, for Claude Code, its `usage` (tokens, turns, cost and duration). Children run in parallel in the same workspace, each in its own window with its own input seat.
 
-Other controls: `cursor_list` and `cursor_get` read status, `cursor_message` sends JSON to a child's inbox, and `cursor_control` can `cancel` (cascades to the whole subtree), `pause`, `resume` or `transfer` a descendant.
+Other controls: `cursor_list` gives an overview with a short result preview and `cursor_get` the full cursor, `cursor_message` sends JSON to a child's inbox, and `cursor_control` can `cancel` (cascades to the whole subtree), `pause`, `resume` or `transfer` a descendant.
 
 ### Launch options
 
 | Field | Description |
 | --- | --- |
 | `adapter` | `claude`, `codex` or `command`. |
-| `model` | Model for the agent CLI. |
+| `model` | Model for the agent CLI. Lean Claude Code agents default to `sonnet`. |
 | `effort` | `low`, `medium` or `high` (Claude Code). |
 | `prompt` | Overrides the goal as the prompt. |
 | `command` | For `command`: the argv to run. |

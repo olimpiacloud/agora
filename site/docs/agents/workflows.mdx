@@ -84,7 +84,7 @@ desktop_key(keys: "Return")
 desktop_screenshot(window: <id>)                   → check the result
 ```
 
-Coordinates in a screenshot match `desktop_click` unless `max_width` scaled the image. Use `control_surface(op: "acquire", surface: "win:<id>", ttl_ms: 60000)` if other cursors might type into the same window. The program must be installed on the Agora host.
+Pass positions from your last screenshot to `desktop_click` as they are, even when the image was scaled: Agora maps them to the desktop. Use `control_surface(op: "acquire", surface: "win:<id>", ttl_ms: 60000)` if other cursors might type into the same window. The program must be installed on the Agora host.
 
 ## Branch a logged-in session
 
