@@ -356,6 +356,22 @@ func tools() []Tool {
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				return s.call(ctx, "POST", "/v1/cursors/"+a.S("to")+"/message", map[string]any{"body": a["body"]})
 			}},
+		{Name: "board_post", Desc: "Post to your workspace's shared board so sibling agents do not duplicate work. kind: claim (take a topic; fails if someone else holds or finished it), done (finished a topic), release (drop your claim), finding, note.", Props: with(map[string]any{"kind": str("claim|done|release|finding|note"), "topic": str("Short work item, e.g. 'audit sidebar'"), "text": str("Details")}), Required: []string{"kind"},
+			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
+				ws, err := s.wsArg(a)
+				if err != nil {
+					return nil, err
+				}
+				return s.call(ctx, "POST", "/v1/workspaces/"+ws+"/board", pick(a, "kind", "topic", "text"))
+			}},
+		{Name: "board_read", Desc: "Read the shared board: current claims and posts after seq. Check it before starting a work item.", Props: with(map[string]any{"since": num("Last seen seq")}),
+			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
+				ws, err := s.wsArg(a)
+				if err != nil {
+					return nil, err
+				}
+				return s.call(ctx, "GET", fmt.Sprintf("/v1/workspaces/%s/board?since=%d", ws, int64(a.N("since"))), nil)
+			}},
 		{Name: "cursor_inbox", Desc: "Read your inbox (messages after seq).", Props: map[string]any{"since": num("Last seen seq")},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				return s.call(ctx, "GET", fmt.Sprintf("/v1/cursors/self/inbox?since=%d", int64(a.N("since"))), nil)

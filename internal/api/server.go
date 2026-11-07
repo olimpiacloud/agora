@@ -47,7 +47,11 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 func writeErr(w http.ResponseWriter, err error) {
 	code := http.StatusBadRequest
 	var ce *core.ConflictError
+	var cc *core.ClaimConflict
 	switch {
+	case errors.As(err, &cc):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "claim": cc.Claim})
+		return
 	case errors.Is(err, core.ErrNotFound):
 		code = http.StatusNotFound
 	case errors.Is(err, core.ErrForbidden):
@@ -360,6 +364,38 @@ func (s *Server) routes() {
 		}
 		writeJSON(w, 200, res)
 	}))
+	m.HandleFunc("GET /v1/workspaces/{id}/board", s.h(func(w http.ResponseWriter, r *http.Request, p *Principal) {
+		id := r.PathValue("id")
+		if !p.CanWorkspace(id) && !s.ownsWorkspace(p, id) {
+			writeErr(w, core.ErrForbidden)
+			return
+		}
+		since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		writeJSON(w, 200, s.m.BoardRead(id, since, limit))
+	}, false))
+	m.HandleFunc("POST /v1/workspaces/{id}/board", s.h(func(w http.ResponseWriter, r *http.Request, p *Principal) {
+		id := r.PathValue("id")
+		if !p.CanWorkspace(id) && !s.ownsWorkspace(p, id) {
+			writeErr(w, core.ErrForbidden)
+			return
+		}
+		var req struct {
+			Kind  string `json:"kind"`
+			Topic string `json:"topic"`
+			Text  string `json:"text"`
+		}
+		if err := decode(r, &req); err != nil {
+			writeErr(w, err)
+			return
+		}
+		post, err := s.m.BoardPost(id, p.CursorID(), req.Kind, req.Topic, req.Text)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, 201, post)
+	}, false))
 	m.HandleFunc("GET /v1/workspaces/{id}/locks", s.ws(func(w http.ResponseWriter, r *http.Request, p *Principal, id string) {
 		writeJSON(w, 200, s.m.Arb.List(id))
 	}))

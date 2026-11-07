@@ -53,6 +53,7 @@ type Manager struct {
 	tokens    map[string]string
 	worktrees map[string]*Worktree
 	mail      map[string][]Message
+	boards    map[string]*board
 	mailSeq   int64
 	launches  map[string]*launchProc
 	cpuPrev   map[string]cpuSample

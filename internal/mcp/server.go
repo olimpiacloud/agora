@@ -273,7 +273,7 @@ func q(kv ...string) string {
 }
 
 var groupOf = map[string]string{
-	"cursor_status": "self", "cursor_report": "self", "cursor_complete": "self", "cursor_fail": "self", "human_request": "self", "events_wait": "self", "cursor_inbox": "self",
+	"cursor_status": "self", "cursor_report": "self", "cursor_complete": "self", "cursor_fail": "self", "human_request": "self", "events_wait": "self", "cursor_inbox": "self", "board_post": "self", "board_read": "self",
 	"cursor_spawn": "spawn", "cursor_list": "spawn", "cursor_get": "spawn", "cursor_wait": "spawn", "cursor_control": "spawn", "cursor_message": "spawn",
 	"control_surface": "desktop", "system_info": "workspace", "worktree_create": "process",
 	"browser_drag": "browserx", "browser_hover": "browserx", "browser_upload": "browserx", "browser_tabs": "browserx", "browser_wait": "browserx", "browser_emulate": "browserx", "browser_audit": "browserx",

@@ -385,6 +385,7 @@ func (m *Manager) Destroy(ctx context.Context, id string, purge bool) error {
 		m.CancelCursor(c, "workspace destroyed", true)
 	}
 	m.Arb.Clear(id)
+	m.dropBoard(id)
 	if purge {
 		shared := false
 		m.mu.Lock()

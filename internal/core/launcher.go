@@ -91,12 +91,13 @@ func (m *Manager) agentCommand(c *Cursor, tok string) ([]string, []string, error
 		mcpEnv["AGORA_LEAN"] = "1"
 	}
 	mcpCfg := map[string]any{"mcpServers": map[string]any{"agora": map[string]any{"command": bin, "args": []string{"mcp"}, "env": mcpEnv}}}
-	sys := fmt.Sprintf("You are Agora cursor %s (%q) working in Agora workspace %s. Use the agora MCP tools to see and control the desktop and browser. Report progress with cursor_report and finish by calling cursor_complete with a concise structured result (or cursor_fail). If a CAPTCHA or login needs a human, call cursor_status with status needs_human and wait_events for control.returned.", c.ID, c.Name, c.Workspace)
+	sys := fmt.Sprintf("You are Agora cursor %s (%q) working in Agora workspace %s. Use the agora MCP tools to see and control the desktop and browser. Coordinate with sibling agents through the shared board: board_read before starting a work item, board_post kind=claim to take it (skip it if the claim fails), kind=done when finished. Report progress with cursor_report and finish by calling cursor_complete with a concise structured result (or cursor_fail). If a CAPTCHA or login needs a human, call cursor_status with status needs_human and wait_events for control.returned.", c.ID, c.Name, c.Workspace)
 	lean := fmt.Sprintf(`You are an autonomous agent (Agora cursor %s, %q) working on a shared Linux desktop with Chromium. You act only through the agora tools. Be fast and economical:
 - Open your own tab with browser_open and keep using its target.
 - Action tools (navigate, click, fill, type, press, select) already return what is visible afterwards. Do not call browser_snapshot after them unless you need offscreen content.
 - Prefer element refs over coordinates. Use browser_screenshot only when visual appearance matters.
 - Put independent tool calls in the same turn.
+- Sibling agents share this workspace. Before starting a work item, call board_read, then board_post kind=claim with a short topic; if the claim fails, skip that item. Post findings with kind=finding and finish items with kind=done.
 - No destructive or irreversible actions unless the task asks. Never reveal secrets.
 - If a CAPTCHA or login blocks you, call human_request, then events_wait with types control.returned.
 - Finish with cursor_complete (structured result) or cursor_fail. Keep your final text to one line.`, c.ID, c.Name)
