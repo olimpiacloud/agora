@@ -56,7 +56,7 @@ Status column: **fixed** means fixed on `main` with the commit listed. **open** 
    - **Fix:** use `sync.Once`, and close only on `Failed` or `Closed`.
    - **If we skip it:** a rare race kills every workspace at once.
 
-9. **Dashboard and Paseo plugin leave orphan streams open** (`web/src/transport.ts:46-61,110`, `paseo-plugin/server/live.ts:85-91`). **Open, web and plugin owners.**
+9. **Dashboard and Paseo plugin leave orphan streams open** (`web/src/transport.ts:46-61,110`, `paseo-plugin/server/live.ts:85-91`). **Fixed.**
    - **What this is:** the dashboard tries WebRTC and falls back to WebSocket. The plugin caches one stream per workspace.
    - **Problem:** closing the view during WebRTC setup still starts the WebSocket fallback afterwards, because `startWS` never checks `closed`. In the plugin, two polls during token minting both open sockets, and the first is overwritten without being closed. Both leaks keep a server viewer alive, so the encoder never sleeps.
    - **Fix:** check `this.closed` after each `await` and at the top of `startWS`. In the plugin, share one pending `open()` promise per key.
@@ -104,7 +104,7 @@ Status column: **fixed** means fixed on `main` with the commit listed. **open** 
     - **Problem:** each JPEG viewer opens 2 X connections and a 33 MB shared-memory segment, and encodes its own frames. Xvfb allows 256 clients, so about 120 viewers lock Chrome out of its own display.
     - **Fix:** one JPEG producer per workspace with fan-out, or at least a per-workspace viewer cap.
 
-18. **Desktop never reconnects after the viewer token expires** (`web/src/api.ts:143-146`, `web/src/transport.ts:64-69`). **Open, web owner.**
+18. **Desktop never reconnects after the viewer token expires** (`web/src/api.ts:143-146`, `web/src/transport.ts:64-69`). **Fixed.**
     - **Problem:** the viewer token is minted once with a 1-hour lifetime. After that, every reconnect gets 401 until the page is reloaded.
     - **Fix:** mint a fresh token inside `start()`.
 
