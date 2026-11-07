@@ -5,7 +5,7 @@ sidebar:
   icon: wrench
 ---
 
-`agora mcp` exposes these tools. With a cursor token, the `workspace` argument is hidden and defaults to the cursor's workspace. `AGORA_TOOLS` limits which groups are listed (the `self` group is always on); see [token efficiency](/agents#token-efficiency).
+`agora mcp` exposes these tools. With a cursor token, the `workspace` argument is hidden and defaults to the cursor's workspace. `AGORA_TOOLS` limits which groups are listed (the `self` group is always on); see [token efficiency](/agents/tools#token-efficiency).
 
 Results of browser actions are text: `done. now visible:` followed by the visible page, diffed against the last view of that tab. If a CAPTCHA is detected, the result ends with `CHALLENGE DETECTED: {...}`. Screenshots are returned as images.
 
@@ -75,7 +75,7 @@ These use the cursor's own MPX pointer and keyboard.
 
 | Tool | Description |
 | --- | --- |
-| `cursor_spawn` | Create a child with a `goal`, `permissions`, `launch`, `worktree` and `max_children`. See [launching subagents](/agents#launching-subagents). |
+| `cursor_spawn` | Create a child with a `goal`, `permissions`, `launch`, `worktree` and `max_children`. See [launching subagents](/agents/tools#subagents). |
 | `cursor_list` | List cursors, by `parent`, `workspace` or `active`. |
 | `cursor_get` | One cursor (`self` for yourself). |
 | `cursor_wait` | Block until cursors finish (`all` default true, `timeout_ms` default 10 min). |

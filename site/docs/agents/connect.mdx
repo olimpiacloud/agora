@@ -1,0 +1,118 @@
+---
+title: Connect your agent
+description: Add the Agora MCP server to Claude Code, Codex or any MCP client, install the Agora skill and read these docs as Markdown.
+sidebar:
+  label: Connect
+  icon: plug
+---
+
+Agents talk to Agora through `agora mcp`, a stdio MCP server that forwards every tool call to the daemon's HTTP API. Run it on the same machine as the daemon.
+
+## Before you start
+
+Agora must be installed and running ([install](/install)). Check it:
+
+```bash
+agora api GET /v1/health
+```
+
+`{"ok":true,...}` means the daemon is up.
+
+## Get a cursor token
+
+Give each agent its own cursor token. With a cursor token the server knows who the agent is and which workspace it works in, so tools do not ask for a `workspace` argument, and the agent can only reach its own workspace.
+
+```bash
+WS=$(agora api POST /v1/workspaces '{"name":"main"}' | jq -r .id)
+agora api POST /v1/cursors "{\"name\":\"claude\",\"workspace\":\"$WS\"}" | jq -r .token
+```
+
+The token is shown once; Agora stores only a hash. To limit what the agent can do, add `"permissions"` (see [security](/agents/security#permissions)).
+
+:::warning
+Without `AGORA_TOKEN`, `agora mcp` falls back to the admin token if it can read it. The admin token reaches every workspace. Use cursor tokens for agents.
+:::
+
+## Claude Code
+
+```bash
+claude mcp add agora -e AGORA_TOKEN=<cursor token> -- agora mcp
+```
+
+Or install the Claude Code plugin, which bundles the skill and the MCP server:
+
+```text
+/plugin marketplace add olimpiacloud/agora-skills
+/plugin install agora@agora
+```
+
+## Codex
+
+```bash
+codex mcp add agora --env AGORA_TOKEN=<cursor token> -- agora mcp
+```
+
+## Any MCP client
+
+Cursor, VS Code, Windsurf and other clients with a JSON config:
+
+```json
+{
+  "mcpServers": {
+    "agora": {
+      "command": "agora",
+      "args": ["mcp"],
+      "env": { "AGORA_TOKEN": "<cursor token>" }
+    }
+  }
+}
+```
+
+Restart the agent session after adding the server so the tools load.
+
+## Environment variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `AGORA_URL` | `http://127.0.0.1:7788` | The daemon. |
+| `AGORA_TOKEN` | the admin token from `AGORA_HOME`, `/var/lib/agora` or `~/.agora`, if readable | A cursor token (recommended) or the admin token. |
+| `AGORA_WORKSPACE` | none | Default workspace when the token is not bound to one. |
+| `AGORA_TOOLS` | all groups | Comma-separated tool groups to expose: `browser`, `browserx`, `desktop`, `spawn`, `workspace`, `process`. The `self` group is always on. |
+| `AGORA_LEAN` | off | `1` shortens tool descriptions to one sentence. |
+
+A lean setup for an agent that only browses and spawns subagents:
+
+```bash
+claude mcp add agora -e AGORA_TOKEN=<cursor token> -e AGORA_TOOLS=browser,spawn -e AGORA_LEAN=1 -- agora mcp
+```
+
+If the agent runs on another machine, run `agora mcp` there and point `AGORA_URL` at an authenticated tunnel to the daemon. Never open port 7788 to the internet.
+
+## Paseo
+
+With the [Paseo plugin](/paseo), every Claude or Codex agent in Paseo gets the Agora MCP server and its own cursor automatically. You do not need to run the commands above.
+
+## Subagents launched by Agora
+
+Agents that Agora starts with `cursor_spawn` and `launch` already have the MCP server configured with their own scoped token. See [subagents](/agents/tools#subagents).
+
+## The Agora skill
+
+The skill teaches agents how to work with Agora: act and read the observation that comes back, use refs instead of coordinates, spawn and wait for subagents, and ask for a human on CAPTCHAs.
+
+```bash
+bunx skills add olimpiacloud/agora-skills
+```
+
+It works with Claude Code, Codex, Cursor and other agents with skills support. Remove it with `bunx skills remove agora`. The source is at [github.com/olimpiacloud/agora-skills](https://github.com/olimpiacloud/agora-skills).
+
+## Docs for agents
+
+These docs are also published in formats agents can read directly:
+
+| URL | Contents |
+| --- | --- |
+| [`/llms.txt`](/llms.txt) | An index of every page with its description. |
+| [`/llms-full.txt`](/llms-full.txt) | The full text of every page in one file. |
+| [`/skill.md`](/skill.md) | A skill file with a map of these docs. |
+| Any page URL + `.md` | That page as Markdown, for example `/agents/tools.md`. |

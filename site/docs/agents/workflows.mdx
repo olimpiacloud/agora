@@ -1,0 +1,108 @@
+---
+title: Workflows
+description: End-to-end tool sequences for common agent tasks in Agora, from testing a web app to running parallel subagents and passing a CAPTCHA.
+sidebar:
+  icon: route
+---
+
+Each recipe shows the tool calls in order. Arguments are abbreviated; see the [MCP tools reference](/mcp-tools) for the full list. With a cursor token, the `workspace` argument is not needed.
+
+## Test a web app
+
+```txt
+browser_open(url: "http://127.0.0.1:3000")        → target, and what is visible
+browser_fill(target, ref: "e4", text: "test@example.com")
+browser_fill(target, ref: "e5", text: "...", submit: true)
+browser_audit(target)                              → overflow, contrast, labels, SEO, LCP/CLS, broken links
+browser_emulate(target, width: 390, height: 844, mobile: true)
+browser_audit(target)                              → the same checks on mobile
+browser_emulate(target, width: 0, height: 0)       → reset
+cursor_complete(result: {issues: [...]})           → if you are a subagent
+```
+
+Each fill and click returns what changed on screen, so you do not need a snapshot between steps. Take a `browser_screenshot` only for a visual issue the audit cannot describe.
+
+## Extract data from a page
+
+```txt
+browser_open(url: "https://example.com/pricing")
+browser_eval(target, expression: "[...document.querySelectorAll('.plan')].map(p => ({name: p.querySelector('h3').textContent, price: p.querySelector('.price').textContent}))")
+```
+
+`browser_eval` returns the JSON value in one call. If the page loads data late, call `browser_wait(target, selector: ".plan")` first.
+
+## Fan out parallel subagents
+
+```txt
+cursor_spawn(name: "acme",   goal: "Open https://acme.com/pricing and return the plans as JSON",
+             permissions: ["browser"], launch: {adapter: "claude", model: "claude-haiku-5-5", effort: "low"})
+cursor_spawn(name: "globex", goal: "Open https://globex.com/pricing and return the plans as JSON", ...)
+cursor_spawn(name: "initech", goal: "...", ...)
+cursor_wait(ids: ["cur_a", "cur_b", "cur_c"], timeout_ms: 600000)
+                                                   → status, result and usage of each child
+```
+
+Spawn every child before waiting. Give each a self-contained `goal`; children do not see your conversation. Each child opens its own window, and children launched by Agora use the [shared board](/agents/tools#the-shared-board) to avoid duplicate work. To stop one early, `cursor_control(id, op: "cancel")`.
+
+## Split a list of work items
+
+When children share one list (pages to review, rows to check), let them coordinate through the board instead of assigning items yourself:
+
+```txt
+board_read()                                       → current claims and posts
+board_post(kind: "claim", topic: "audit /settings")
+                                                   → fails if another cursor holds or finished it: pick another item
+... do the work ...
+board_post(kind: "finding", topic: "audit /settings", text: "Save button has no label")
+board_post(kind: "done", topic: "audit /settings")
+```
+
+## Log in with help from a human
+
+```txt
+browser_open(url: "https://app.example.com/login")
+browser_fill(target, ref: "e3", text: "<email the user gave you>", submit: true)
+                                                   → CHALLENGE DETECTED, or an MFA prompt
+human_request(reason: "Solve the CAPTCHA and enter the MFA code on app.example.com, then return control")
+events_wait(types: "control.returned", wait_ms: 30000)
+                                                   → repeat on timeout
+browser_snapshot(target)                           → continue in the same tab, now logged in
+```
+
+Tell the user where to take control: the dashboard, the viewer URL from `agora open <workspace>`, or the [Paseo panel](/paseo). The login is kept in the workspace's browser profile, so later sessions start logged in.
+
+## Drive a desktop app
+
+```txt
+desktop_launch(command: "gimp", args: ["/var/lib/agora-apps/input.png"])
+desktop_windows()                                  → window id and geometry
+desktop_screenshot(window: <id>, max_width: 1024)  → orient once
+desktop_key(keys: "ctrl+shift+e")
+desktop_type(text: "output.png")
+desktop_key(keys: "Return")
+desktop_screenshot(window: <id>)                   → check the result
+```
+
+Coordinates in a screenshot match `desktop_click` unless `max_width` scaled the image. Use `control_surface(op: "acquire", surface: "win:<id>", ttl_ms: 60000)` if other cursors might type into the same window. The program must be installed on the Agora host.
+
+## Branch a logged-in session
+
+Requires the `workspace` permission.
+
+```txt
+workspace_op(op: "checkpoint", snapshot: true)     → tabs, layout, cursors and a copy of the profile
+workspace_op(op: "fork", name: "experiment")       → a new workspace with a copy of the profile and home
+```
+
+Work in the fork without touching the original session. `suspend` and `resume` keep a workspace on disk and reopen its tabs.
+
+## Parallel development with worktrees
+
+```txt
+cursor_spawn(name: "fix-header", goal: "Fix the header overflow on mobile and run the tests",
+             permissions: ["browser", "process"],
+             worktree: {repo: "/srv/app", branch: "fix-header", base: "main"},
+             launch: {adapter: "claude"})
+```
+
+The child gets its own git worktree and a port range (`PORT`, `AGORA_PORT_BASE`, `AGORA_PORTS`), so several children can run dev servers side by side and test them in their own tabs.

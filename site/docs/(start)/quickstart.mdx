@@ -50,7 +50,7 @@ This walkthrough uses the `agora api` command, which calls the HTTP API with the
     agora api POST /v1/cursors "{\"name\":\"main\",\"workspace\":\"$WS\"}" | jq '{id: .cursor.id, token}'
     ```
 
-    Give that token to your agent's MCP configuration. See [agents](/agents).
+    Give that token to your agent's MCP configuration. See [connect your agent](/agents/connect).
   </Step>
   <Step title="Let Agora launch a subagent">
     With `launch`, Agora starts Claude Code (or Codex, or any command) with a scoped token and the Agora MCP server already wired in:

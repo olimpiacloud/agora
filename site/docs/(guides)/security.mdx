@@ -41,10 +41,38 @@ Isolation between cursors **in the same workspace** is logical: tab owners, surf
 For agents you do not trust:
 
 - Put them in **separate workspaces** (separate processes, display and profile), and do not give them the `workspace` permission.
+- Turn on [`sandbox`](#sandboxed-workspaces) for those workspaces, so their browser and apps cannot read the rest of the host.
 - Use a dedicated profile without your personal logins.
 - Keep `process` and `desktop` off unless the task needs them: `process` launches programs as the `agora` user.
 
 Agora does not checkpoint memory: a suspended workspace keeps cookies and storage on disk in its profile, not open page state.
+
+## Sandboxed workspaces
+
+Set `"sandbox": true` in a workspace's `config` to run its Chrome and every app launched in it in a confined view of the host:
+
+```bash
+agora api POST /v1/workspaces '{"name":"untrusted","start":true,"config":{"sandbox":true}}'
+```
+
+Each sandboxed process starts through `agora sandbox-exec`, which runs it in new mount, PID, IPC and UTS namespaces:
+
+- The whole system is mounted read-only and without setuid bits.
+- Home directories, `/tmp`, `/run`, `/var/lib` (which holds the Agora state, Docker and databases), `/var/log` and the Agora home directory are hidden behind empty mounts.
+- Only the workspace's own directory, its Chrome profile and its X socket are mounted read-write.
+- The workspace gets a private `/tmp`, `/dev/shm` and `/proc`. Its apps cannot see, signal or trace processes of other workspaces.
+- The process runs as the unprivileged apps user, with no supplementary groups and no capabilities. Chrome's own sandbox keeps working inside.
+
+Limits:
+
+- **Root only.** The daemon must run as root with an apps user (the default for `agora.service`). Otherwise a sandboxed workspace fails to start.
+- **Shared network.** Sandboxed processes can reach services on `127.0.0.1`, including the Agora API (which still needs a token). Do not run unauthenticated local services next to untrusted workspaces.
+- **Shared display.** Xvfb runs outside the sandbox, and X11 does not isolate clients on the same display: every app in the workspace can read the screen and send input to every other window of that workspace.
+- **Readable system files.** World-readable files in `/etc` and `/usr` stay readable. Keep secrets out of them.
+- **Same user, same kernel.** A kernel exploit escapes the sandbox. For hostile code, use a VM or a separate machine.
+- **Launched agents are not sandboxed.** Agents started by `cursor_spawn` (`claude`, `codex`) run as the daemon user, because they need its credentials. The sandbox covers Chrome and `desktop_launch` apps only.
+- **No D-Bus.** `/run` is hidden, so apps that need the system or session bus lose those features.
+- CPU and memory limits come from the workspace `budget`, not from the sandbox.
 
 ## Reporting a vulnerability
 

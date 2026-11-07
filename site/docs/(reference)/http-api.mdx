@@ -157,7 +157,7 @@ Create body:
 | `parent` | Defaults to the calling cursor. |
 | `permissions` | Subset of `desktop`, `browser`, `process`, `spawn`, `message`, `workspace`; intersected with the parent's. |
 | `budget` | `max_cursors` (direct children), `max_depth`. |
-| `launch` | `{adapter, model, effort, prompt, command, tools, profile, env}`. See [launching subagents](/agents#launching-subagents). |
+| `launch` | `{adapter, model, effort, prompt, command, tools, profile, env}`. See [launching subagents](/agents/tools#subagents). |
 | `worktree` | `{repo, branch, base, ports}`. |
 
 Operations (`POST /v1/cursors/{id}/{op}`, by the cursor itself, an ancestor or the admin):

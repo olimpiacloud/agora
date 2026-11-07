@@ -1,0 +1,48 @@
+---
+title: Prompts
+description: Prompts to copy and give your agent once Agora is connected, from testing a site to running parallel subagents.
+sidebar:
+  icon: message-square-text
+---
+
+Copy any of these into Claude Code, Codex or another agent with Agora [connected](/agents/connect). They work best with the [Agora skill](/agents/connect#the-agora-skill) installed.
+
+<Prompt description="**Check the setup**" actions={["copy"]}>
+Check that Agora is running with `agora api GET /v1/health` and that the agora MCP tools are loaded. Open https://example.com in your own tab with browser_open and tell me the page title. Do not install or restart anything without asking me.
+</Prompt>
+
+<Prompt description="**Test** a local web app" actions={["copy"]}>
+Open http://127.0.0.1:3000 in Agora. Go through the signup flow with a test account, then run browser_audit on each page you visit, on desktop and on a 390x844 mobile viewport with browser_emulate. Give me a list of issues ordered by severity, with the page and the element for each. Take a screenshot only when an issue is visual and the audit does not explain it.
+</Prompt>
+
+<Prompt description="**Audit and fix** the UI" actions={["copy"]}>
+Run browser_audit on http://127.0.0.1:3000 in Agora, on desktop and on mobile. Fix in the code what it finds (contrast, overflow, unlabeled inputs, missing alt text, tap targets), reload the page and run the audit again until it is clean or only items you cannot fix remain. Tell me what is left and why.
+</Prompt>
+
+<Prompt description="**Compare** competitors in parallel" actions={["copy"]}>
+Compare the pricing pages of these sites: [list of URLs]. Spawn one Agora subagent per site with cursor_spawn, using launch adapter claude, a small model, effort low and only the browser permission. Give each a self-contained goal that asks for the plans as JSON (name, monthly price, main limits). Wait for all of them with one cursor_wait and give me a single comparison table.
+</Prompt>
+
+<Prompt description="**Log in** with my help" actions={["copy"]}>
+Open [URL] in Agora and log in with the account I give you. If you hit a CAPTCHA, MFA or anything that needs a person, call human_request with exactly what I must do, tell me, and wait with events_wait for control.returned. Then continue in the same tab. Never try to bypass a CAPTCHA.
+</Prompt>
+
+<Prompt description="**Fill a form** from a file" actions={["copy"]}>
+Read [file] and fill the form at [URL] in Agora, one entry per row. Use browser_fill by ref and read the observation each action returns instead of taking snapshots. Do not submit the final step: stop before it and show me what you entered.
+</Prompt>
+
+<Prompt description="**Extract** a table" actions={["copy"]}>
+Open [URL] in Agora and extract the main table as JSON with a single browser_eval call. If the data loads late, use browser_wait first. Save the result to data.json.
+</Prompt>
+
+<Prompt description="**Desktop app**" actions={["copy"]}>
+Open [file] in GIMP on the Agora desktop with desktop_launch, export it as PNG at 1200 px wide and tell me where you saved it. Take one desktop_screenshot to orient and another to check the result.
+</Prompt>
+
+<Prompt description="**Split work** across subagents" actions={["copy"]}>
+Review every page listed in [file] with Agora subagents. Spawn four children with cursor_spawn (launch adapter claude, browser permission). Tell them to use the shared board: board_read first, board_post a claim for each page before working on it, post findings with kind finding and done when finished. Wait for all of them and merge their findings into one report.
+</Prompt>
+
+<Prompt description="**Parallel fixes** with worktrees" actions={["copy"]}>
+For each issue in [list], spawn an Agora subagent with cursor_spawn, a git worktree of this repo on its own branch, the browser and process permissions, and launch adapter claude. Each child fixes its issue, starts the app on its own PORT, checks the fix in its own browser tab and finishes with cursor_complete and a summary. Wait for all of them and list the branches ready for review.
+</Prompt>

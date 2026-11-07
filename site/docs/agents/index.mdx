@@ -1,0 +1,73 @@
+---
+title: Agora for agents
+description: How an AI agent connects to Agora and uses its MCP tools to browse, drive desktop apps, run subagents and hand off to a human.
+sidebar:
+  label: Overview
+  icon: bot
+---
+
+Agora is an agent-native desktop runtime by [Olimpia](https://olimpia.dev). One daemon on a Linux machine runs one X display and one Chromium per workspace, and many agents share it. Each agent is a **cursor** with its own scoped token, input seat, tabs, status and structured result. Agents control it through `agora mcp`, a stdio MCP server with 52 tools.
+
+## Connect in three steps
+
+<Steps>
+  <Step title="Check that Agora is running">
+    On the machine where the agent runs:
+
+    ```bash
+    agora api GET /v1/health
+    ```
+
+    If `agora` is missing, see [install](/install).
+  </Step>
+  <Step title="Add the MCP server">
+    ```bash
+    claude mcp add agora -e AGORA_TOKEN=<cursor token> -- agora mcp
+    ```
+
+    Codex, other clients and how to get a cursor token: [Connect](/agents/connect).
+  </Step>
+  <Step title="Install the skill (optional)">
+    ```bash
+    bunx skills add olimpiacloud/agora-skills
+    ```
+
+    It teaches the agent the cheap workflows: snapshot first, act by ref, wait for events, hand CAPTCHAs to a human.
+  </Step>
+</Steps>
+
+## What an agent can do
+
+| Task | Tools |
+| --- | --- |
+| Read and act on web pages | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_eval` |
+| Test and review a UI | `browser_audit`, `browser_emulate`, `browser_screenshot` |
+| Drive any desktop app | `desktop_launch`, `desktop_screenshot`, `desktop_click`, `desktop_type`, `desktop_key` |
+| Run subagents in parallel | `cursor_spawn`, `cursor_wait`, `cursor_control`, `cursor_message` |
+| Coordinate with siblings | `board_read`, `board_post` |
+| Report progress and results | `cursor_report`, `cursor_complete`, `cursor_fail` |
+| Ask a human for help | `human_request`, `events_wait` |
+| Manage workspaces | `workspace_create`, `workspace_op`, `workspace_info` |
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Connect" href="/agents/connect" icon="plug">
+    MCP setup for Claude Code, Codex and any client, the skill, and machine-readable docs.
+  </Card>
+  <Card title="Tools" href="/agents/tools" icon="wrench">
+    How to use each tool family well, and how to keep token usage low.
+  </Card>
+  <Card title="Workflows" href="/agents/workflows" icon="route">
+    End-to-end recipes: test a web app, fan out subagents, pass a CAPTCHA.
+  </Card>
+  <Card title="Prompts" href="/agents/prompts" icon="message-square-text">
+    Prompts to copy and give your agent.
+  </Card>
+  <Card title="Security" href="/agents/security" icon="shield">
+    Token scopes, what an agent can reach, human handoff and sandboxed workspaces.
+  </Card>
+  <Card title="MCP tools reference" href="/mcp-tools" icon="book-open">
+    Every tool and its arguments.
+  </Card>
+</CardGroup>
