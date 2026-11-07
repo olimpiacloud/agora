@@ -12,7 +12,7 @@ Agora gives AI agents a real Linux computer, with Chromium, X11 apps and a termi
 
 ## Features
 
-- **Cursors, not containers.** Five agents share one desktop and one browser, each with its own windows, its own MPX pointer and keyboard, and its own token. Permissions can only narrow when an agent spawns a subagent. Pause, cancel (cascading), wait and messaging are built in.
+- **Cursors, not containers.** Five agents share one desktop and one browser, each with its own windows, its own MPX pointer and keyboard, and its own token. Permissions can only narrow when an agent spawns a subagent. Pause, cancel (cascading), wait, messaging and a shared board with claims (so parallel subagents do not repeat each other's work) are built in.
 - **Truly concurrent input.** Two agents type into two windows at the same time without mixing keys. In Chromium, input goes per tab over CDP, with no OS focus at all.
 - **Semantic and visual control.** A compact snapshot with refs (`[e3] button "Sign in"`) for pages, and after each action only what changed. Clicks by ref or coordinates, fill, select, upload, downloads, dialogs, drag, eval, device emulation, and a built-in UI audit. Pixel control for any X11 app.
 - **Human in the loop.** CAPTCHAs and logins are detected, the cursor moves to `needs_human`, a person takes over from the viewer, then hands control back. The agent continues on the same tab and session.
@@ -101,6 +101,7 @@ One Xvfb and one Chromium per workspace, MPX seats per cursor, CDP over a pipe, 
 - Browsers and apps run as the unprivileged `agora` user with Chrome's sandbox enabled and no access to root's files. CDP has no TCP port.
 - Every call needs a token. Cursor tokens are scoped to a workspace and a permission set, and viewer links expire.
 - Cursors in the same workspace are isolated logically, not by a security boundary. Use separate workspaces for agents that must not see each other.
+- `config.sandbox: true` runs a workspace's Chrome and apps with a read-only system, a private home and no view of other workspaces. See [docs/SANDBOX.md](docs/SANDBOX.md) for what it does and does not protect against.
 
 Report vulnerabilities privately: [SECURITY.md](SECURITY.md).
 
