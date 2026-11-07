@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/pion/interceptor"
@@ -71,6 +72,7 @@ type RTCSession struct {
 	Sink   *QueueSink
 	Events chan []byte
 	closed chan struct{}
+	once   sync.Once
 }
 
 type RTCHandlers struct {
@@ -133,46 +135,49 @@ func (r *RTC) Answer(ctx context.Context, id string, mode Mode, offer string, h 
 			})
 		}
 	})
-	var closeOnce bool
-	pc.OnConnectionStateChange(func(st webrtc.PeerConnectionState) {
-		if (st == webrtc.PeerConnectionStateFailed || st == webrtc.PeerConnectionStateClosed || st == webrtc.PeerConnectionStateDisconnected) && !closeOnce {
-			closeOnce = true
-			close(s.closed)
-			if h.OnClose != nil {
-				h.OnClose()
-			}
-		}
-	})
 	s.Sink = NewQueueSink(id, mode, 6, func(f *Frame) error {
 		return track.WriteSample(media.Sample{Data: f.Data, Duration: f.Duration})
 	})
-	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: offer}); err != nil {
+	pc.OnConnectionStateChange(func(st webrtc.PeerConnectionState) { s.stateChanged(st, h.OnClose) })
+	fail := func(err error) (*RTCSession, string, error) {
+		s.Sink.Close()
 		pc.Close()
 		return nil, "", err
+	}
+	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: offer}); err != nil {
+		return fail(err)
 	}
 	ans, err := pc.CreateAnswer(nil)
 	if err != nil {
-		pc.Close()
-		return nil, "", err
+		return fail(err)
 	}
 	gather := webrtc.GatheringCompletePromise(pc)
 	if err := pc.SetLocalDescription(ans); err != nil {
-		pc.Close()
-		return nil, "", err
+		return fail(err)
 	}
 	select {
 	case <-gather:
 	case <-time.After(3 * time.Second):
 	case <-ctx.Done():
-		pc.Close()
-		return nil, "", ctx.Err()
+		return fail(ctx.Err())
 	}
 	ld := pc.LocalDescription()
 	if ld == nil {
-		pc.Close()
-		return nil, "", errors.New("no local description")
+		return fail(errors.New("no local description"))
 	}
 	return s, ld.SDP, nil
+}
+
+func (s *RTCSession) stateChanged(st webrtc.PeerConnectionState, onClose func()) {
+	if st != webrtc.PeerConnectionStateFailed && st != webrtc.PeerConnectionStateClosed {
+		return
+	}
+	s.once.Do(func() {
+		close(s.closed)
+		if onClose != nil {
+			onClose()
+		}
+	})
 }
 
 func (s *RTCSession) Closed() <-chan struct{} { return s.closed }
