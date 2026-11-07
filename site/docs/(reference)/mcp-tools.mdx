@@ -1,0 +1,97 @@
+---
+title: MCP tools
+description: The 50 tools of the agora mcp server, grouped by what they control.
+sidebar:
+  icon: wrench
+---
+
+`agora mcp` exposes these tools. With a cursor token, the `workspace` argument is hidden and defaults to the cursor's workspace. `AGORA_TOOLS` limits which groups are listed (the `self` group is always on); see [token efficiency](/agents#token-efficiency).
+
+Results of browser actions are text: `done. now visible:` followed by the visible page, diffed against the last view of that tab. If a CAPTCHA is detected, the result ends with `CHALLENGE DETECTED: {...}`. Screenshots are returned as images.
+
+## Browser (`browser`)
+
+| Tool | Description |
+| --- | --- |
+| `browser_open` | Open a tab you own, in its own window. `url`, `isolated` (separate context), `same_window`. Returns the `target` and what is visible. |
+| `browser_navigate` | Navigate a tab, wait for load (`wait`: `load`, `domcontentloaded`, `none`) and return what is visible. |
+| `browser_snapshot` | Full semantic view of the page, offscreen included: interactive elements with refs `[eN]`, roles, names, boxes, plus page text (`max_text`, default 3000). |
+| `browser_click` | Click by `ref`, or at viewport `x`,`y` for canvases, cross-origin iframes and CAPTCHA widgets. `button`, `count`. |
+| `browser_fill` | Replace a field's value by `ref`. `submit: true` presses Enter. |
+| `browser_type` | Type key by key into the focused element (or click `ref` first). Works on background tabs without stealing focus. |
+| `browser_press` | Press a key or combo: `Enter`, `Tab`, `Escape`, `ctrl+a`, `ArrowDown`. |
+| `browser_scroll` | Scroll by pixels (`dy > 0` down), optionally at `x`,`y`. |
+| `browser_select` | Select options of a `<select>` by value or label. |
+| `browser_eval` | Evaluate a JavaScript expression and return its JSON value. Promises are awaited. |
+| `browser_screenshot` | Viewport or `full_page` screenshot. Defaults to `max_width` 1024 and JPEG `quality` 60. |
+| `browser_action` | `back`, `forward`, `reload`, `dialog` (`accept`, `text`), `challenge`, `focus`, `info`, `close`. |
+
+## Extra browser tools (`browserx`)
+
+| Tool | Description |
+| --- | --- |
+| `browser_tabs` | List tabs with owners. |
+| `browser_hover` | Hover by `ref` or coordinates. |
+| `browser_drag` | Drag inside the page from `x`,`y` to `x2`,`y2`. |
+| `browser_upload` | Set `files` (paths on the Agora host) on a file input `ref`, or on the file chooser that just opened. |
+| `browser_wait` | Wait for a `selector`, visible `text` or `url_contains`. `timeout_ms` default 15000. |
+| `browser_emulate` | Emulate a device viewport: `width`, `height`, `scale`, `mobile`. `width: 0` resets. |
+| `browser_audit` | One-call UI and quality audit: overflow, contrast, tiny text, tap targets, unnamed controls, unlabeled inputs, missing alt, headings, meta and SEO tags, TTFB/LCP/CLS, bytes by type, third parties, fonts, animations, reduced motion and broken internal links. |
+
+## Desktop (`desktop`)
+
+These use the cursor's own MPX pointer and keyboard.
+
+| Tool | Description |
+| --- | --- |
+| `desktop_screenshot` | Desktop, one `window` or a region (`x`, `y`, `w`, `h`). Coordinates match `desktop_*` unless `max_width` scales the image. |
+| `desktop_windows` | Top-level windows: id, title, class, geometry. |
+| `desktop_click` | Click at screen coordinates. Focuses and raises the window under it. |
+| `desktop_move` | Move the pointer (hover). |
+| `desktop_drag` | Drag with the left button. |
+| `desktop_scroll` | Scroll in notches at a position. |
+| `desktop_type` | Type into the window focused by your keyboard, optionally focusing `window` first. |
+| `desktop_key` | Key or combo: `Enter`, `ctrl+l`, `ctrl+shift+t`, `alt+F4`. |
+| `desktop_window` | `raise`, `move`, `resize`, `release` (back to the layout) or `close` a window. |
+| `desktop_launch` | Launch a program (unprivileged, `DISPLAY` set). `restore: true` relaunches it on resume. |
+| `desktop_clipboard` | Get the clipboard, or set it with `text`. |
+| `control_surface` | `acquire` or `release` an exclusive lock on `win:<id>` or `tab:<target>`, with `ttl_ms`. |
+
+## Self (always available)
+
+| Tool | Description |
+| --- | --- |
+| `cursor_status` | Set your live status: `running`, `thinking`, `executing`, `waiting`, `blocked`, `needs_human`. |
+| `cursor_report` | Report progress (`message`, `percent`) to your parent. |
+| `cursor_complete` | Finish with a structured `result`. Releases your seats, locks and tabs. |
+| `cursor_fail` | Finish with an `error`. |
+| `cursor_inbox` | Read messages after `since`. |
+| `human_request` | Ask a human to take over (CAPTCHA, MFA, approval). Then call `events_wait` with `types: "control.returned"`. |
+| `events_wait` | Wait for events: `types` (comma-separated, `*` suffix), `cursor`, `since`, `wait_ms` (default 30000). |
+
+## Subagents (`spawn`)
+
+| Tool | Description |
+| --- | --- |
+| `cursor_spawn` | Create a child with a `goal`, `permissions`, `launch`, `worktree` and `max_children`. See [launching subagents](/agents#launching-subagents). |
+| `cursor_list` | List cursors, by `parent`, `workspace` or `active`. |
+| `cursor_get` | One cursor (`self` for yourself). |
+| `cursor_wait` | Block until cursors finish (`all` default true, `timeout_ms` default 10 min). |
+| `cursor_control` | `cancel` (cascades), `pause`, `resume` or `transfer` a descendant. |
+| `cursor_message` | Send JSON to another cursor's inbox. |
+
+## Workspaces (`workspace`)
+
+| Tool | Description |
+| --- | --- |
+| `workspace_list` | Workspaces with state, resources, viewers and cursors. |
+| `workspace_create` | Create a workspace: `name`, `width`, `height`, `profile`, `layout`, `start`. |
+| `workspace_info` | State, display, browser, usage and locks. |
+| `workspace_op` | `start`, `suspend`, `resume`, `freeze`, `thaw`, `checkpoint`, `fork`, `resize`, `layout`, `browser-restart`. |
+| `system_info` | Daemon resources and per-workspace memory and CPU. |
+
+## Processes (`process`)
+
+| Tool | Description |
+| --- | --- |
+| `worktree_create` | Git worktree with its own branch, directory and port range: `repo`, `branch`, `base`. |

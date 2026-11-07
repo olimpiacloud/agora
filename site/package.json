@@ -1,0 +1,14 @@
+{
+  "name": "agora-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "blume dev",
+    "build": "bun run copy-scripts && blume build",
+    "copy-scripts": "for f in install.sh uninstall.sh; do [ -f ../scripts/$f ] && cp ../scripts/$f public/$f || true; done",
+    "deploy": "bun run build && cf deploy"
+  },
+  "dependencies": {
+    "blume": "^2.2.6"
+  }
+}

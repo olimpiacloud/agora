@@ -1,0 +1,70 @@
+---
+title: Introduction
+description: Agora gives AI agents a real Linux computer they can share. One desktop and one Chromium per workspace, many agents on it at once, each with its own cursor, keyboard and tabs.
+sidebar:
+  icon: compass
+---
+
+Agora is an agent-native desktop runtime, built by [Olimpia](https://olimpia.dev). A single Go daemon gives every agent a real Linux computer (Chromium, X11 apps, a terminal) without starting a desktop or a browser per agent. Agents are **cursors**: they have an identity, scoped permissions, their own input seat, their own tabs, a parent-child hierarchy and structured results.
+
+## Why
+
+Remote desktops were built for one person looking at one screen. Agents need something else:
+
+- **Many agents, one machine.** Five agents in one Agora workspace share one Xvfb display and one Chromium, with a window each. That is about 326 MB against 1.45 GB for five separate Xvfb + noVNC + Chrome stacks.
+- **Input that does not collide.** Each cursor gets its own MPX pointer and keyboard on demand, and browser actions go straight to the tab over CDP. Two agents can type into two windows at the same time.
+- **Semantic control first, pixels when needed.** A compact snapshot with element refs (`[e3] button "Sign in"`) takes about 1 ms and costs a fraction of the tokens of a screenshot. Pixel control is still there for canvases, CAPTCHAs and any desktop app.
+- **Humans in the loop.** When an agent hits a CAPTCHA or a login, it asks for a human. You take control from the viewer, solve it and hand it back; the agent continues in the same tab and session.
+- **Nothing runs when nobody watches.** With no viewers there is no capture and no encoding. Workspaces go idle, freeze or suspend to disk and resume with their tabs.
+
+## What you get
+
+<CardGroup cols={2}>
+  <Card title="Workspaces" href="/concepts#workspaces" icon="monitor">
+    Persistent virtual computers with a lifecycle, budgets, checkpoints and copy-on-write forks. Free until used.
+  </Card>
+  <Card title="Cursors and subagents" href="/concepts#cursors" icon="mouse-pointer-2">
+    Scoped tokens, permissions that only narrow when delegated, messaging, progress and `wait`. Agora can launch Claude Code or Codex for you.
+  </Card>
+  <Card title="MCP server" href="/mcp-tools" icon="plug">
+    50 tools over stdio for any harness: browser, desktop, cursors, events and workspaces.
+  </Card>
+  <Card title="Streaming" href="/concepts#streaming" icon="video">
+    H.264 over WebRTC or WebSocket, and damage-driven JPEG for light clients. Encode once, fan out to every viewer.
+  </Card>
+</CardGroup>
+
+## Agora vs noVNC
+
+Measured with `go run ./cmd/agora-bench` against Xvfb + x11vnc + noVNC + Chrome on a Ryzen 5 3400G (8 threads). Full results on the [benchmarks](/benchmarks) page.
+
+| | Agora | noVNC stack |
+| --- | ---: | ---: |
+| Empty desktop, memory | 36 MB | 82 MB |
+| Empty desktop, start | 98 ms | 246 ms |
+| Five agents with a browser, memory | 326 MB | 1,454 MB |
+| New agent ready | 156 ms | 521 ms |
+| Click to DOM `mousedown` (p50) | 1.1 ms | 3.9 ms |
+| Streaming bandwidth, 1 viewer | 303 kbit/s | 5,862 kbit/s |
+| Suspended workspace, memory | 41 MB | not possible |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Install" href="/install" icon="download">
+    One line on Ubuntu or Debian.
+  </Card>
+  <Card title="Quickstart" href="/quickstart" icon="rocket">
+    Create a workspace, open a tab and read it like an agent.
+  </Card>
+  <Card title="Connect your agent" href="/agents" icon="bot">
+    MCP for Claude Code and Codex, plus the Agora skill.
+  </Card>
+  <Card title="Security model" href="/security" icon="shield">
+    What Agora isolates, and what it does not.
+  </Card>
+</CardGroup>
+
+:::note
+Agora is part of the Olimpia family, alongside the [Olimpia cloud](https://olimpia.dev) ([docs](https://docs.olimpia.dev)) and [Acropolis](https://acropolis.olimpia.dev), an OCI image builder that is still experimental.
+:::

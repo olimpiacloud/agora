@@ -1,0 +1,28 @@
+---
+title: Paseo plugin
+description: Watch and steer Agora desktops from Paseo, on desktop or mobile, and give every Paseo agent its own Agora cursor.
+sidebar:
+  icon: smartphone
+---
+
+[Paseo](https://paseo.sh) runs coding agents on your machines and lets you drive them from anywhere. The Agora plugin connects Paseo to an Agora daemon on the same host.
+
+## What it adds
+
+- **An Agora panel in every workspace** with the desktop live. Frames are JPEG images sent only when the screen changes, through Paseo's existing connection, so it works on mobile and needs no open ports. Tap to click, long press to right click, type into the focused window, send keys, scroll, and take or return control when an agent asks for a human.
+- **Screenshot cards in the chat.** Every screenshot an agent takes with Agora tools shows up as a card with a link to the live view.
+- **MCP for every agent.** Each Claude or Codex agent gets the Agora MCP server with its own cursor. Agents in the same Paseo workspace share one Agora workspace (one desktop and one browser profile), each with its own windows and input seat.
+
+## Install
+
+Install and run Agora on the Paseo daemon host first ([install](/install)), then:
+
+```bash
+paseo plugin install /path/to/agora/paseo-plugin
+```
+
+The plugin requires Paseo 0.15.2 or later. It reads the admin token from `/var/lib/agora/admin.token` (override with `AGORA_HOME` or `AGORA_URL`) and stores per-agent cursor tokens in `~/.agora-paseo/state.json` with mode 0600.
+
+## Opt out per agent
+
+Add the label `agora/enabled=false` to an agent to skip it: it gets no Agora MCP server and no cursor.

@@ -1,0 +1,115 @@
+---
+title: Concepts
+description: Workspaces and their lifecycle, cursors and subagents, input seats and arbitration, human takeover, streaming modes and persistence.
+sidebar:
+  icon: boxes
+---
+
+## Workspaces
+
+A workspace is a persistent virtual computer: one Xvfb display, one Chromium (started on demand), the apps you launch in it and a home directory. Agora itself is the window manager (a minimal EWMH one with `tile`, `max` and `float` layouts). Creating a workspace costs nothing; it only starts processes when something uses it.
+
+### Lifecycle
+
+```text
+created → active → idle → frozen → suspended → destroyed
+```
+
+| State | What is running | How you get there |
+| --- | --- | --- |
+| `created` | Nothing | `POST /v1/workspaces` |
+| `active` | Xvfb, window manager, Chromium and apps | `start`, or any call that needs the desktop |
+| `idle` | Same, input seats released | No activity for `idle_after` (default 5 min) and no viewers |
+| `frozen` | Processes stopped with the cgroup freezer (or `SIGSTOP`); RAM kept | `freeze`, or `freeze_on_idle: true` |
+| `suspended` | Nothing; a checkpoint is on disk | `suspend`, or `suspend_after` while idle |
+| `destroyed` | Nothing | `DELETE /v1/workspaces/{id}` (`?purge=1` also deletes its data) |
+
+`thaw` resumes a frozen workspace instantly. `resume` rebuilds a suspended one and reopens its tabs for their owners. A workspace with active agents is not marked idle for 30 minutes, and one with viewers never is. A workspace with a `ttl` is destroyed when it expires.
+
+### Configuration
+
+Pass these under `config` when creating a workspace:
+
+| Field | Description |
+| --- | --- |
+| `width`, `height` | Screen size, 320×240 to 3840×2160. Default 1280×800. |
+| `profile` | Browser profile name. Workspaces that share a profile share logins. Default: a dedicated one. |
+| `layout` | `tile` (default), `max` or `float`. |
+| `idle_after`, `suspend_after`, `ttl` | Durations such as `"10m"` or `"2h"`. |
+| `freeze_on_idle` | Freeze instead of only marking idle. |
+| `budget` | `memory_mb`, `cpu_percent`, `max_cursors`, `max_tabs`, `max_depth`. |
+| `browser_args` | Extra Chromium flags. |
+| `autostart_urls` | Tabs to open when the browser starts. |
+
+### Checkpoints and forks
+
+A checkpoint records tabs (with their owners), apps marked `restore`, the layout and the cursors; with `snapshot: true` it also copies the browser profile. `fork` creates a new workspace with a copy of the profile and home directory, so you can branch a logged-in session without touching the original.
+
+## Cursors
+
+A cursor is an agent (or a human, or a script) acting in a workspace. Each cursor has:
+
+- **A token** that identifies it on every call. Cursor tokens only reach their own workspace and their own descendants.
+- **Permissions**, a subset of `desktop`, `browser`, `process`, `spawn`, `message` and `workspace`. The default is everything except `workspace`. A child gets the intersection of what it asks for and what its parent has, so permissions only narrow when delegated.
+- **A status**: `pending`, `running`, `thinking`, `executing`, `waiting`, `blocked`, `needs_human`, `paused`, and the terminal `done`, `failed` and `cancelled`.
+- **Progress reports, an inbox and a result.** A cursor finishes with `complete` (any JSON result) or `fail`. Finishing releases its seats, locks and tabs.
+- **A color and a visible pointer** on the live view, so you can tell agents apart.
+
+### Subagents
+
+Any cursor with `spawn` can create children with a goal. Limits come from budgets: `max_cursors` caps direct children, `max_depth` caps how deep the tree goes (never more than 8 levels). Parents can `wait` for children, read their results, message them, `pause`, `resume`, `transfer` them to another parent or workspace, or `cancel` them, which cascades to the whole subtree.
+
+With `launch`, Agora starts the agent process itself:
+
+| Adapter | What runs |
+| --- | --- |
+| `claude` | `claude -p` with the Agora MCP server, a lean system prompt and only Agora tools allowed. Token usage, turns, cost and duration land in `cursor.usage`. |
+| `codex` | `codex exec` with the Agora MCP server configured. |
+| `command` | Any command, with `AGORA_URL`, `AGORA_TOKEN`, `AGORA_CURSOR`, `AGORA_WORKSPACE` and `AGORA_GOAL` in its environment. |
+
+Add `worktree: {repo, branch, base}` to give the child its own git worktree and a port range (`PORT`, `AGORA_PORT_BASE`, `AGORA_PORTS`) for parallel development.
+
+## Input seats and arbitration
+
+Agents drive the browser semantically over CDP, per tab, so cursors in different tabs never compete for focus. For everything else, each cursor gets its own **input seat**: an MPX master pointer and keyboard (XInput 2.2) with their own focus. Two agents can type into two windows at the same time without mixing keys or modifiers.
+
+Seats are scarce (about 6 per display, an X server limit). Agora assigns them on first desktop input and recycles them after 2 minutes without use, or when the workspace goes idle.
+
+To keep others out of a window or tab for a while, a cursor can **acquire a surface lock** (`win:<id>` or `tab:<target>`) with a lease. Locks have priorities: agents (10) < humans (100) < admin (1000). A higher priority wins; a conflicting call from a lower one gets `409 Conflict` with the lock that blocked it.
+
+## Human takeover and CAPTCHAs
+
+Agora checks pages for reCAPTCHA, hCaptcha, Turnstile, Arkose and DataDome challenges and reports them in tool results (`CHALLENGE DETECTED`) and as `browser.challenge.detected` events. When an agent needs a person:
+
+1. The agent calls `human_request` with a reason. Its status becomes `needs_human` and a `human.requested` event fires. The browser and session stay alive.
+2. You open the live view (dashboard, `agora open`, or the [Paseo panel](/paseo)) and **take control**. That puts a human-priority lock on the whole workspace, so agent input is refused (`409`) until you hand it back.
+3. You solve the CAPTCHA, log in or approve, then **return control**. A `control.returned` event fires and cursors waiting on a human go back to `running`.
+4. The agent, blocked on `events_wait` for `control.returned`, continues in the same tab.
+
+## Streaming
+
+Nothing is captured or encoded until someone watches. Capture uses XShm (Composite for covered windows) and XDamage wakes the encoder only when pixels change.
+
+| Transport | Use it when |
+| --- | --- |
+| WebRTC (H.264) | The viewer can reach the host over UDP. Lowest latency. |
+| WebSocket + WebCodecs (H.264) | Behind HTTP tunnels such as Cloudflare Tunnel, where UDP is not available. |
+| Damage-driven JPEG | Light clients: the Paseo panel and mobile. Frames are sent only when the screen changes. |
+
+The encoder (x264, `ultrafast`/`zerolatency`) runs once per workspace and fans out to every viewer. Frame rate adapts: 30 fps while a human is interacting (2 s after the last input), 15 fps while an interactive viewer only watches, 8 fps in observation mode (`?mode=observation`).
+
+## Persistence
+
+Everything lives in the state directory (`/var/lib/agora` as root, `~/.agora` otherwise):
+
+| Path | Contents |
+| --- | --- |
+| `admin.token`, `viewer.key` | The admin token and the key that signs viewer tokens. Mode 0600. |
+| `profiles/` | Browser profiles, by name. Logins survive suspend, resume and daemon restarts. |
+| `workspaces/` | Per-workspace home directories (downloads included). |
+| `checkpoints/` | Checkpoints and profile snapshots. |
+| `events/` | Event logs per workspace. |
+| `agents/` | Logs of launched agents. |
+| `worktrees/` | Git worktrees created for cursors. |
+
+On `SIGTERM` the daemon checkpoints every workspace before exiting. Memory is not checkpointed: after a suspend, pages reload from their URLs.

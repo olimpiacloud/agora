@@ -1,0 +1,72 @@
+---
+title: Quickstart
+description: Create a workspace, open a tab, read it the way an agent does, watch it live and launch a subagent.
+sidebar:
+  icon: rocket
+---
+
+This walkthrough uses the `agora api` command, which calls the HTTP API with the admin token from the state directory (or `AGORA_URL` and `AGORA_TOKEN` from the environment). Run it on the Agora host; if the state lives in `/var/lib/agora`, run it as root. You also need `jq`.
+
+<Steps>
+  <Step title="Create a workspace">
+    A workspace is a persistent virtual computer. `start: true` boots its display right away; otherwise it starts on first use.
+
+    ```bash
+    WS=$(agora api POST /v1/workspaces '{"name":"demo","start":true}' | jq -r .id)
+    echo $WS
+    ```
+  </Step>
+  <Step title="Open a tab">
+    ```bash
+    TAB=$(agora api POST /v1/workspaces/$WS/tabs '{"url":"https://example.com"}' | jq -r .target)
+    ```
+  </Step>
+  <Step title="Read it like an agent">
+    The semantic snapshot lists interactive elements with refs, roles, names and boxes, plus the page text.
+
+    ```bash
+    agora api POST /v1/workspaces/$WS/tabs/$TAB '{"action":"snapshot"}' | jq -r .snapshot
+    ```
+
+    Click a ref and get back only what changed on screen:
+
+    ```bash
+    agora api POST /v1/workspaces/$WS/tabs/$TAB '{"action":"click","ref":"e1","observe":true}' | jq -r .observation
+    ```
+  </Step>
+  <Step title="Watch it live">
+    Print a viewer URL with a short-lived token and open it in your browser (through an SSH tunnel if Agora runs on another machine):
+
+    ```bash
+    agora open $WS
+    ```
+
+    Or open the dashboard at `http://127.0.0.1:7788` and paste the output of `agora token`.
+  </Step>
+  <Step title="Create a cursor for an agent">
+    Cursors are agents. Each one gets its own token, limited to its workspace and permissions.
+
+    ```bash
+    agora api POST /v1/cursors "{\"name\":\"main\",\"workspace\":\"$WS\"}" | jq '{id: .cursor.id, token}'
+    ```
+
+    Give that token to your agent's MCP configuration. See [agents](/agents).
+  </Step>
+  <Step title="Let Agora launch a subagent">
+    With `launch`, Agora starts Claude Code (or Codex, or any command) with a scoped token and the Agora MCP server already wired in:
+
+    ```bash
+    CHILD=$(agora api POST /v1/cursors "{\"name\":\"reader\",\"workspace\":\"$WS\",\"goal\":\"Open example.com and return the page title\",\"launch\":{\"adapter\":\"claude\",\"model\":\"claude-haiku-5-5\"}}" | jq -r .cursor.id)
+    agora api POST /v1/wait "{\"ids\":[\"$CHILD\"]}" | jq '.cursors[0] | {status, result, usage}'
+    ```
+
+    The `claude` CLI must be installed and logged in for the user that runs Agora.
+  </Step>
+  <Step title="Suspend and clean up">
+    ```bash
+    agora api POST /v1/workspaces/$WS/suspend
+    agora api POST /v1/workspaces/$WS/resume
+    agora api DELETE "/v1/workspaces/$WS?purge=1"
+    ```
+  </Step>
+</Steps>

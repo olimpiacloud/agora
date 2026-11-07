@@ -1,0 +1,192 @@
+---
+title: HTTP API
+description: Every endpoint of the Agora daemon, with authentication, request bodies and errors.
+sidebar:
+  icon: braces
+---
+
+The daemon serves a JSON API under `/v1` on `127.0.0.1:7788`, plus the dashboard at `/`.
+
+## Conventions
+
+- **Auth:** `Authorization: Bearer <token>` on every endpoint except `GET /v1/health`. Streaming endpoints also accept `?token=`. See [tokens](/security#tokens).
+- **Acting as a cursor:** with the admin token, send `X-Agora-Cursor: <cursor id>` to act as that cursor.
+- **`self`:** in `/v1/cursors/{id}/...`, a cursor token can use `self` as the id.
+- **Errors:** `{"error": "..."}` with `400` (bad request), `401` (missing or invalid token), `403` (not allowed), `404` (not found), `409` (surface locked; the body includes the `lock`) or `504` (timeout).
+- **Durations** in workspace config are strings like `"10m"` or numbers of seconds.
+
+## System
+
+| Method and path | Description |
+| --- | --- |
+| `GET /v1/health` | Liveness, no auth. |
+| `GET /v1/system` | Version, uptime, daemon resources, per-workspace memory and CPU. |
+| `GET /v1/me` | `{admin, cursor}` for the calling token. |
+| `POST /v1/viewer-tokens` | Admin. `{workspace, control, ttl_seconds}` → `{token, expires_in}`. TTL defaults to 3600, at most 86400. |
+
+## Workspaces
+
+| Method and path | Description |
+| --- | --- |
+| `POST /v1/workspaces` | Admin or `workspace` permission. `{name, config, start, labels}` → `201` workspace. See [configuration](/concepts#configuration). |
+| `GET /v1/workspaces` | Workspaces visible to the token, with state, resources, viewers and cursors. |
+| `GET /v1/workspaces/{id}` | One workspace. `?detail=1` refreshes the detailed usage first. |
+| `DELETE /v1/workspaces/{id}` | Admin. Destroy. `?purge=1` also deletes its home, checkpoints, events and its profile (unless another workspace shares it). |
+| `POST /v1/workspaces/{id}/{op}` | Lifecycle and control operations, below. |
+
+### Operations
+
+`POST /v1/workspaces/{id}/{op}` with an optional JSON body:
+
+| `op` | Body | Description |
+| --- | --- | --- |
+| `start` | | Boot the display. |
+| `suspend` | `reason` | Checkpoint, close the browser and free everything. Needs `workspace`. |
+| `resume` | | Rebuild and restore tabs to their owners. |
+| `freeze` | | Stop all processes, keep RAM. Needs `workspace`. |
+| `thaw` | | Continue a frozen workspace. |
+| `checkpoint` | `reason`, `snapshot` | Record state; `snapshot: true` also copies the profile. |
+| `fork` | `name` | New workspace with a copy of profile and home. Needs `workspace`. |
+| `resize` | `width`, `height` | Change the screen size. |
+| `layout` | `layout` | `tile`, `max` or `float`. |
+| `clipboard` | `text` | Set the clipboard; returns `{text}`. |
+| `browser-restart` | | Restart Chromium. |
+| `request-human` | `reason` | Mark the calling cursor `needs_human` and emit `human.requested`. |
+| `control-take` | | Human-priority lock on the whole workspace. Needs `workspace`. |
+| `control-return` | | Release it; emits `control.returned`. Needs `workspace`. |
+| `acquire` | `surface`, `ttl_ms`, `reason` | Lock `win:<id>` or `tab:<target>` for the calling cursor. |
+| `release` | `surface` | Release a lock. |
+| `usage` | | Detailed memory and CPU per process. |
+
+## Desktop
+
+| Method and path | Description |
+| --- | --- |
+| `GET /v1/workspaces/{id}/windows` | Top-level windows: id, title, class, geometry. |
+| `POST /v1/workspaces/{id}/windows/{win}` | `{action, x, y, width, height}` with `raise`, `move`, `resize`, `release` (back to the layout) or `close`. |
+| `GET /v1/workspaces/{id}/screenshot` | Image. Query: `window`, `x`, `y`, `w`, `h`, `format` (`jpeg` or `png`), `quality`, `max_width`. The `X-Agora-Shot` header has an id for `/v1/shots/{sid}`. |
+| `GET /v1/shots/{sid}` | A stored screenshot. |
+| `POST /v1/workspaces/{id}/input` | Input on the caller's own seat, below. |
+| `POST /v1/workspaces/{id}/apps` | Needs `process`. `{command, args, restore}` → `201` process. Runs as the apps user with `DISPLAY` set. |
+| `GET /v1/workspaces/{id}/processes` | Processes started in the workspace. |
+| `DELETE /v1/workspaces/{id}/processes/{pid}` | Kill one. |
+| `GET /v1/workspaces/{id}/clipboard` | `{text}`. |
+| `GET /v1/workspaces/{id}/locks` | Current surface locks. |
+
+### Input
+
+`POST /v1/workspaces/{id}/input`:
+
+| `action` | Fields |
+| --- | --- |
+| `click` | `x`, `y`, `button` (1 left, 2 middle, 3 right), `count` |
+| `move` | `x`, `y` |
+| `drag` | `x`, `y`, `x2`, `y2` |
+| `scroll` | `x`, `y`, `dx`, `dy` (notches; `dy > 0` scrolls down) |
+| `type` | `text`, optional `window` to focus first, `delay_ms` |
+| `key` | `keys` such as `Enter`, `ctrl+l`, `alt+F4`; optional `window` |
+
+`no_raise: true` clicks without raising the window.
+
+## Browser
+
+| Method and path | Description |
+| --- | --- |
+| `GET /v1/workspaces/{id}/tabs` | Tabs with owners. |
+| `POST /v1/workspaces/{id}/tabs` | `{url, isolated, same_window, observe}` → `201 {target, url, context}`; with `observe`, also `observation`. |
+| `POST /v1/workspaces/{id}/tabs/{target}` | A tab action, below. Times out after 60 s, or `timeout_ms` + 5 s. |
+
+### Tab actions
+
+Body: `{"action": "...", ...}`. With `observe: true`, actions that change the page return `observation`: what is visible now, diffed against the last view of that tab.
+
+| `action` | Fields | Returns |
+| --- | --- | --- |
+| `navigate` | `url`, `wait` (`load`, `domcontentloaded`, `none`) | |
+| `back`, `forward`, `reload` | | |
+| `snapshot` | `max_text` (default 3000) | `snapshot`, `challenge` |
+| `screenshot` | `full_page`, `format`, `quality`, `max_width` | `image` (base64), `mime`, `shot` |
+| `click` | `ref` or `x`,`y`; `button`, `count` | |
+| `hover` | `ref` or `x`,`y` | |
+| `drag` | `x`, `y`, `x2`, `y2` (HTML5 drag supported) | |
+| `fill` | `ref`, `text`, `submit` | |
+| `type` | `text`, optional `ref` to click first | |
+| `insert_text` | `text` | |
+| `press` | `keys` | |
+| `scroll` | `dx`, `dy` (pixels), optional `x`, `y` | |
+| `select` | `ref`, `values` (values or labels) | |
+| `upload` | `files` (host paths), optional `ref` (otherwise the open file chooser) | |
+| `eval` | `expression` (promises are awaited) | the JSON value |
+| `wait` | `selector`, `text` or `url_contains`; `timeout_ms` (default 15000) | |
+| `dialog` | `accept`, `text` | |
+| `challenge` | | `challenge` |
+| `audit` | | `audit` |
+| `emulate` | `width`, `height`, `scale`, `mobile` (width 0 resets) | |
+| `focus`, `info`, `close` | | `info` returns `tab` |
+
+## Streaming
+
+These accept a viewer token, a cursor token of the same workspace (watch only) or the admin token, as a header or `?token=`. `?mode=observation` lowers the frame rate to 8 fps.
+
+| Method and path | Description |
+| --- | --- |
+| `GET /v1/workspaces/{id}/stream/ws` | WebSocket. Binary messages are H.264 frames with a 13-byte header (key flag, 64-bit PTS, 16-bit width and height). Text messages from the client are input events when the token allows control. |
+| `POST /v1/workspaces/{id}/stream/webrtc` | `{sdp, mode}` with an SDP offer → `{sdp, viewer}` with the answer. |
+| `GET /v1/workspaces/{id}/stream/jpeg` | Damage-driven JPEG frames for light clients. |
+
+## Cursors
+
+| Method and path | Description |
+| --- | --- |
+| `POST /v1/cursors` | Admin or `spawn`. Body below → `201 {cursor, token}`. If the launch fails, the cursor is still returned with `error`. |
+| `GET /v1/cursors` | Query: `workspace`, `parent`, `root`, `active=1`. |
+| `GET /v1/cursors/{id}` | Status, progress, result, usage. |
+| `GET /v1/cursors/{id}/inbox` | Messages after `?since=<seq>`. |
+| `DELETE /v1/cursors/{id}` | Delete a cursor. |
+| `POST /v1/cursors/{id}/{op}` | Operations, below. |
+| `POST /v1/wait` | `{ids, all, timeout_ms}` → `{cursors, timeout}`. Waits for all (default) or any. |
+
+Create body:
+
+| Field | Description |
+| --- | --- |
+| `name`, `goal`, `labels` | |
+| `workspace` | Defaults to the parent's. |
+| `parent` | Defaults to the calling cursor. |
+| `permissions` | Subset of `desktop`, `browser`, `process`, `spawn`, `message`, `workspace`; intersected with the parent's. |
+| `budget` | `max_cursors` (direct children), `max_depth`. |
+| `launch` | `{adapter, model, effort, prompt, command, tools, profile, env}`. See [launching subagents](/agents#launching-subagents). |
+| `worktree` | `{repo, branch, base, ports}`. |
+
+Operations (`POST /v1/cursors/{id}/{op}`, by the cursor itself, an ancestor or the admin):
+
+| `op` | Body |
+| --- | --- |
+| `status` | `status`, `detail` |
+| `report` | `message`, `percent` |
+| `complete` | `result` (any JSON) |
+| `fail` | `error` |
+| `cancel` | `reason`, `cascade` (default `true`) |
+| `pause`, `resume` | |
+| `message` | `body` (any JSON). Any cursor can message another. |
+| `transfer` | `parent`, `workspace` |
+| `wait` | `timeout_ms` → `{cursor, timeout}` |
+
+## Events
+
+| Method and path | Description |
+| --- | --- |
+| `GET /v1/events` | Query: `workspace`, `cursor`, `types` (comma-separated, `*` suffix allowed), `since`, `limit` (≤ 500), `wait_ms` (long poll, ≤ 120000) → `{events, seq}`. |
+| `GET /v1/events/stream` | Server-sent events with the same filters. Heartbeat every 25 s. |
+
+Non-admin tokens only see events of their own workspace.
+
+Event types: `workspace.created`, `workspace.state`, `workspace.checkpoint`, `workspace.forked`, `workspace.resumed`, `workspace.recovered`, `workspace.expired`, `workspace.destroyed`, `workspace.budget_exceeded`, `desktop.started`, `desktop.resized`, `desktop.window`, `desktop.windows`, `desktop.screenshot`, `desktop.crashed`, `browser.started`, `browser.stopped`, `browser.crashed`, `browser.tab.created`, `browser.tab.opened`, `browser.tab.navigated`, `browser.tab.closed`, `browser.tab.restored`, `browser.page.loaded`, `browser.dialog.opened`, `browser.dialog.closed`, `browser.filechooser.opened`, `browser.download.*`, `browser.challenge.detected`, `cursor.created`, `cursor.status`, `cursor.progress`, `cursor.action`, `cursor.pointer`, `cursor.message`, `cursor.transferred`, `cursor.ended`, `cursor.deleted`, `agent.launched`, `agent.usage`, `agent.exited`, `control.acquired`, `control.released`, `control.lost`, `control.taken`, `control.returned`, `human.requested`, `process.started`, `process.exited`, `viewer.attached`, `viewer.detached`, `stream.state`, `scheduler.suspend`, `scheduler.tab_closed`, `worktree.created`, `worktree.removed`.
+
+## Worktrees
+
+| Method and path | Description |
+| --- | --- |
+| `POST /v1/worktrees` | Admin or `process`. `{repo, branch, base, ports}` → `201` worktree with `path`, `port_base`, `ports`. |
+| `GET /v1/worktrees` | All worktrees. |
+| `DELETE /v1/worktrees/{id}` | Admin. `?force=1` removes even with changes. |

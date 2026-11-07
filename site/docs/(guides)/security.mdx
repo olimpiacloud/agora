@@ -1,0 +1,51 @@
+---
+title: Security model
+description: How Agora authenticates callers, isolates browsers and apps, and what it does not protect against.
+sidebar:
+  icon: shield
+---
+
+Agora controls a real computer with logged-in browser sessions. Treat access to it like SSH access to the host.
+
+## Network exposure
+
+- The daemon listens on **127.0.0.1:7788** and refuses to bind to any other interface unless you set `AGORA_ALLOW_PUBLIC=1`. Don't.
+- For remote access, publish it through an **authenticated tunnel** (for example Cloudflare Tunnel with Access, or an SSH tunnel). Never open the port to the internet.
+- Chromium is controlled with `--remote-debugging-pipe`: **there is no CDP TCP port**. X displays are local to the host and never exposed.
+- WebRTC needs UDP to the host. Behind HTTP tunnels, viewers use the WebSocket transport instead.
+- The embedded dashboard is served with a strict Content Security Policy (`default-src 'self'`).
+
+## Tokens
+
+Every API call needs `Authorization: Bearer <token>`. Streaming endpoints also accept `?token=` because browsers cannot set headers on WebSocket and `<img>` requests.
+
+| Token | Scope | Where it comes from |
+| --- | --- | --- |
+| Admin | Everything. | Generated on first start in `admin.token` (mode 0600). `agora token` prints it. |
+| Cursor | Its own workspace and its own descendants, limited by its permissions. | Returned once by `POST /v1/cursors`. Agora stores only a hash. |
+| Viewer | Streaming one workspace, with or without input, for at most 24 hours. Rejected on every other endpoint. | `POST /v1/viewer-tokens` or `agora open`. HMAC-signed with `viewer.key`. |
+
+Give agents cursor tokens, never the admin token. Permissions only narrow down the tree: a child can never get a permission its parent lacks, and only cursors with `workspace` can create workspaces, freeze, suspend, fork or take control.
+
+## Process isolation
+
+- When the daemon runs as root, **apps and browsers run as the unprivileged `agora` user** (home `/var/lib/agora-apps`), with no access to root's files.
+- **Chrome's sandbox stays on.**
+- Each workspace has its own processes, display and (by default) browser profile. Processes start inside a per-workspace cgroup when cgroups v2 is available, which enforces `memory_mb` and `cpu_percent` budgets.
+- Request bodies are capped at 8 MB.
+
+## What Agora does not isolate
+
+Isolation between cursors **in the same workspace** is logical: tab owners, surface locks and token scopes. They share one display, one browser profile and one Unix user. A cursor with `browser` permission can read any page in that profile.
+
+For agents you do not trust:
+
+- Put them in **separate workspaces** (separate processes, display and profile), and do not give them the `workspace` permission.
+- Use a dedicated profile without your personal logins.
+- Keep `process` and `desktop` off unless the task needs them: `process` launches programs as the `agora` user.
+
+Agora does not checkpoint memory: a suspended workspace keeps cookies and storage on disk in its profile, not open page state.
+
+## Reporting a vulnerability
+
+Email **security@olimpia.dev** with the details. Please do not open a public issue for security reports.

@@ -1,0 +1,7 @@
+node_modules
+dist
+.blume
+.cloudflare
+public/install.sh
+public/uninstall.sh
+.astro

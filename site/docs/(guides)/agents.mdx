@@ -1,0 +1,113 @@
+---
+title: Agents
+description: Connect Claude Code, Codex or any MCP client to Agora, install the Agora skill, launch subagents and keep token usage low.
+sidebar:
+  icon: bot
+---
+
+Agents talk to Agora through `agora mcp`, a stdio MCP server that wraps the HTTP API. It reads two environment variables:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `AGORA_URL` | `http://127.0.0.1:7788` | The daemon. |
+| `AGORA_TOKEN` | the admin token in the state directory, if readable | A cursor token (recommended) or the admin token. |
+
+With a cursor token the server knows who the agent is and which workspace it works in, so tools do not ask for a `workspace` argument.
+
+## Get a cursor token
+
+Create a workspace and a cursor for your agent (see the [quickstart](/quickstart)):
+
+```bash
+WS=$(agora api POST /v1/workspaces '{"name":"main"}' | jq -r .id)
+agora api POST /v1/cursors "{\"name\":\"claude\",\"workspace\":\"$WS\"}" | jq -r .token
+```
+
+## Claude Code
+
+```bash
+claude mcp add agora -e AGORA_TOKEN=<cursor token> -- agora mcp
+```
+
+## Codex
+
+```bash
+codex mcp add agora --env AGORA_TOKEN=<cursor token> -- agora mcp
+```
+
+## Any MCP client
+
+```json
+{
+  "mcpServers": {
+    "agora": {
+      "command": "agora",
+      "args": ["mcp"],
+      "env": { "AGORA_TOKEN": "<cursor token>" }
+    }
+  }
+}
+```
+
+If the client runs on another machine, run `agora mcp` there too and point `AGORA_URL` at an authenticated tunnel to the daemon.
+
+## The Agora skill
+
+The skill teaches agents how to work with Agora: snapshot first, act by ref, use the observation that comes back, spawn and wait for subagents, and ask for a human on CAPTCHAs.
+
+```bash
+bunx skills add olimpiacloud/agora-skills
+```
+
+## Launching subagents
+
+An agent with the `spawn` permission can create children with `cursor_spawn`. With `launch`, Agora starts the agent process with its own scoped token and the MCP server already configured:
+
+```json
+{
+  "name": "pricing-check",
+  "goal": "Open https://example.com/pricing and return the plans as JSON",
+  "permissions": ["browser"],
+  "launch": { "adapter": "claude", "model": "claude-haiku-5-5", "effort": "low" }
+}
+```
+
+Then wait for the results instead of polling:
+
+```json
+{ "ids": ["cur_..."], "timeout_ms": 600000 }
+```
+
+`cursor_wait` returns each child with its `status`, `result` and, for Claude Code, its `usage` (tokens, turns, cost and duration). Children can run in parallel in the same workspace: each opens its own window and gets its own input seat.
+
+`launch` options:
+
+| Field | Description |
+| --- | --- |
+| `adapter` | `claude`, `codex` or `command`. |
+| `model` | Model for the agent CLI. |
+| `effort` | `low`, `medium` or `high` (Claude Code). |
+| `prompt` | Overrides the goal as the prompt. |
+| `command` | For `command`: the argv to run. |
+| `tools` | Tool groups to expose: `browser`, `browserx`, `desktop`, `spawn`, `workspace`, `process`. Default `browser`, plus groups matching the cursor's permissions. |
+| `profile` | `lean` (default) or `full`. |
+
+## Token efficiency
+
+Agora is designed so agents spend tokens on the task, not on the plumbing. In our benchmark of three browser tasks, the lean launcher brought the cost of six runs from $2.01 to $0.23 with the same 6/6 correct answers, and each subagent's initial context from 66,700 to 7,500 tokens. See [benchmarks](/benchmarks#subagent-tokens).
+
+What helps:
+
+- **Act, then read the observation.** `browser_open`, `browser_navigate`, `browser_click`, `browser_fill`, `browser_press`, `browser_select` and `browser_scroll` return what is visible afterwards, and only what changed since the last view of that tab. Do not call `browser_snapshot` after them unless you need offscreen content.
+- **Refs over coordinates, snapshots over screenshots.** A snapshot takes about 1 ms and a few hundred tokens. Use `browser_screenshot` only when appearance matters; it defaults to 1024 px JPEG at quality 60.
+- **One audit instead of many screenshots.** `browser_audit` checks overflow, contrast, tap targets, labels, headings, SEO tags, Core Web Vitals, animations and broken links in one call.
+- **Wait for events.** `events_wait` and `cursor_wait` block until something happens; never poll in a loop.
+- **Lean subagents.** The default `lean` profile runs Claude Code with `--strict-mcp-config`, no slash commands, no built-in tools, no settings files and a short system prompt, and exposes only the tool groups the cursor needs (`AGORA_TOOLS`) with one-line descriptions (`AGORA_LEAN=1`). Tool definitions shrink from about 5.7k to 2.9k tokens.
+- **Small models for small jobs.** Reading a page or filling a form rarely needs the largest model; pass `model` and `effort: "low"`.
+- **Batch independent calls** in the same turn.
+
+You can apply the same filters to your own MCP setup:
+
+```bash
+claude mcp add agora -e AGORA_TOKEN=<cursor token> -e AGORA_TOOLS=browser,spawn -e AGORA_LEAN=1 -- agora mcp
+```

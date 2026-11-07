@@ -1,0 +1,66 @@
+---
+title: CLI
+description: Every agora subcommand and environment variable.
+sidebar:
+  icon: terminal
+---
+
+```text
+agora serve [--listen 127.0.0.1:7788] [--home DIR] [--apps-user agora] [--rtc-port 0]
+agora mcp                      MCP stdio server (AGORA_URL, AGORA_TOKEN)
+agora token                    print the admin token
+agora open <workspace> [--control] [--base URL] [--ttl 3600]
+agora api METHOD PATH [JSON]   call the HTTP API
+agora version
+```
+
+## agora serve
+
+Runs the daemon in the foreground. All flags are listed on the [install](/install#run-without-systemd) page. On `SIGINT` or `SIGTERM` it checkpoints every workspace (up to 30 s) and exits.
+
+## agora mcp
+
+Speaks MCP over stdin/stdout and forwards every tool call to the HTTP API. See [agents](/agents) and the [tool reference](/mcp-tools).
+
+## agora token
+
+Prints the admin token from `<home>/admin.token`.
+
+## agora open
+
+Mints a viewer token for a workspace and prints a viewer URL:
+
+```bash
+agora open ws_1a2b3c --base https://agora.example.com
+# https://agora.example.com/view/ws_1a2b3c#vt=v1....
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--control` | `true` | Allow input from the viewer. `--control=false` for watch-only links. |
+| `--base` | `AGORA_URL` | Public base URL, for example your tunnel hostname. |
+| `--ttl` | `3600` | Token lifetime in seconds (at most 86400). |
+
+## agora api
+
+Calls the HTTP API and prints the response body:
+
+```bash
+agora api GET /v1/workspaces
+agora api POST /v1/workspaces '{"name":"demo"}'
+```
+
+## Environment
+
+| Variable | Used by | Description |
+| --- | --- | --- |
+| `AGORA_URL` | clients | Daemon URL. Default `http://127.0.0.1:7788`. |
+| `AGORA_TOKEN` | clients | Token to send. Default: the admin token from `AGORA_HOME`, `/var/lib/agora` or `~/.agora`, whichever is readable. |
+| `AGORA_ACT_AS` | clients | With the admin token, act as this cursor (sent as `X-Agora-Cursor`). |
+| `AGORA_HOME` | all | State directory. |
+| `AGORA_ALLOW_PUBLIC` | `serve` | `1` allows binding to non-loopback addresses. |
+| `AGORA_CGROUPS` | `serve` | `off` disables per-workspace cgroups. |
+| `AGORA_TOOLS` | `mcp` | Comma-separated tool groups to expose: `browser`, `browserx`, `desktop`, `spawn`, `workspace`, `process`. Default: all. |
+| `AGORA_LEAN` | `mcp` | `1` shortens tool descriptions to one sentence. |
+
+Launched agents also receive `AGORA_CURSOR`, `AGORA_WORKSPACE` and, for the `command` adapter, `AGORA_GOAL`.
