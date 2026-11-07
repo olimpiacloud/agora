@@ -8,3 +8,4 @@
 /paseo-plugin/node_modules/
 __pycache__/
 *.tsbuildinfo
+/.cloudflare/
