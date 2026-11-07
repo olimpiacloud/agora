@@ -1,5 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { agentCursor, bytes, call, AGORA_BIN, linkedWorkspace, nameFromCwd } from "./server/agora";
+import { agentCursor, bytes, call, AGORA_BIN, linkedWorkspace, nameFromCwd, releaseAgentCursor } from "./server/agora";
 import { control, ensureWorkspace, getShot, listWorkspaces, live, resolveWorkspace, sendInput } from "./shared/agora";
 import { closeAll, pollLive } from "./server/live";
 
@@ -73,6 +73,8 @@ export default function contribute(server: PluginServerContext) {
       const ws = await linkedWorkspace(request.workspaceId, nameFromCwd(request.cwd), true);
       if (!ws) return;
       const cur = await agentCursor(request.agentId, request.title ?? null, ws);
+      const env: Record<string, string> = { AGORA_URL: process.env.AGORA_URL || "http://127.0.0.1:7788", AGORA_TOKEN: cur.token, AGORA_WORKSPACE: ws };
+      if (request.provider === "codex" || request.provider.startsWith("codex/")) env.AGORA_LEAN = "1";
       return {
         ...request,
         mcpServers: {
@@ -81,7 +83,7 @@ export default function contribute(server: PluginServerContext) {
             type: "stdio" as const,
             command: AGORA_BIN,
             args: ["mcp"],
-            env: { AGORA_URL: process.env.AGORA_URL || "http://127.0.0.1:7788", AGORA_TOKEN: cur.token, AGORA_WORKSPACE: ws },
+            env,
           },
         },
       };
@@ -90,6 +92,16 @@ export default function contribute(server: PluginServerContext) {
       return;
     }
   });
+
+  const release = async ({ agent }: { agent: { id: string } }) => {
+    try {
+      await releaseAgentCursor(agent.id);
+    } catch (e) {
+      console.error("agora: could not release cursor:", errText(e));
+    }
+  };
+  server.addHook("agent.close.after", release);
+  server.addHook("agent.archive.after", release);
 
   return () => closeAll();
 }

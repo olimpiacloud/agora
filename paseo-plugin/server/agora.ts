@@ -111,6 +111,20 @@ export async function agentCursor(agentId: string, title: string | null, workspa
   return rec;
 }
 
+export async function releaseAgentCursor(agentId: string): Promise<void> {
+  const st = loadState();
+  const known = st.agents[agentId];
+  if (!known) return;
+  try {
+    await call("DELETE", `/v1/cursors/${encodeURIComponent(known.cursor)}`);
+  } catch (e) {
+    if (!(e instanceof AgoraError && e.status === 404)) throw e;
+  }
+  const fresh = loadState();
+  delete fresh.agents[agentId];
+  saveState(fresh);
+}
+
 export function nameFromCwd(cwd: string): string {
   return basename(cwd) || "paseo";
 }
