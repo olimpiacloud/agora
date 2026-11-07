@@ -127,6 +127,8 @@ func Launch(ctx context.Context, o LaunchOptions) (*Browser, error) {
 	}
 	ourR, fromChrome, err := os.Pipe()
 	if err != nil {
+		toChrome.Close()
+		ourW.Close()
 		return nil, err
 	}
 	cmd := exec.Command(o.Binary, args...)
@@ -149,11 +151,14 @@ func Launch(ctx context.Context, o LaunchOptions) (*Browser, error) {
 			defer f.Close()
 		}
 	}
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
+	err = cmd.Start()
 	toChrome.Close()
 	fromChrome.Close()
+	if err != nil {
+		ourW.Close()
+		ourR.Close()
+		return nil, err
+	}
 	b := &Browser{opts: o, cmd: cmd, cdp: NewCDP(ourR, ourW), targets: map[string]*TargetInfo{}, tabs: map[string]*Tab{}, contexts: map[string]bool{}, exited: make(chan struct{}), started: time.Now()}
 	go func() {
 		cmd.Wait()
