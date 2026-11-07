@@ -82,7 +82,7 @@ func (m *Manager) OpenTab(ctx context.Context, ws, cursorID string, req OpenTabR
 	if req.Observe {
 		tab.Settle(ctx)
 		if s, e := tab.Observe(ctx, 900); e == nil {
-			res["observation"] = r.observeDiff(tab.TargetID, s.Compact())
+			res["observation"] = r.observeDiff(tab.TargetID, s.Compact(false))
 		}
 	}
 	return res, nil
@@ -179,6 +179,7 @@ type TabAction struct {
 	Mobile    bool     `json:"mobile,omitempty"`
 	MaxWidth  int      `json:"max_width,omitempty"`
 	Observe   bool     `json:"observe,omitempty"`
+	Boxes     bool     `json:"boxes,omitempty"`
 }
 
 var readOnlyTab = map[string]bool{"snapshot": true, "screenshot": true, "info": true, "challenge": true, "wait": true, "audit": true}
@@ -232,7 +233,7 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 		var s *browser.Snapshot
 		s, err = tab.Snapshot(ctx, maxText, 0)
 		if err == nil {
-			res["snapshot"] = s.Compact()
+			res["snapshot"] = s.Compact(a.Boxes)
 			res["url"], res["title"] = s.URL, s.Title
 			if ch, _ := tab.DetectChallenge(ctx); ch != nil {
 				res["challenge"] = ch
@@ -245,6 +246,11 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 			res["image"] = base64.StdEncoding.EncodeToString(b)
 			res["mime"] = "image/" + defStr(a.Format, "jpeg")
 			res["shot"] = m.StoreShot(ws, cursorID, "image/"+defStr(a.Format, "jpeg"), b)
+			var vp [2]float64
+			if e := tab.Eval(ctx, "[innerWidth, innerHeight]", &vp); e == nil {
+				res["viewport"] = vp
+			}
+			res["full_page"] = a.Full
 		}
 	case "click":
 		if a.Ref != "" {
@@ -327,7 +333,7 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 	if a.Observe && !readOnlyTab[a.Action] && a.Action != "close" {
 		tab.Settle(ctx)
 		if s, e := tab.Observe(ctx, 900); e == nil {
-			res["observation"] = r.observeDiff(target, s.Compact())
+			res["observation"] = r.observeDiff(target, s.Compact(false))
 			if ch, _ := tab.DetectChallenge(ctx); ch != nil {
 				res["challenge"] = ch
 			}

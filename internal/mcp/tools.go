@@ -2,9 +2,11 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 func str(d string) map[string]any { return map[string]any{"type": "string", "description": d} }
@@ -28,6 +30,8 @@ func tabProp(p map[string]any) map[string]any {
 	return p
 }
 
+var pointing = map[string]bool{"click": true, "hover": true, "drag": true, "scroll": true}
+
 var observing = map[string]bool{"scroll": true, "navigate": true, "click": true, "fill": true, "type": true, "press": true, "select": true, "back": true, "forward": true, "reload": true, "hover": true, "drag": true, "upload": true, "dialog": true}
 
 func (s *Server) tab(ctx context.Context, a Args, body map[string]any) ([]content, error) {
@@ -44,14 +48,36 @@ func (s *Server) tab(ctx context.Context, a Args, body map[string]any) ([]conten
 	if t == "" {
 		return nil, fmt.Errorf("target is required")
 	}
+	act, _ := body["action"].(string)
+	if pointing[act] && a.S("ref") == "" {
+		s.mapPoints("tab:"+t, a, body)
+	}
 	var out map[string]any
 	if err := s.c.Do(ctx, "POST", "/v1/workspaces/"+ws+"/tabs/"+t, body, &out); err != nil {
 		return nil, err
 	}
+	if act == "emulate" {
+		s.setShot("tab:"+t, nil)
+	}
 	if img, ok := out["image"].(string); ok {
 		res := []content{{Type: "image", Data: img, MimeType: fmt.Sprint(out["mime"])}}
-		if id, ok := out["shot"].(string); ok {
-			res = append(res, content{Type: "text", Text: "agora-shot:" + id})
+		note := ""
+		if full, _ := out["full_page"].(bool); full {
+			s.setShot("tab:"+t, nil)
+			note = fullNote
+		} else if vp, ok := out["viewport"].([]any); ok && len(vp) == 2 {
+			raw, _ := base64.StdEncoding.DecodeString(img)
+			vw, _ := vp[0].(float64)
+			vh, _ := vp[1].(float64)
+			m := shotScale(raw, vw, vh, 0, 0)
+			s.setShot("tab:"+t, m)
+			if m != nil {
+				note = tabNote
+			}
+		}
+		id, _ := out["shot"].(string)
+		if txt := shotText(id, note); txt != "" {
+			res = append(res, content{Type: "text", Text: txt})
 		}
 		return res, nil
 	}
@@ -79,6 +105,7 @@ func (s *Server) input(ctx context.Context, a Args, body map[string]any) ([]cont
 	if err != nil {
 		return nil, err
 	}
+	s.mapPoints("ws:"+ws, a, body)
 	return s.call(ctx, "POST", "/v1/workspaces/"+ws+"/input", body)
 }
 
@@ -119,14 +146,19 @@ func tools() []Tool {
 				}
 				return s.call(ctx, "POST", "/v1/workspaces/"+ws+"/"+a.S("op"), pick(a, "name", "width", "height", "layout", "snapshot"))
 			}},
-		{Name: "desktop_screenshot", Desc: "Capture the desktop (or one window / region) as an image. Coordinates in the image match desktop_* coordinates unless max_width scales it.", Props: with(map[string]any{"window": num("X window id"), "x": num("region x"), "y": num("region y"), "w": num("region width"), "h": num("region height"), "max_width": num("downscale to this width"), "format": str("jpeg|png")}),
+		{Name: "desktop_screenshot", Desc: "Capture the desktop (or one window / region) as an image, 1024 px wide JPEG by default; desktop_click/move/drag/scroll then take positions in that image. Region x/y/w/h are desktop pixels.", Props: with(map[string]any{"window": num("X window id"), "x": num("region x"), "y": num("region y"), "w": num("region width"), "h": num("region height"), "max_width": num("downscale to this width (default 1024)"), "format": str("jpeg|png"), "quality": num("JPEG quality (default 60)")}),
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				ws, err := s.wsArg(a)
 				if err != nil {
 					return nil, err
 				}
-				f := func(k string) string { return fmt.Sprint(int(a.N(k))) }
-				return s.image(ctx, "/v1/workspaces/"+ws+"/screenshot"+q("window", f("window"), "x", f("x"), "y", f("y"), "w", f("w"), "h", f("h"), "max_width", f("max_width"), "format", a.S("format")))
+				f := func(k string, d int) string {
+					if _, ok := a[k]; !ok {
+						return fmt.Sprint(d)
+					}
+					return fmt.Sprint(int(a.N(k)))
+				}
+				return s.image(ctx, "/v1/workspaces/"+ws+"/screenshot"+q("window", f("window", 0), "x", f("x", 0), "y", f("y", 0), "w", f("w", 0), "h", f("h", 0), "max_width", f("max_width", 1024), "quality", f("quality", 60), "format", a.S("format")), "ws:"+ws)
 			}},
 		{Name: "desktop_windows", Desc: "List top-level windows (id, title, class, geometry).", Props: with(map[string]any{}),
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
@@ -216,9 +248,9 @@ func tools() []Tool {
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				return s.tab(ctx, a, map[string]any{"action": "navigate", "url": a.S("url"), "wait": a.S("wait")})
 			}},
-		{Name: "browser_snapshot", Desc: "Full semantic view of the whole page (also offscreen): interactive elements with refs [eN], roles, names, boxes, plus page text. Use refs with browser_click/browser_fill.", Props: tabProp(map[string]any{"max_text": num("Max visible text chars (default 3000)")}), Required: []string{"target"},
+		{Name: "browser_snapshot", Desc: "Full semantic view of the whole page (also offscreen): interactive elements with refs [eN], roles and names, plus page text. Use refs with browser_click/browser_fill.", Props: tabProp(map[string]any{"max_text": num("Max visible text chars (default 3000)"), "boxes": boo("Also list each element's viewport box @x,y wxh")}), Required: []string{"target"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
-				return s.tab(ctx, a, map[string]any{"action": "snapshot", "max_text": a.N("max_text")})
+				return s.tab(ctx, a, map[string]any{"action": "snapshot", "max_text": a.N("max_text"), "boxes": a.B("boxes")})
 			}},
 		{Name: "browser_click", Desc: "Click an element by ref, or at viewport coordinates x,y (for canvases, cross-origin iframes, CAPTCHA widgets).", Props: tabProp(map[string]any{"ref": str("Element ref"), "x": num("viewport x"), "y": num("viewport y"), "button": str("left|right|middle"), "count": num("click count")}), Required: []string{"target"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
@@ -314,19 +346,19 @@ func tools() []Tool {
 				if n := a.N("max_children"); n > 0 {
 					body["budget"] = map[string]any{"max_cursors": n}
 				}
-				return s.call(ctx, "POST", "/v1/cursors", body)
+				return s.cursors(ctx, "POST", "/v1/cursors", body, 0)
 			}},
-		{Name: "cursor_list", Desc: "List cursors (subagents) with status and results. Filter by parent or active.", Props: map[string]any{"parent": str("Parent cursor id"), "workspace": str("Workspace"), "active": boo("Only non-terminal")},
+		{Name: "cursor_list", Desc: "List cursors (subagents) with status and a result preview; cursor_get has the full result. Filter by parent or active.", Props: map[string]any{"parent": str("Parent cursor id"), "workspace": str("Workspace"), "active": boo("Only non-terminal")},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				act := ""
 				if a.B("active") {
 					act = "1"
 				}
-				return s.call(ctx, "GET", "/v1/cursors"+q("parent", a.S("parent"), "workspace", a.S("workspace"), "active", act), nil)
+				return s.cursors(ctx, "GET", "/v1/cursors"+q("parent", a.S("parent"), "workspace", a.S("workspace"), "active", act), nil, listResultMax)
 			}},
 		{Name: "cursor_get", Desc: "Get one cursor (status, progress, result). Use 'self' for yourself.", Props: map[string]any{"id": str("Cursor id or self")}, Required: []string{"id"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
-				return s.call(ctx, "GET", "/v1/cursors/"+a.S("id"), nil)
+				return s.cursors(ctx, "GET", "/v1/cursors/"+a.S("id"), nil, -1)
 			}},
 		{Name: "cursor_status", Desc: "Set your (or a child's) live status: running | thinking | executing | waiting | blocked | needs_human.", Props: map[string]any{"id": str("Cursor id (default self)"), "status": str("Status"), "detail": str("Why")}, Required: []string{"status"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
@@ -350,7 +382,7 @@ func tools() []Tool {
 			}},
 		{Name: "cursor_wait", Desc: "Block until the given cursors finish (all, or any when all=false). Returns their results.", Props: map[string]any{"ids": strs("Cursor ids"), "all": boo("Wait for all (default true)"), "timeout_ms": num("Timeout (default 10 min)")}, Required: []string{"ids"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
-				return s.call(ctx, "POST", "/v1/wait", pick(a, "ids", "all", "timeout_ms"))
+				return s.cursors(ctx, "POST", "/v1/wait", pick(a, "ids", "all", "timeout_ms"), 0)
 			}},
 		{Name: "cursor_message", Desc: "Send a JSON message to another cursor's inbox.", Props: map[string]any{"to": str("Cursor id"), "body": anyv("Message body")}, Required: []string{"to", "body"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
@@ -410,6 +442,85 @@ func tools() []Tool {
 				return s.call(ctx, "POST", "/v1/worktrees", pick(a, "repo", "branch", "base"))
 			}},
 	}
+}
+
+const listResultMax = 300
+
+var cursorKeep = []string{"id", "name", "status", "detail", "parent", "goal", "result", "error", "usage", "ended"}
+
+func slimCursor(v any, resultMax int) any {
+	c, ok := v.(map[string]any)
+	if !ok {
+		return v
+	}
+	if resultMax < 0 {
+		for _, k := range []string{"token_hash", "color", "x", "y", "root", "launch_pid"} {
+			delete(c, k)
+		}
+		if l, ok := c["launch"].(map[string]any); ok {
+			delete(l, "prompt")
+			delete(l, "env")
+		}
+		return c
+	}
+	out := map[string]any{}
+	for _, k := range cursorKeep {
+		if v, ok := c[k]; ok && v != nil && v != "" {
+			out[k] = v
+		}
+	}
+	if g, ok := out["goal"].(string); ok && len(g) > 160 {
+		out["goal"] = trunc(g, 160)
+	}
+	if u, ok := out["usage"].(map[string]any); ok {
+		out["usage"] = map[string]any{"cost_usd": u["cost_usd"], "turns": u["turns"]}
+	}
+	if p, ok := c["progress"].([]any); ok && len(p) > 0 {
+		if last, ok := p[len(p)-1].(map[string]any); ok {
+			out["last_progress"] = last["message"]
+		}
+	}
+	if r, ok := out["result"]; ok && resultMax > 0 {
+		if b, _ := json.Marshal(r); len(b) > resultMax {
+			out["result"] = trunc(string(b), resultMax)
+			out["result_truncated"] = true
+		}
+	}
+	return out
+}
+
+func trunc(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
+}
+
+func (s *Server) cursors(ctx context.Context, method, path string, body any, resultMax int) ([]content, error) {
+	var out any
+	if err := s.c.Do(ctx, method, path, body, &out); err != nil {
+		return nil, err
+	}
+	switch v := out.(type) {
+	case []any:
+		for i := range v {
+			v[i] = slimCursor(v[i], resultMax)
+		}
+	case map[string]any:
+		if cs, ok := v["cursors"].([]any); ok {
+			for i := range cs {
+				cs[i] = slimCursor(cs[i], resultMax)
+			}
+		} else if c, ok := v["cursor"]; ok {
+			v["cursor"] = slimCursor(c, resultMax)
+		} else if _, ok := v["id"]; ok {
+			out = slimCursor(v, resultMax)
+		}
+	}
+	return textJSON(out), nil
 }
 
 func defID(a Args) string {

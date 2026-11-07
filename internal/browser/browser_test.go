@@ -61,7 +61,7 @@ func TestBrowserSemantic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Log(s.Compact())
+	t.Log(s.Compact(true))
 	var in, ta, btn string
 	for _, e := range s.Elements {
 		switch {

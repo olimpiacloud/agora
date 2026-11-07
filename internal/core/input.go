@@ -203,20 +203,27 @@ type ShotOpts struct {
 	MaxWidth int    `json:"max_width,omitempty"`
 }
 
-func (m *Manager) Screenshot(ctx context.Context, ws string, o ShotOpts) ([]byte, string, error) {
+type ShotInfo struct {
+	Mime string
+	X, Y int
+	W, H int
+}
+
+func (m *Manager) Screenshot(ctx context.Context, ws string, o ShotOpts) ([]byte, ShotInfo, error) {
+	var info ShotInfo
 	r, err := m.ensureRuntime(ctx, ws, true)
 	if err != nil {
-		return nil, "", err
+		return nil, info, err
 	}
 	r.mu.Lock()
 	d := r.display
 	r.mu.Unlock()
 	if d == nil {
-		return nil, "", errors.New("no display")
+		return nil, info, errors.New("no display")
 	}
 	cp, err := d.NewCapturer()
 	if err != nil {
-		return nil, "", err
+		return nil, info, err
 	}
 	defer cp.Close()
 	var f *x11.Frame
@@ -229,8 +236,9 @@ func (m *Manager) Screenshot(ctx context.Context, ws string, o ShotOpts) ([]byte
 		f, err = cp.GrabScreen(nil)
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, info, err
 	}
+	info.X, info.Y, info.W, info.H = f.X, f.Y, f.Width, f.Height
 	img := f.RGBA()
 	var out image.Image = img
 	if o.MaxWidth > 0 && img.Bounds().Dx() > o.MaxWidth {
@@ -240,14 +248,16 @@ func (m *Manager) Screenshot(ctx context.Context, ws string, o ShotOpts) ([]byte
 	if o.Format == "png" {
 		enc := png.Encoder{CompressionLevel: png.BestSpeed}
 		err = enc.Encode(&buf, out)
-		return buf.Bytes(), "image/png", err
+		info.Mime = "image/png"
+		return buf.Bytes(), info, err
 	}
 	q := o.Quality
 	if q == 0 {
 		q = 75
 	}
 	err = jpeg.Encode(&buf, out, &jpeg.Options{Quality: q})
-	return buf.Bytes(), "image/jpeg", err
+	info.Mime = "image/jpeg"
+	return buf.Bytes(), info, err
 }
 
 func downscale(src *image.RGBA, maxW int) *image.RGBA {

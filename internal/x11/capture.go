@@ -15,6 +15,8 @@ import (
 )
 
 type Frame struct {
+	X      int
+	Y      int
 	Width  int
 	Height int
 	Stride int
@@ -140,7 +142,11 @@ func (cp *Capturer) Grab(x, y, w, h int, dst *Frame) (*Frame, error) {
 	if y+h > sh {
 		h = sh - y
 	}
-	return cp.grab(xproto.Drawable(cp.d.root), x, y, w, h, dst)
+	f, err := cp.grab(xproto.Drawable(cp.d.root), x, y, w, h, dst)
+	if f != nil {
+		f.X, f.Y = x, y
+	}
+	return f, err
 }
 
 func (cp *Capturer) GrabScreen(dst *Frame) (*Frame, error) {
@@ -169,12 +175,25 @@ func (cp *Capturer) GrabWindow(id uint32, dst *Frame) (*Frame, error) {
 	if err != nil {
 		return nil, err
 	}
+	ox, oy := 0, 0
+	if tr, err := xproto.TranslateCoordinates(cp.c, w, cp.d.root, 0, 0).Reply(); err == nil {
+		ox, oy = int(tr.DstX), int(tr.DstY)
+	}
 	pm := xproto.Pixmap(pid)
+	var f *Frame
 	if err := composite.NameWindowPixmapChecked(cp.c, w, pm).Check(); err != nil {
-		return cp.grab(xproto.Drawable(w), 0, 0, int(g.Width), int(g.Height), dst)
+		f, err = cp.grab(xproto.Drawable(w), 0, 0, int(g.Width), int(g.Height), dst)
+		if f != nil {
+			f.X, f.Y = ox, oy
+		}
+		return f, err
 	}
 	defer xproto.FreePixmap(cp.c, pm)
-	return cp.grab(xproto.Drawable(pm), 0, 0, int(g.Width), int(g.Height), dst)
+	f, err = cp.grab(xproto.Drawable(pm), 0, 0, int(g.Width), int(g.Height), dst)
+	if f != nil {
+		f.X, f.Y = ox, oy
+	}
+	return f, err
 }
 
 type DamageWatcher struct {

@@ -95,7 +95,7 @@ type Snapshot struct {
 	Text     string    `json:"text,omitempty"`
 }
 
-func (s *Snapshot) Compact() string {
+func (s *Snapshot) Compact(boxes bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "url: %s\ntitle: %s\nviewport: %dx%d scroll: %d/%d\n", s.URL, s.Title, s.Viewport[0], s.Viewport[1], s.Scroll[1], s.Scroll[2])
 	for _, e := range s.Elements {
@@ -112,7 +112,10 @@ func (s *Snapshot) Compact() string {
 		if e.Offscreen {
 			b.WriteString(" offscreen")
 		}
-		fmt.Fprintf(&b, " @%d,%d %dx%d\n", e.Box[0], e.Box[1], e.Box[2], e.Box[3])
+		if boxes {
+			fmt.Fprintf(&b, " @%d,%d %dx%d", e.Box[0], e.Box[1], e.Box[2], e.Box[3])
+		}
+		b.WriteByte('\n')
 	}
 	if s.Text != "" {
 		b.WriteString("--- text ---\n")

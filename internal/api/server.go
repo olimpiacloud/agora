@@ -250,12 +250,14 @@ func (s *Server) routes() {
 		q := r.URL.Query()
 		atoi := func(k string) int { v, _ := strconv.Atoi(q.Get(k)); return v }
 		win, _ := strconv.ParseUint(q.Get("window"), 10, 32)
-		b, mime, err := s.m.Screenshot(r.Context(), id, core.ShotOpts{Window: uint32(win), X: atoi("x"), Y: atoi("y"), W: atoi("w"), H: atoi("h"), Format: q.Get("format"), Quality: atoi("quality"), MaxWidth: atoi("max_width")})
+		b, info, err := s.m.Screenshot(r.Context(), id, core.ShotOpts{Window: uint32(win), X: atoi("x"), Y: atoi("y"), W: atoi("w"), H: atoi("h"), Format: q.Get("format"), Quality: atoi("quality"), MaxWidth: atoi("max_width")})
 		if err != nil {
 			writeErr(w, err)
 			return
 		}
+		mime := info.Mime
 		w.Header().Set("Content-Type", mime)
+		w.Header().Set("X-Agora-Region", fmt.Sprintf("%d,%d,%d,%d", info.X, info.Y, info.W, info.H))
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Agora-Shot", s.m.StoreShot(id, p.CursorID(), mime, b))
 		w.Write(b)

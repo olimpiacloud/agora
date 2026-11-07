@@ -2,13 +2,19 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
+	"math"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -73,6 +79,56 @@ type Server struct {
 	byName map[string]*Tool
 	out    io.Writer
 	outMu  sync.Mutex
+	shotMu sync.Mutex
+	shots  map[string]shotMap
+}
+
+type shotMap struct {
+	ox, oy, sx, sy float64
+}
+
+func (s *Server) setShot(key string, m *shotMap) {
+	s.shotMu.Lock()
+	defer s.shotMu.Unlock()
+	if s.shots == nil {
+		s.shots = map[string]shotMap{}
+	}
+	if m == nil {
+		delete(s.shots, key)
+		return
+	}
+	s.shots[key] = *m
+}
+
+func (s *Server) mapPoints(key string, src Args, dst map[string]any) {
+	s.shotMu.Lock()
+	m, ok := s.shots[key]
+	s.shotMu.Unlock()
+	if !ok {
+		return
+	}
+	for _, p := range [][2]string{{"x", "y"}, {"x2", "y2"}} {
+		if _, ok := src[p[0]]; !ok {
+			continue
+		}
+		if _, ok := src[p[1]]; !ok {
+			continue
+		}
+		dst[p[0]] = math.Round(m.ox + src.N(p[0])*m.sx)
+		dst[p[1]] = math.Round(m.oy + src.N(p[1])*m.sy)
+	}
+}
+
+func shotScale(data []byte, srcW, srcH, ox, oy float64) *shotMap {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || cfg.Width == 0 || cfg.Height == 0 || srcW <= 0 || srcH <= 0 {
+		return nil
+	}
+	m := &shotMap{ox: ox, oy: oy, sx: srcW / float64(cfg.Width), sy: srcH / float64(cfg.Height)}
+	if ox == 0 && oy == 0 && math.Abs(m.sx-1) < 0.01 && math.Abs(m.sy-1) < 0.01 {
+		return nil
+	}
+	return m
 }
 
 func New(c *client.Client) *Server {
@@ -233,7 +289,7 @@ func (s *Server) handle(ctx context.Context, req rpcReq) (any, map[string]any) {
 }
 
 func textJSON(v any) []content {
-	b, _ := json.MarshalIndent(v, "", " ")
+	b, _ := json.Marshal(v)
 	return []content{{Type: "text", Text: string(b)}}
 }
 
@@ -247,16 +303,48 @@ func (s *Server) call(ctx context.Context, method, path string, body any) ([]con
 	return textJSON(out), nil
 }
 
-func (s *Server) image(ctx context.Context, path string) ([]content, error) {
+func (s *Server) image(ctx context.Context, path, mapKey string) ([]content, error) {
 	b, h, err := s.c.RawHeader(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err
 	}
 	out := []content{{Type: "image", Data: base64.StdEncoding.EncodeToString(b), MimeType: h.Get("Content-Type")}}
-	if id := h.Get("X-Agora-Shot"); id != "" {
-		out = append(out, content{Type: "text", Text: "agora-shot:" + id})
+	note := ""
+	if mapKey != "" {
+		var m *shotMap
+		if f := strings.Split(h.Get("X-Agora-Region"), ","); len(f) == 4 {
+			var v [4]float64
+			for i := range f {
+				v[i], _ = strconv.ParseFloat(strings.TrimSpace(f[i]), 64)
+			}
+			m = shotScale(b, v[2], v[3], v[0], v[1])
+		}
+		s.setShot(mapKey, m)
+		if m != nil {
+			note = desktopNote
+		}
+	}
+	if t := shotText(h.Get("X-Agora-Shot"), note); t != "" {
+		out = append(out, content{Type: "text", Text: t})
 	}
 	return out, nil
+}
+
+const (
+	desktopNote = "coordinates: pass positions from this image as-is to desktop_click/move/drag/scroll; Agora maps them to the desktop"
+	tabNote     = "coordinates: pass positions from this image as-is to browser_click/hover/drag/scroll; Agora maps them to the viewport"
+	fullNote    = "full-page image: its positions are not viewport coordinates"
+)
+
+func shotText(id, note string) string {
+	var parts []string
+	if id != "" {
+		parts = append(parts, "agora-shot:"+id)
+	}
+	if note != "" {
+		parts = append(parts, note)
+	}
+	return strings.Join(parts, "\n")
 }
 
 func q(kv ...string) string {
