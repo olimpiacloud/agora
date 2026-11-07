@@ -1,0 +1,80 @@
+---
+title: Modelo de seguridad
+description: >-
+  Cómo Agora autentica a quien lo llama, aísla navegadores y apps, y contra qué
+  no protege.
+sidebar:
+  icon: shield
+---
+Agora controla una computadora real con sesiones de navegador logueadas. Tratá el acceso a Agora como si fuera acceso por SSH al host.
+
+## Exposición de red [#network-exposure]
+
+- El daemon escucha en **127.0.0.1:7788** y no acepta escuchar en ninguna otra interfaz salvo que definas `AGORA_ALLOW_PUBLIC=1`. No lo hagas.
+- Para acceder de forma remota, publicalo a través de un **túnel autenticado** (por ejemplo, Cloudflare Tunnel con Access o un túnel SSH). Nunca abras el puerto a internet.
+- Chromium se controla con `--remote-debugging-pipe`: **no hay ningún puerto TCP de CDP**. Los displays de X son locales al host y nunca quedan expuestos.
+- WebRTC necesita UDP hacia el host. Detrás de túneles HTTP, los viewers usan el transporte por WebSocket.
+- El dashboard embebido se sirve con una Content Security Policy estricta (`default-src 'self'`).
+
+## Tokens
+
+Toda llamada a la API necesita `Authorization: Bearer <token>`. Los endpoints de streaming también aceptan `?token=`, porque los navegadores no pueden definir headers en pedidos de WebSocket ni de `<img>`.
+
+| Token | Alcance | De dónde sale |
+| --- | --- | --- |
+| Admin | Todo. | Se genera en el primer arranque en `admin.token` (modo 0600). `agora token` lo muestra. |
+| Cursor | Su propio workspace y sus propios descendientes, limitado por sus permisos. | Lo devuelve una sola vez `POST /v1/cursors`. Agora guarda solo un hash. |
+| Viewer | Ver el streaming de un workspace, con o sin input, por 24 horas como máximo. Se rechaza en cualquier otro endpoint. | `POST /v1/viewer-tokens` o `agora open`. Firmado con HMAC usando `viewer.key`. |
+
+Dales a los agentes tokens de cursor, nunca el token de admin. Los permisos solo se achican a medida que bajás en el árbol: un hijo nunca puede tener un permiso que su padre no tiene, y solo los cursores con `workspace` pueden crear workspaces, congelar, suspender, hacer fork o tomar el control.
+
+## Aislamiento de procesos [#process-isolation]
+
+- Cuando el daemon corre como root, **las apps y los navegadores corren como el usuario sin privilegios `agora`** (home `/var/lib/agora-apps`), sin acceso a los archivos de root.
+- **El sandbox de Chrome sigue activado.**
+- Cada workspace tiene sus propios procesos, su display y (por defecto) su perfil de navegador. Si hay cgroups v2 disponibles, los procesos arrancan dentro de un cgroup por workspace, que hace cumplir los límites de `memory_mb` y `cpu_percent`.
+- El cuerpo de los pedidos está limitado a 8 MB.
+
+## Lo que Agora no aísla [#what-agora-does-not-isolate]
+
+El aislamiento entre cursores **del mismo workspace** es lógico: dueños de pestañas, locks de superficies y alcances de tokens. Comparten un mismo display, un mismo perfil de navegador y un mismo usuario de Unix. Un cursor con permiso `browser` puede leer cualquier página de ese perfil.
+
+Para agentes en los que no confiás:
+
+- Ponelos en **workspaces separados** (procesos, display y perfil separados) y no les des el permiso `workspace`.
+- Activá [`sandbox`](#sandboxed-workspaces) en esos workspaces, así su navegador y sus apps no pueden leer el resto del host.
+- Usá un perfil dedicado, sin tus logins personales.
+- Dejá `process` y `desktop` desactivados salvo que la tarea los necesite: `process` lanza programas como el usuario `agora`.
+
+Agora no guarda checkpoints de memoria: un workspace suspendido conserva en disco las cookies y el storage de su perfil, pero no el estado de las páginas abiertas.
+
+## Workspaces con sandbox [#sandboxed-workspaces]
+
+Poné `"sandbox": true` en el `config` de un workspace para que su Chrome y todas las apps que se lancen en él corran con una vista restringida del host:
+
+```bash
+agora api POST /v1/workspaces '{"name":"untrusted","start":true,"config":{"sandbox":true}}'
+```
+
+Cada proceso con sandbox arranca a través de `agora sandbox-exec`, que lo corre en namespaces nuevos de mount, PID, IPC y UTS:
+
+- Todo el sistema se monta como solo lectura y sin bits setuid.
+- Los directorios home, `/tmp`, `/run`, `/var/lib` (donde están el estado de Agora, Docker y las bases de datos), `/var/log` y el directorio home de Agora quedan ocultos detrás de mounts vacíos.
+- Solo el directorio propio del workspace, su perfil de Chrome y su socket de X se montan con lectura y escritura.
+- El workspace tiene sus propios `/tmp`, `/dev/shm` y `/proc` privados. Sus apps no pueden ver, mandar señales ni hacer trace de procesos de otros workspaces.
+- El proceso corre como el usuario de apps sin privilegios, sin grupos suplementarios y sin capabilities. El sandbox propio de Chrome sigue funcionando adentro.
+
+Límites:
+
+- **Solo como root.** El daemon tiene que correr como root con un usuario de apps (lo que viene por defecto en `agora.service`). Si no, un workspace con sandbox no arranca.
+- **Red compartida.** Los procesos con sandbox pueden llegar a servicios en `127.0.0.1`, incluida la API de Agora (que igual necesita un token). No corras servicios locales sin autenticación al lado de workspaces no confiables.
+- **Display compartido.** Xvfb corre fuera del sandbox, y X11 no aísla a los clientes de un mismo display: cualquier app del workspace puede leer la pantalla y mandar input a cualquier otra ventana de ese workspace.
+- **Archivos del sistema legibles.** Los archivos de `/etc` y `/usr` legibles por todos siguen siendo legibles. No guardes secretos ahí.
+- **Mismo usuario, mismo kernel.** Un exploit del kernel se escapa del sandbox. Para código hostil, usá una VM o una máquina aparte.
+- **Los agentes lanzados no tienen sandbox.** Los agentes que arranca `cursor_spawn` (`claude`, `codex`) corren como el usuario del daemon, porque necesitan sus credenciales. El sandbox cubre solo Chrome y las apps de `desktop_launch`.
+- **Sin D-Bus.** `/run` está oculto, así que las apps que necesitan el bus del sistema o de sesión pierden esas funciones.
+- Los límites de CPU y memoria salen del `budget` del workspace, no del sandbox.
+
+## Reportar una vulnerabilidad [#reporting-a-vulnerability]
+
+Mandá un mail a **security@olimpia.dev** con los detalles. Por favor, no abras un issue público para reportes de seguridad.

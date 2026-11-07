@@ -1,0 +1,49 @@
+---
+title: Prompts
+description: >-
+  Prompts para copiar y pasarle a tu agente una vez que conectaste Agora, desde
+  probar un sitio hasta correr subagentes en paralelo.
+sidebar:
+  icon: message-square-text
+---
+Copiá cualquiera de estos en Claude Code, Codex u otro agente con Agora [conectado](/agents/connect). Funcionan mejor si tenés instalada la [skill de Agora](/agents/connect#the-agora-skill).
+
+<Prompt description="**Revisar la configuración**" actions={["copy"]}>
+Fijate que Agora esté corriendo con `agora api GET /v1/health` y que las herramientas MCP de agora estén cargadas. Abrí https://example.com en tu propia pestaña con browser_open y decime el título de la página. No instales ni reinicies nada sin preguntarme.
+</Prompt>
+
+<Prompt description="**Probar** una app web local" actions={["copy"]}>
+Abrí http://127.0.0.1:3000 en Agora. Recorré el flujo de registro con una cuenta de prueba y después corré browser_audit en cada página que visites, en escritorio y en un viewport móvil de 390x844 con browser_emulate. Dame una lista de problemas ordenados por gravedad, con la página y el elemento de cada uno. Sacá una captura solo cuando un problema sea visual y la auditoría no lo explique.
+</Prompt>
+
+<Prompt description="**Auditar y arreglar** la UI" actions={["copy"]}>
+Corré browser_audit en http://127.0.0.1:3000 en Agora, en escritorio y en móvil. Arreglá en el código lo que encuentre (contraste, desbordes, inputs sin etiqueta, texto alternativo faltante, áreas táctiles), recargá la página y volvé a correr la auditoría hasta que quede limpia o solo queden cosas que no podés arreglar. Decime qué quedó y por qué.
+</Prompt>
+
+<Prompt description="**Comparar** competidores en paralelo" actions={["copy"]}>
+Compará las páginas de precios de estos sitios: [lista de URLs]. Lanzá un subagente de Agora por sitio con cursor_spawn, usando el launch adapter claude, un modelo chico, effort low y solo el permiso de browser. Dale a cada uno un objetivo autocontenido que pida los planes en JSON (nombre, precio mensual, límites principales). Esperalos a todos con un solo cursor_wait y dame una única tabla comparativa.
+</Prompt>
+
+<Prompt description="**Iniciar sesión** con mi ayuda" actions={["copy"]}>
+Abrí [URL] en Agora e iniciá sesión con la cuenta que te doy. Si te topás con un CAPTCHA, MFA o cualquier cosa que necesite una persona, llamá a human_request con exactamente lo que tengo que hacer, avisame y esperá con events_wait a control.returned. Después seguí en la misma pestaña. Nunca intentes saltear un CAPTCHA.
+</Prompt>
+
+<Prompt description="**Completar un formulario** desde un archivo" actions={["copy"]}>
+Leé [archivo] y completá el formulario en [URL] en Agora, una entrada por fila. Usá browser_fill por ref y leé la observación que devuelve cada acción en vez de sacar snapshots. No envíes el paso final: frená antes y mostrame lo que cargaste.
+</Prompt>
+
+<Prompt description="**Extraer** una tabla" actions={["copy"]}>
+Abrí [URL] en Agora y extraé la tabla principal como JSON con una sola llamada a browser_eval. Si los datos cargan tarde, usá browser_wait primero. Guardá el resultado en data.json.
+</Prompt>
+
+<Prompt description="**App de escritorio**" actions={["copy"]}>
+Abrí [archivo] en GIMP en el escritorio de Agora con desktop_launch, exportalo como PNG de 1200 px de ancho y decime dónde lo guardaste. Sacá un desktop_screenshot para orientarte y otro para verificar el resultado.
+</Prompt>
+
+<Prompt description="**Repartir trabajo** entre subagentes" actions={["copy"]}>
+Revisá cada página listada en [archivo] con subagentes de Agora. Lanzá cuatro hijos con cursor_spawn (launch adapter claude, permiso de browser). Deciles que usen el tablero compartido: primero board_read, un board_post reclamando cada página antes de trabajar en ella, que publiquen los hallazgos con kind finding y done cuando terminen. Esperalos a todos y uní sus hallazgos en un solo informe.
+</Prompt>
+
+<Prompt description="**Arreglos en paralelo** con worktrees" actions={["copy"]}>
+Por cada issue en [lista], lanzá un subagente de Agora con cursor_spawn, un git worktree de este repo en su propia rama, los permisos de browser y process, y el launch adapter claude. Cada hijo arregla su issue, levanta la app en su propio PORT, verifica el arreglo en su propia pestaña del browser y termina con cursor_complete y un resumen. Esperalos a todos y listá las ramas listas para revisión.
+</Prompt>

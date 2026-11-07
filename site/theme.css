@@ -85,13 +85,50 @@ body::after {
   }
 }
 
-header a[href="/"] > span.truncate {
+header a[href="/"] > span.truncate,
+header a[href="/en"] > span.truncate,
+header a[href="/es"] > span.truncate {
   font-family: var(--blume-font-display);
   font-size: 1.3rem;
   font-weight: 400;
   letter-spacing: 0.03em;
 }
 
-header a[href="/"] > span:first-child > svg {
+header a[href="/"] > span:first-child > svg,
+header a[href="/en"] > span:first-child > svg,
+header a[href="/es"] > span:first-child > svg {
   height: 1.6rem;
+}
+
+.family-brand {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.family-by {
+  color: var(--blume-muted-foreground);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.family-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid color-mix(in oklab, var(--blume-accent) 55%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--blume-accent) 14%, transparent);
+  color: var(--blume-accent);
+  padding: 0.1rem 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+@media (max-width: 40rem) {
+  .family-by {
+    display: none;
+  }
 }

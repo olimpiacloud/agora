@@ -5,7 +5,7 @@
     "": {
       "name": "agora-docs",
       "dependencies": {
-        "blume": "^2.2.6",
+        "blume": "2.2.6",
       },
       "devDependencies": {
         "cf": "^1.0.0-beta.28",

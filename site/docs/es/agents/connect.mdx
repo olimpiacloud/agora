@@ -1,0 +1,119 @@
+---
+title: Conectá tu agente
+description: >-
+  Agregá el servidor MCP de Agora a Claude Code, Codex o cualquier cliente MCP,
+  instalá la skill de Agora y leé esta documentación como Markdown.
+sidebar:
+  label: Conectar
+  icon: plug
+---
+Los agentes se comunican con Agora mediante `agora mcp`, un servidor MCP por stdio que reenvía cada llamada a herramienta a la API HTTP del daemon. Corrélo en la misma máquina que el daemon.
+
+## Antes de empezar [#before-you-start]
+
+Agora tiene que estar instalado y corriendo ([instalación](/install)). Verificalo:
+
+```bash
+agora api GET /v1/health
+```
+
+`{"ok":true,...}` significa que el daemon está levantado.
+
+## Conseguí un token de cursor [#get-a-cursor-token]
+
+Dale a cada agente su propio token de cursor. Con un token de cursor, el servidor sabe quién es el agente y en qué workspace trabaja, así que las herramientas no piden un argumento `workspace` y el agente solo puede acceder a su propio workspace.
+
+```bash
+WS=$(agora api POST /v1/workspaces '{"name":"main"}' | jq -r .id)
+agora api POST /v1/cursors "{\"name\":\"claude\",\"workspace\":\"$WS\"}" | jq -r .token
+```
+
+El token se muestra una sola vez; Agora guarda solo un hash. Para limitar lo que puede hacer el agente, agregá `"permissions"` (mirá [seguridad](/agents/security#permissions)).
+
+:::warning
+Sin `AGORA_TOKEN`, `agora mcp` usa el token de admin si lo puede leer. El token de admin llega a todos los workspaces. Usá tokens de cursor para los agentes.
+:::
+
+## Claude Code
+
+```bash
+claude mcp add agora -e AGORA_TOKEN=<cursor token> -- agora mcp
+```
+
+O instalá el plugin de Claude Code, que incluye la skill y el servidor MCP:
+
+```text
+/plugin marketplace add olimpiacloud/agora-skills
+/plugin install agora@agora
+```
+
+## Codex
+
+```bash
+codex mcp add agora --env AGORA_TOKEN=<cursor token> -- agora mcp
+```
+
+## Cualquier cliente MCP [#any-mcp-client]
+
+Cursor, VS Code, Windsurf y otros clientes con configuración en JSON:
+
+```json
+{
+  "mcpServers": {
+    "agora": {
+      "command": "agora",
+      "args": ["mcp"],
+      "env": { "AGORA_TOKEN": "<cursor token>" }
+    }
+  }
+}
+```
+
+Reiniciá la sesión del agente después de agregar el servidor para que se carguen las herramientas.
+
+## Variables de entorno [#environment-variables]
+
+| Variable | Valor por defecto | Descripción |
+| --- | --- | --- |
+| `AGORA_URL` | `http://127.0.0.1:7788` | El daemon. |
+| `AGORA_TOKEN` | el token de admin de `AGORA_HOME`, `/var/lib/agora` o `~/.agora`, si se puede leer | Un token de cursor (recomendado) o el token de admin. |
+| `AGORA_WORKSPACE` | ninguno | Workspace por defecto cuando el token no está atado a uno. |
+| `AGORA_TOOLS` | todos los grupos | Grupos de herramientas a exponer, separados por comas: `browser`, `browserx`, `desktop`, `spawn`, `workspace`, `process`. El grupo `self` siempre está activo. |
+| `AGORA_LEAN` | desactivado | `1` acorta las descripciones de las herramientas a una sola oración. |
+
+Una configuración liviana para un agente que solo navega y lanza subagentes:
+
+```bash
+claude mcp add agora -e AGORA_TOKEN=<cursor token> -e AGORA_TOOLS=browser,spawn -e AGORA_LEAN=1 -- agora mcp
+```
+
+Si el agente corre en otra máquina, corré `agora mcp` ahí y apuntá `AGORA_URL` a un túnel autenticado hacia el daemon. Nunca abras el puerto 7788 a internet.
+
+## Paseo
+
+Con el [plugin de Paseo](/paseo), cada agente de Claude o Codex en Paseo recibe automáticamente el servidor MCP de Agora y su propio cursor. No necesitás correr los comandos de arriba.
+
+## Subagentes lanzados por Agora [#subagents-launched-by-agora]
+
+Los agentes que Agora inicia con `cursor_spawn` y `launch` ya tienen el servidor MCP configurado con su propio token acotado. Mirá [subagentes](/agents/tools#subagents).
+
+## La skill de Agora [#the-agora-skill]
+
+La skill les enseña a los agentes a trabajar con Agora: actuar y leer la observación que vuelve, usar refs en lugar de coordenadas, lanzar subagentes y esperarlos, y pedir un humano ante los CAPTCHAs.
+
+```bash
+bunx skills add olimpiacloud/agora-skills
+```
+
+Funciona con Claude Code, Codex, Cursor y otros agentes que soportan skills. Sacala con `bunx skills remove agora`. El código fuente está en [github.com/olimpiacloud/agora-skills](https://github.com/olimpiacloud/agora-skills).
+
+## Documentación para agentes [#docs-for-agents]
+
+Esta documentación también se publica en formatos que los agentes pueden leer directamente:
+
+| URL | Contenido |
+| --- | --- |
+| [`/llms.txt`](/llms.txt) | Un índice de todas las páginas con su descripción. |
+| [`/llms-full.txt`](/llms-full.txt) | El texto completo de todas las páginas en un solo archivo. |
+| [`/skill.md`](/skill.md) | Un archivo de skill con un mapa de esta documentación. |
+| La URL de cualquier página + `.md` | Esa página como Markdown, por ejemplo `/agents/tools.md`. |

@@ -1,0 +1,75 @@
+---
+title: Agora para agentes
+description: >-
+  Cómo un agente de IA se conecta a Agora y usa sus herramientas MCP para
+  navegar, manejar apps de escritorio, correr subagentes y pasarle el control a
+  un humano.
+sidebar:
+  label: Resumen
+  icon: bot
+---
+Agora es un runtime de escritorio nativo para agentes, hecho por [Olimpia](https://olimpia.dev). Un daemon en una máquina Linux corre un display X y un Chromium por workspace, y muchos agentes lo comparten. Cada agente es un **cursor** con su propio token acotado, puesto de input, pestañas, estado y resultado estructurado. Los agentes lo controlan a través de `agora mcp`, un servidor MCP por stdio con 52 herramientas.
+
+## Conectate en tres pasos [#connect-in-three-steps]
+
+<Steps>
+  <Step title="Check that Agora is running">
+    En la máquina donde corre el agente:
+
+    ```bash
+    agora api GET /v1/health
+    ```
+
+    Si no tenés `agora`, mirá [instalación](/install).
+  </Step>
+  <Step title="Add the MCP server">
+    ```bash
+    claude mcp add agora -e AGORA_TOKEN=<cursor token> -- agora mcp
+    ```
+
+    Codex, otros clientes y cómo conseguir un token de cursor: [Conectar](/agents/connect).
+  </Step>
+  <Step title="Install the skill (optional)">
+    ```bash
+    bunx skills add olimpiacloud/agora-skills
+    ```
+
+    Le enseña al agente los flujos baratos: primero el snapshot, actuar por ref, esperar eventos y pasarle los CAPTCHAs a un humano.
+  </Step>
+</Steps>
+
+## Qué puede hacer un agente [#what-an-agent-can-do]
+
+| Tarea | Herramientas |
+| --- | --- |
+| Leer páginas web y actuar sobre ellas | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_eval` |
+| Probar y revisar una UI | `browser_audit`, `browser_emulate`, `browser_screenshot` |
+| Manejar cualquier app de escritorio | `desktop_launch`, `desktop_screenshot`, `desktop_click`, `desktop_type`, `desktop_key` |
+| Correr subagentes en paralelo | `cursor_spawn`, `cursor_wait`, `cursor_control`, `cursor_message` |
+| Coordinarse con agentes hermanos | `board_read`, `board_post` |
+| Reportar progreso y resultados | `cursor_report`, `cursor_complete`, `cursor_fail` |
+| Pedirle ayuda a un humano | `human_request`, `events_wait` |
+| Administrar workspaces | `workspace_create`, `workspace_op`, `workspace_info` |
+
+## Por dónde seguir [#where-to-go-next]
+
+<CardGroup cols={2}>
+  <Card title="Connect" href="/agents/connect" icon="plug">
+    Configuración de MCP para Claude Code, Codex y cualquier cliente, la skill y docs legibles por máquina.
+  </Card>
+  <Card title="Tools" href="/agents/tools" icon="wrench">
+    Cómo usar bien cada familia de herramientas y cómo mantener bajo el consumo de tokens.
+  </Card>
+  <Card title="Workflows" href="/agents/workflows" icon="route">
+    Recetas de punta a punta: probar una app web, repartir trabajo entre subagentes, pasar un CAPTCHA.
+  </Card>
+  <Card title="Prompts" href="/agents/prompts" icon="message-square-text">
+    Prompts para copiar y dárselos a tu agente.
+  </Card>
+  <Card title="Security" href="/agents/security" icon="shield">
+    Alcances de los tokens, a qué puede llegar un agente, traspaso a un humano y workspaces en sandbox.
+  </Card>
+  <Card title="MCP tools reference" href="/mcp-tools" icon="book-open">
+    Todas las herramientas y sus argumentos.
+  </Card>
+</CardGroup>

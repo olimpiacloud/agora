@@ -1,0 +1,98 @@
+---
+title: Herramientas MCP
+description: Las 52 herramientas del servidor agora mcp, agrupadas según lo que controlan.
+sidebar:
+  icon: wrench
+---
+`agora mcp` expone estas herramientas. Con un token de cursor, el argumento `workspace` queda oculto y toma por defecto el workspace del cursor. `AGORA_TOOLS` limita qué grupos se listan (el grupo `self` siempre está activo); mirá [eficiencia de tokens](/agents/tools#token-efficiency).
+
+Los resultados de las acciones del navegador son texto: `done. now visible:` seguido de la página visible, como diff contra la última vista de esa pestaña. Si se detecta un CAPTCHA, el resultado termina con `CHALLENGE DETECTED: {...}`. Las capturas de pantalla se devuelven como imágenes.
+
+## Navegador (`browser`) [#browser-browser]
+
+| Herramienta | Descripción |
+| --- | --- |
+| `browser_open` | Abre una pestaña propia, en su propia ventana. `url`, `isolated` (contexto separado), `same_window`. Devuelve el `target` y lo que se ve. |
+| `browser_navigate` | Navega una pestaña, espera a que cargue (`wait`: `load`, `domcontentloaded`, `none`) y devuelve lo que se ve. |
+| `browser_snapshot` | Vista semántica completa de la página, incluido lo que está fuera de pantalla: elementos interactivos con refs `[eN]`, roles, nombres, cajas, más el texto de la página (`max_text`, por defecto 3000). |
+| `browser_click` | Hace clic por `ref`, o en `x`,`y` del viewport para canvas, iframes de otro origen y widgets de CAPTCHA. `button`, `count`. |
+| `browser_fill` | Reemplaza el valor de un campo por `ref`. `submit: true` aprieta Enter. |
+| `browser_type` | Escribe tecla por tecla en el elemento con foco (o primero hace clic en `ref`). Funciona en pestañas en segundo plano sin robar el foco. |
+| `browser_press` | Aprieta una tecla o combinación: `Enter`, `Tab`, `Escape`, `ctrl+a`, `ArrowDown`. |
+| `browser_scroll` | Scrollea por píxeles (`dy > 0` hacia abajo), opcionalmente en `x`,`y`. |
+| `browser_select` | Selecciona opciones de un `<select>` por valor o etiqueta. |
+| `browser_eval` | Evalúa una expresión de JavaScript y devuelve su valor JSON. Las promesas se esperan. |
+| `browser_screenshot` | Captura del viewport o `full_page`. Por defecto usa `max_width` 1024 y JPEG con `quality` 60. |
+| `browser_action` | `back`, `forward`, `reload`, `dialog` (`accept`, `text`), `challenge`, `focus`, `info`, `close`. |
+
+## Herramientas extra del navegador (`browserx`) [#extra-browser-tools-browserx]
+
+| Herramienta | Descripción |
+| --- | --- |
+| `browser_tabs` | Lista las pestañas con sus dueños. |
+| `browser_hover` | Pasa el puntero por encima por `ref` o coordenadas. |
+| `browser_drag` | Arrastra dentro de la página desde `x`,`y` hasta `x2`,`y2`. |
+| `browser_upload` | Asigna `files` (rutas en el host de Agora) a un input de archivo `ref`, o al selector de archivos que se acaba de abrir. |
+| `browser_wait` | Espera un `selector`, un `text` visible o `url_contains`. `timeout_ms` por defecto 15000. |
+| `browser_emulate` | Emula el viewport de un dispositivo: `width`, `height`, `scale`, `mobile`. `width: 0` lo resetea. |
+| `browser_audit` | Auditoría de UI y calidad en una sola llamada: overflow, contraste, texto diminuto, áreas táctiles, controles sin nombre, inputs sin etiqueta, alt faltante, encabezados, etiquetas meta y de SEO, TTFB/LCP/CLS, bytes por tipo, terceros, fuentes, animaciones, movimiento reducido y links internos rotos. |
+
+## Escritorio (`desktop`) [#desktop-desktop]
+
+Estas usan el puntero y el teclado MPX propios del cursor.
+
+| Herramienta | Descripción |
+| --- | --- |
+| `desktop_screenshot` | El escritorio, una `window` o una región (`x`, `y`, `w`, `h`). Las coordenadas coinciden con las de `desktop_*`, salvo que `max_width` escale la imagen. |
+| `desktop_windows` | Ventanas de nivel superior: id, título, clase, geometría. |
+| `desktop_click` | Hace clic en coordenadas de pantalla. Le da foco a la ventana que está debajo y la trae al frente. |
+| `desktop_move` | Mueve el puntero (hover). |
+| `desktop_drag` | Arrastra con el botón izquierdo. |
+| `desktop_scroll` | Scrollea en pasos de rueda en una posición. |
+| `desktop_type` | Escribe en la ventana que tiene el foco de tu teclado, opcionalmente dándole foco primero a `window`. |
+| `desktop_key` | Tecla o combinación: `Enter`, `ctrl+l`, `ctrl+shift+t`, `alt+F4`. |
+| `desktop_window` | `raise`, `move`, `resize`, `release` (vuelve al layout) o `close` de una ventana. |
+| `desktop_launch` | Lanza un programa (sin privilegios, con `DISPLAY` configurado). `restore: true` lo vuelve a lanzar al reanudar. |
+| `desktop_clipboard` | Lee el portapapeles, o lo setea con `text`. |
+| `control_surface` | `acquire` o `release` de un lock exclusivo sobre `win:<id>` o `tab:<target>`, con `ttl_ms`. |
+
+## Self (siempre disponible) [#self-always-available]
+
+| Herramienta | Descripción |
+| --- | --- |
+| `cursor_status` | Setea tu estado en vivo: `running`, `thinking`, `executing`, `waiting`, `blocked`, `needs_human`. |
+| `cursor_report` | Reporta el progreso (`message`, `percent`) a tu padre. |
+| `cursor_complete` | Termina con un `result` estructurado. Libera tus asientos, locks y pestañas. |
+| `cursor_fail` | Termina con un `error`. |
+| `cursor_inbox` | Lee los mensajes posteriores a `since`. |
+| `human_request` | Pedile a un humano que tome el control (CAPTCHA, MFA, aprobación). Después llamá a `events_wait` con `types: "control.returned"`. |
+| `board_read` | Lee el tablero compartido del workspace: los claims actuales y los posts posteriores a `since`. Revisalo antes de arrancar una tarea. |
+| `board_post` | Publica en el tablero compartido para que los agentes hermanos no dupliquen trabajo. `kind`: `claim` (falla si otro tiene o ya terminó el `topic`), `done`, `release`, `finding` o `note`; `topic`, `text`. |
+| `events_wait` | Espera eventos: `types` (separados por comas, sufijo `*`), `cursor`, `since`, `wait_ms` (por defecto 30000). |
+
+## Subagentes (`spawn`) [#subagents-spawn]
+
+| Herramienta | Descripción |
+| --- | --- |
+| `cursor_spawn` | Crea un hijo con un `goal`, `permissions`, `launch`, `worktree` y `max_children`. Mirá [lanzar subagentes](/agents/tools#subagents). |
+| `cursor_list` | Lista cursores, por `parent`, `workspace` o `active`. |
+| `cursor_get` | Un cursor (`self` para vos mismo). |
+| `cursor_wait` | Bloquea hasta que los cursores terminen (`all` por defecto true, `timeout_ms` por defecto 10 min). |
+| `cursor_control` | `cancel` (en cascada), `pause`, `resume` o `transfer` de un descendiente. |
+| `cursor_message` | Manda JSON al inbox de otro cursor. |
+
+## Workspaces (`workspace`)
+
+| Herramienta | Descripción |
+| --- | --- |
+| `workspace_list` | Workspaces con su estado, recursos, viewers y cursores. |
+| `workspace_create` | Crea un workspace: `name`, `width`, `height`, `profile`, `layout`, `start`. |
+| `workspace_info` | Estado, display, navegador, uso y locks. |
+| `workspace_op` | `start`, `suspend`, `resume`, `freeze`, `thaw`, `checkpoint`, `fork`, `resize`, `layout`, `browser-restart`. |
+| `system_info` | Recursos del daemon y memoria y CPU por workspace. |
+
+## Procesos (`process`) [#processes-process]
+
+| Herramienta | Descripción |
+| --- | --- |
+| `worktree_create` | Worktree de Git con su propia rama, directorio y rango de puertos: `repo`, `branch`, `base`. |

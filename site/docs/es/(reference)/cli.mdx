@@ -1,0 +1,65 @@
+---
+title: CLI
+description: Todos los subcomandos y variables de entorno de agora.
+sidebar:
+  icon: terminal
+---
+```text
+agora serve [--listen 127.0.0.1:7788] [--home DIR] [--apps-user agora] [--rtc-port 0]
+agora mcp                      MCP stdio server (AGORA_URL, AGORA_TOKEN)
+agora token                    print the admin token
+agora open <workspace> [--control] [--base URL] [--ttl 3600]
+agora api METHOD PATH [JSON]   call the HTTP API
+agora version
+```
+
+## agora serve
+
+Corre el daemon en primer plano. Tenés todos los flags en la página de [instalación](/install#run-without-systemd). Cuando recibe `SIGINT` o `SIGTERM`, hace un checkpoint de cada workspace (hasta 30 s) y termina.
+
+## agora mcp
+
+Habla MCP por stdin/stdout y reenvía cada llamada a herramienta a la API HTTP. Mirá [conectá tu agente](/agents/connect) y la [referencia de herramientas](/mcp-tools).
+
+## agora token
+
+Imprime el token de admin que está en `<home>/admin.token`.
+
+## agora open
+
+Genera un token de visualización para un workspace e imprime una URL para verlo:
+
+```bash
+agora open ws_1a2b3c --base https://agora.example.com
+# https://agora.example.com/view/ws_1a2b3c#vt=v1....
+```
+
+| Flag | Valor por defecto | Descripción |
+| --- | --- | --- |
+| `--control` | `true` | Permite que quien mira mande input. Usá `--control=false` para links de solo lectura. |
+| `--base` | `AGORA_URL` | URL base pública, por ejemplo el hostname de tu túnel. |
+| `--ttl` | `3600` | Duración del token en segundos (máximo 86400). |
+
+## agora api
+
+Llama a la API HTTP e imprime el cuerpo de la respuesta:
+
+```bash
+agora api GET /v1/workspaces
+agora api POST /v1/workspaces '{"name":"demo"}'
+```
+
+## Variables de entorno [#environment]
+
+| Variable | La usa | Descripción |
+| --- | --- | --- |
+| `AGORA_URL` | clientes | URL del daemon. Por defecto, `http://127.0.0.1:7788`. |
+| `AGORA_TOKEN` | clientes | Token que se manda. Por defecto, el token de admin de `AGORA_HOME`, `/var/lib/agora` o `~/.agora`, el primero que se pueda leer. |
+| `AGORA_ACT_AS` | clientes | Con el token de admin, actúa como este cursor (se manda como `X-Agora-Cursor`). |
+| `AGORA_HOME` | todos | Directorio de estado. |
+| `AGORA_ALLOW_PUBLIC` | `serve` | Con `1` se puede escuchar en direcciones que no son loopback. |
+| `AGORA_CGROUPS` | `serve` | Con `off` se desactivan los cgroups por workspace. |
+| `AGORA_TOOLS` | `mcp` | Grupos de herramientas a exponer, separados por comas: `browser`, `browserx`, `desktop`, `spawn`, `workspace`, `process`. Por defecto, todos. |
+| `AGORA_LEAN` | `mcp` | Con `1` las descripciones de las herramientas se acortan a una sola oración. |
+
+Los agentes que se lanzan también reciben `AGORA_CURSOR`, `AGORA_WORKSPACE` y, con el adaptador `command`, `AGORA_GOAL`.

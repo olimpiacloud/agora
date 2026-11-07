@@ -1,0 +1,77 @@
+{
+  "files": {
+    "docs/(guides)/concepts.mdx": {
+      "es": "234c0c789559b77c"
+    },
+    "docs/(guides)/meta.ts": {
+      "es": "f824f624dd88ac31"
+    },
+    "docs/(guides)/paseo.mdx": {
+      "es": "7861e535f9197303"
+    },
+    "docs/(guides)/security.mdx": {
+      "es": "c04df75b6f676787"
+    },
+    "docs/(project)/changelog.mdx": {
+      "es": "84eafa1585af1ae3"
+    },
+    "docs/(project)/faq.mdx": {
+      "es": "46580a4f9aa1e7ba"
+    },
+    "docs/(project)/meta.ts": {
+      "es": "2b8b494020729888"
+    },
+    "docs/(reference)/benchmarks.mdx": {
+      "es": "e3c7c5ed6c98c823"
+    },
+    "docs/(reference)/cli.mdx": {
+      "es": "0e130ae6c3f54534"
+    },
+    "docs/(reference)/http-api.mdx": {
+      "es": "e984bda761b668f8"
+    },
+    "docs/(reference)/mcp-tools.mdx": {
+      "es": "ddcc7053f41be482"
+    },
+    "docs/(reference)/meta.ts": {
+      "es": "6740d5c6a527e298"
+    },
+    "docs/(start)/install.mdx": {
+      "es": "1337a08b0b98ad37"
+    },
+    "docs/(start)/introduction.mdx": {
+      "es": "c06dbde4ce1fc740"
+    },
+    "docs/(start)/meta.ts": {
+      "es": "5852204a8fe7aff0"
+    },
+    "docs/(start)/quickstart.mdx": {
+      "es": "7f7799d29ee1a121"
+    },
+    "docs/(start)/uninstall.mdx": {
+      "es": "2595846e7a248a7f"
+    },
+    "docs/agents/connect.mdx": {
+      "es": "3346b65462a9e8f2"
+    },
+    "docs/agents/index.mdx": {
+      "es": "2403d22a6f61893a"
+    },
+    "docs/agents/meta.ts": {
+      "es": "9a46dc95956e02fe"
+    },
+    "docs/agents/prompts.mdx": {
+      "es": "db4083f7203b494e"
+    },
+    "docs/agents/security.mdx": {
+      "es": "0256616ab23d01fc"
+    },
+    "docs/agents/tools.mdx": {
+      "es": "579c6e6f67b51998"
+    },
+    "docs/agents/workflows.mdx": {
+      "es": "f81ae91b6e101cf6"
+    }
+  },
+  "version": 1
+}

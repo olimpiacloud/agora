@@ -1,0 +1,110 @@
+---
+title: Flujos de trabajo
+description: >-
+  Secuencias de herramientas de punta a punta para tareas comunes de agentes en
+  Agora, desde probar una app web hasta correr subagentes en paralelo y pasar un
+  CAPTCHA.
+sidebar:
+  icon: route
+---
+Cada receta muestra las llamadas a herramientas en orden. Los argumentos están abreviados; mirá la [referencia de herramientas MCP](/mcp-tools) para ver la lista completa. Con un token de cursor, no hace falta el argumento `workspace`.
+
+## Probar una app web [#test-a-web-app]
+
+```txt
+browser_open(url: "http://127.0.0.1:3000")        → target, and what is visible
+browser_fill(target, ref: "e4", text: "test@example.com")
+browser_fill(target, ref: "e5", text: "...", submit: true)
+browser_audit(target)                              → overflow, contrast, labels, SEO, LCP/CLS, broken links
+browser_emulate(target, width: 390, height: 844, mobile: true)
+browser_audit(target)                              → the same checks on mobile
+browser_emulate(target, width: 0, height: 0)       → reset
+cursor_complete(result: {issues: [...]})           → if you are a subagent
+```
+
+Cada fill y cada click devuelven lo que cambió en pantalla, así que no necesitás un snapshot entre pasos. Sacá un `browser_screenshot` solo para un problema visual que la auditoría no pueda describir.
+
+## Extraer datos de una página [#extract-data-from-a-page]
+
+```txt
+browser_open(url: "https://example.com/pricing")
+browser_eval(target, expression: "[...document.querySelectorAll('.plan')].map(p => ({name: p.querySelector('h3').textContent, price: p.querySelector('.price').textContent}))")
+```
+
+`browser_eval` devuelve el valor JSON en una sola llamada. Si la página carga los datos tarde, llamá primero a `browser_wait(target, selector: ".plan")`.
+
+## Repartir el trabajo entre subagentes en paralelo [#fan-out-parallel-subagents]
+
+```txt
+cursor_spawn(name: "acme",   goal: "Open https://acme.com/pricing and return the plans as JSON",
+             permissions: ["browser"], launch: {adapter: "claude", model: "claude-haiku-5-5", effort: "low"})
+cursor_spawn(name: "globex", goal: "Open https://globex.com/pricing and return the plans as JSON", ...)
+cursor_spawn(name: "initech", goal: "...", ...)
+cursor_wait(ids: ["cur_a", "cur_b", "cur_c"], timeout_ms: 600000)
+                                                   → status, result and usage of each child
+```
+
+Lanzá todos los hijos antes de esperar. Dale a cada uno un `goal` autosuficiente: los hijos no ven tu conversación. Cada hijo abre su propia ventana, y los hijos que lanza Agora usan el [tablero compartido](/agents/tools#the-shared-board) para no duplicar trabajo. Para frenar uno antes de tiempo, `cursor_control(id, op: "cancel")`.
+
+## Dividir una lista de tareas [#split-a-list-of-work-items]
+
+Cuando los hijos comparten una lista (páginas para revisar, filas para chequear), dejá que se coordinen a través del tablero en vez de asignarles los ítems vos:
+
+```txt
+board_read()                                       → current claims and posts
+board_post(kind: "claim", topic: "audit /settings")
+                                                   → fails if another cursor holds or finished it: pick another item
+... do the work ...
+board_post(kind: "finding", topic: "audit /settings", text: "Save button has no label")
+board_post(kind: "done", topic: "audit /settings")
+```
+
+## Iniciar sesión con ayuda de una persona [#log-in-with-help-from-a-human]
+
+```txt
+browser_open(url: "https://app.example.com/login")
+browser_fill(target, ref: "e3", text: "<email the user gave you>", submit: true)
+                                                   → CHALLENGE DETECTED, or an MFA prompt
+human_request(reason: "Solve the CAPTCHA and enter the MFA code on app.example.com, then return control")
+events_wait(types: "control.returned", wait_ms: 30000)
+                                                   → repeat on timeout
+browser_snapshot(target)                           → continue in the same tab, now logged in
+```
+
+Decile al usuario dónde tomar el control: el dashboard, la URL del visor que da `agora open <workspace>` o el [panel de Paseo](/paseo). La sesión queda guardada en el perfil del navegador del workspace, así que las sesiones siguientes arrancan ya logueadas.
+
+## Manejar una app de escritorio [#drive-a-desktop-app]
+
+```txt
+desktop_launch(command: "gimp", args: ["/var/lib/agora-apps/input.png"])
+desktop_windows()                                  → window id and geometry
+desktop_screenshot(window: <id>, max_width: 1024)  → orient once
+desktop_key(keys: "ctrl+shift+e")
+desktop_type(text: "output.png")
+desktop_key(keys: "Return")
+desktop_screenshot(window: <id>)                   → check the result
+```
+
+Las coordenadas de una captura coinciden con las de `desktop_click`, salvo que `max_width` haya escalado la imagen. Usá `control_surface(op: "acquire", surface: "win:<id>", ttl_ms: 60000)` si otros cursores podrían escribir en la misma ventana. El programa tiene que estar instalado en el host de Agora.
+
+## Bifurcar una sesión logueada [#branch-a-logged-in-session]
+
+Requiere el permiso `workspace`.
+
+```txt
+workspace_op(op: "checkpoint", snapshot: true)     → tabs, layout, cursors and a copy of the profile
+workspace_op(op: "fork", name: "experiment")       → a new workspace with a copy of the profile and home
+```
+
+Trabajá en el fork sin tocar la sesión original. `suspend` y `resume` mantienen un workspace en disco y vuelven a abrir sus pestañas.
+
+## Desarrollo en paralelo con worktrees [#parallel-development-with-worktrees]
+
+```txt
+cursor_spawn(name: "fix-header", goal: "Fix the header overflow on mobile and run the tests",
+             permissions: ["browser", "process"],
+             worktree: {repo: "/srv/app", branch: "fix-header", base: "main"},
+             launch: {adapter: "claude"})
+```
+
+El hijo recibe su propio worktree de git y un rango de puertos (`PORT`, `AGORA_PORT_BASE`, `AGORA_PORTS`), así varios hijos pueden correr servidores de desarrollo en paralelo y probarlos cada uno en sus propias pestañas.

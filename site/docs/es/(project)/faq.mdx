@@ -1,0 +1,44 @@
+---
+title: Preguntas frecuentes
+description: Preguntas comunes sobre Agora.
+sidebar:
+  icon: circle-help
+---
+<Accordion>
+  <AccordionItem title="¿En qué se diferencia Agora de noVNC o de un servidor VNC?">
+    VNC transmite un escritorio a una sola persona. Agora corre un escritorio para muchos agentes: cada uno tiene su propio cursor, teclado, pestañas, permisos y resultados, y las personas miran a través de un stream H.264 que no cuesta nada cuando nadie está mirando. Mirá los [benchmarks](/benchmarks).
+  </AccordionItem>
+  <AccordionItem title="¿Por qué no un navegador o un contenedor por agente?">
+    Por la memoria. Cinco agentes en un workspace de Agora usan unos 326 MB; cinco stacks separados de Xvfb + noVNC + Chrome usan unos 1,45 GB. Los agentes que necesitan aislamiento real igual pueden tener workspaces separados.
+  </AccordionItem>
+  <AccordionItem title="¿Necesito Playwright o Puppeteer?">
+    No. Agora habla con Chromium directamente por el pipe de CDP y tiene su propia capa semántica, diseñada para ser compacta para los LLM.
+  </AccordionItem>
+  <AccordionItem title="¿Con qué agentes funciona?">
+    Con cualquiera que hable MCP por stdio, y con cualquiera que pueda llamar a una API HTTP. Agora puede lanzar Claude Code y Codex como subagentes por su cuenta, o cualquier comando que le pases.
+  </AccordionItem>
+  <AccordionItem title="¿Puede correr apps de escritorio, no solo el navegador?">
+    Sí. `desktop_launch` arranca cualquier programa X11 en el workspace, y las herramientas `desktop_*` lo manejan con píxeles y con un mouse y un teclado reales.
+  </AccordionItem>
+  <AccordionItem title="¿Corre en macOS o Windows?">
+    No. Agora necesita Linux con Xvfb. Usá un servidor o una VM con Linux y conectate a través de un túnel autenticado.
+  </AccordionItem>
+  <AccordionItem title="¿Hay GPU?">
+    No. Xvfb no tiene GPU, así que Chromium rasteriza por software. Para la mayoría de los sitios alcanza; el WebGL pesado va a andar lento.
+  </AccordionItem>
+  <AccordionItem title="¿Qué pasa con las sesiones iniciadas cuando se suspende un workspace?">
+    Sobreviven. El perfil del navegador vive en disco con su nombre, así que las cookies y el storage se mantienen. Las páginas abiertas se recargan desde sus URLs al reanudar; la memoria no se guarda en un checkpoint.
+  </AccordionItem>
+  <AccordionItem title="¿Los agentes pueden resolver CAPTCHAs?">
+    Agora detecta los CAPTCHAs comunes y deja que el agente haga clic en el widget de forma visual. Cuando eso no alcanza, el agente llama a `human_request`, vos tomás el control desde el visor o desde el panel de Paseo, y el agente sigue en la misma sesión. Mirá [toma de control humana](/concepts#human-takeover-and-captchas).
+  </AccordionItem>
+  <AccordionItem title="¿Lo puedo exponer a internet?">
+    No directamente. Agora rechaza por defecto las direcciones que no son de loopback. Usá Cloudflare Tunnel con Access o un túnel SSH. Mirá el [modelo de seguridad](/security).
+  </AccordionItem>
+  <AccordionItem title="¿Cuántos agentes entran en un workspace?">
+    Los cursores lógicos cuestan alrededor de 1,3 KB cada uno, así que cientos no son problema. Los agentes que usan entrada de escritorio comparten unos 6 puestos de entrada por display, que se reciclan después de 2 minutos sin actividad; los agentes que solo usan el navegador no necesitan un puesto.
+  </AccordionItem>
+  <AccordionItem title="¿Agora tiene relación con la nube de Olimpia?">
+    Agora está hecho por [Olimpia](https://olimpia.dev) y corre en tu propia máquina. La nube de Olimpia ([docs](https://docs.olimpia.dev)) hostea apps, Postgres, Redis y buckets; [Acropolis](https://acropolis.olimpia.dev), todavía experimental, construye imágenes OCI.
+  </AccordionItem>
+</Accordion>

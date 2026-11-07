@@ -1,0 +1,140 @@
+---
+title: Herramientas
+description: >-
+  Cómo tiene que usar un agente cada familia de herramientas MCP de Agora
+  (browser, escritorio, cursores, tablero, workspaces, traspaso a un humano) y
+  mantener bajo el consumo de tokens.
+sidebar:
+  icon: wrench
+---
+`agora mcp` expone 52 herramientas agrupadas. Esta página explica cómo usar bien cada familia. Para ver todas las herramientas y sus argumentos, mirá la [referencia de herramientas MCP](/mcp-tools).
+
+| Familia | Grupo en `AGORA_TOOLS` | Para qué usarla |
+| --- | --- | --- |
+| `browser_*` | `browser`, `browserx` | Páginas web, mediante refs semánticas sobre CDP. |
+| `desktop_*`, `control_surface` | `desktop` | Cualquier app X11, con píxeles y tu propio mouse y teclado. |
+| `cursor_*` (crear y controlar) | `spawn` | Subagentes: crear, esperar, mandar mensajes, cancelar. |
+| `cursor_status`, `cursor_report`, `cursor_complete`, `cursor_fail`, `cursor_inbox` | `self` (siempre activo) | Tu propio estado, progreso y resultado. |
+| `board_read`, `board_post` | `self` | Coordinación con agentes hermanos. |
+| `human_request`, `events_wait` | `self` | Traspaso a un humano y espera de eventos. |
+| `workspace_*`, `system_info` | `workspace` | Crear y administrar workspaces. |
+| `worktree_create` | `process` | Un worktree de git con su propio rango de puertos. |
+
+## Browser
+
+Para cualquier cosa en la web, preferí las herramientas `browser_*`. Hablan con Chromium por pestaña sobre CDP, así que nunca le disputan el foco a otros agentes y no necesitan un puesto de entrada.
+
+1. **Abrí tu propia pestaña.** `browser_open` con una `url` devuelve el `target` de la pestaña y lo que se ve. Seguí usando ese target. `isolated: true` la abre en un contexto separado, sin las sesiones iniciadas del workspace.
+2. **Actuá por ref.** Las refs como `[e12]` salen de la observación o de `browser_snapshot`. Usá `browser_click`, `browser_fill` (`submit: true` aprieta Enter), `browser_select` y `browser_press`. Usá coordenadas `x`,`y` solo para canvas, iframes de otro origen y widgets de CAPTCHA.
+3. **Leé la observación.** `browser_open`, `browser_navigate`, `browser_click`, `browser_fill`, `browser_type`, `browser_press`, `browser_select` y `browser_scroll` devuelven `done. now visible:` seguido de la página visible, como diff contra tu última vista de esa pestaña. No llames a `browser_snapshot` después de ellas salvo que necesites contenido fuera de pantalla.
+4. **Extraé datos en una sola llamada.** `browser_eval` evalúa una expresión de JavaScript y devuelve su valor en JSON.
+5. **Esperá, no duermas.** `browser_wait` espera un `selector`, un `text` visible o `url_contains`.
+
+Para trabajo de UI, usá `browser_audit` una vez en lugar de muchas capturas: revisa overflow, contraste, áreas táctiles, labels, encabezados, etiquetas de SEO, Core Web Vitals, animaciones y links internos rotos. `browser_emulate` configura un viewport móvil (`width: 0` lo resetea). Sacá `browser_screenshot` solo cuando importa la apariencia; por defecto es un JPEG de 1024 px con calidad 60, y `max_width` lo achica.
+
+`browser_upload` carga archivos en un input de archivo; las rutas son del host de Agora. `browser_action` maneja `back`, `forward`, `reload`, diálogos y `close`.
+
+## Escritorio [#desktop]
+
+Usá las herramientas `desktop_*` para todo lo que no sea una página web. Usan el puntero MPX y el teclado propios de tu cursor, así que dos agentes pueden escribir en dos ventanas al mismo tiempo.
+
+1. `desktop_launch` arranca un programa como el usuario de apps sin privilegios, con `DISPLAY` configurado. `restore: true` lo vuelve a lanzar cuando se reanuda el workspace.
+2. Sacá un `desktop_screenshot` para orientarte. Sus coordenadas coinciden con las de las herramientas `desktop_*`, salvo que `max_width` escale la imagen. `desktop_windows` lista las ventanas con sus ids y geometría.
+3. Actuá con `desktop_click`, `desktop_type`, `desktop_key`, `desktop_scroll` y `desktop_drag`. `desktop_window` trae al frente, mueve, redimensiona o cierra una ventana.
+4. `desktop_clipboard` lee o escribe el portapapeles.
+
+Para que otros cursores no toquen una ventana o pestaña por un rato, llamá a `control_surface` con `op: "acquire"` y una superficie como `win:<id>` o `tab:<target>`, más un lease `ttl_ms`. Liberala cuando termines.
+
+## Subagentes [#subagents]
+
+Un agente con el permiso `spawn` puede crear hijos con `cursor_spawn`. Con `launch`, Agora arranca el proceso del agente con su propio token acotado y el servidor MCP ya configurado:
+
+```json
+{
+  "name": "pricing-check",
+  "goal": "Open https://example.com/pricing and return the plans as JSON",
+  "permissions": ["browser"],
+  "launch": { "adapter": "claude", "model": "claude-haiku-5-5", "effort": "low" }
+}
+```
+
+Sin `launch`, recibís el token del hijo para pasárselo vos a un agente.
+
+Creá primero todos los hijos independientes y después llamá a `cursor_wait` una sola vez con todos los ids:
+
+```json
+{ "ids": ["cur_..."], "timeout_ms": 600000 }
+```
+
+`cursor_wait` devuelve cada hijo con su `status`, su `result` y, para Claude Code, su `usage` (tokens, turnos, costo y duración). Los hijos corren en paralelo en el mismo workspace, cada uno en su propia ventana y con su propio puesto de entrada.
+
+Otros controles: `cursor_list` y `cursor_get` leen el estado, `cursor_message` manda JSON a la bandeja de entrada de un hijo, y `cursor_control` puede hacer `cancel` (se propaga a todo el subárbol), `pause`, `resume` o `transfer` sobre un descendiente.
+
+### Opciones de launch [#launch-options]
+
+| Campo | Descripción |
+| --- | --- |
+| `adapter` | `claude`, `codex` o `command`. |
+| `model` | Modelo para el CLI del agente. |
+| `effort` | `low`, `medium` o `high` (Claude Code). |
+| `prompt` | Reemplaza al goal como prompt. |
+| `command` | Para `command`: el argv a ejecutar. |
+| `tools` | Grupos de herramientas a exponer: `browser`, `browserx`, `desktop`, `spawn`, `workspace`, `process`. Por defecto `browser`, más los grupos que correspondan a los permisos del cursor. |
+| `profile` | `lean` (por defecto) o `full`. |
+
+Agregá `worktree: {repo, branch, base}` a `cursor_spawn` para darle al hijo su propio worktree de git y su rango de puertos para desarrollo en paralelo. Los permisos de un hijo son siempre la intersección entre lo que pide y lo que tenés vos.
+
+### Reportar como hijo [#reporting-as-a-child]
+
+Si vos mismo sos un cursor, reportá con `cursor_report` (`message`, `percent`), definí tu estado en vivo con `cursor_status` y terminá con `cursor_complete` (cualquier `result` en JSON) o `cursor_fail` (`error`). Al terminar se liberan tus puestos, locks y pestañas. Leé los mensajes de tu padre con `cursor_inbox`.
+
+## El tablero compartido [#the-shared-board]
+
+Los cursores de un workspace comparten un tablero para que los agentes en paralelo no repitan el trabajo de los demás:
+
+1. `board_read` antes de arrancar una tarea.
+2. `board_post` con `kind: "claim"` y un `topic` corto. El claim falla si otro cursor vivo tiene el topic o si ya está terminado; en ese caso, salteá esa tarea.
+3. Publicá `finding` o `note` para tus hermanos.
+4. Publicá `done` cuando termines el topic, o `release` para soltarlo.
+
+Los claims de cursores que terminaron vencen solos. A los subagentes que lanza Agora se les indica que usen el tablero.
+
+## Traspaso a un humano [#human-handoff]
+
+Cuando una página muestra `CHALLENGE DETECTED`, o un login, MFA o aprobación necesita a una persona:
+
+1. Llamá a `human_request` con un `reason` preciso. Tu estado pasa a `needs_human` y la sesión del browser sigue viva.
+2. Decile al usuario qué tiene que hacer.
+3. Llamá a `events_wait` con `types: "control.returned"`. Si se vence el tiempo, volvé a llamarlo.
+4. Seguí en la misma pestaña.
+
+Nunca intentes vencer un CAPTCHA por fuerza bruta ni con un servicio de resolución de terceros. Mirá [toma de control humana](/concepts#human-takeover-and-captchas) para ver qué ve el humano.
+
+## Eventos [#events]
+
+`events_wait` se bloquea hasta que pasa algo, así que nunca hacés polling en un loop. Filtrá con `types` (separados por comas, se permite el sufijo `*`), por ejemplo `control.returned`, `cursor.ended`, `browser.challenge.detected` o `browser.dialog.opened`. Pasá el último `since` que viste para continuar; `wait_ms` es 30000 por defecto.
+
+## Workspaces
+
+Las herramientas usan por defecto tu propio workspace. Con el permiso `workspace` (o el token de admin) también podés administrar workspaces:
+
+- `workspace_create` crea un workspace nuevo. No cuesta nada hasta que algo lo usa.
+- `workspace_op` ejecuta `start`, `suspend`, `resume`, `freeze`, `thaw`, `checkpoint`, `fork`, `resize`, `layout` y `browser-restart`.
+- `workspace_info`, `workspace_list` y `system_info` informan el estado y el uso de recursos.
+
+`fork` copia el perfil del browser y el directorio home a un workspace nuevo, así podés bifurcar una sesión iniciada sin tocar la original.
+
+## Eficiencia de tokens [#token-efficiency]
+
+Agora está diseñado para que los agentes gasten tokens en la tarea, no en la plomería. En nuestro benchmark de tres tareas de browser, el launcher lean bajó el costo de seis corridas de $2.01 a $0.23 con las mismas 6/6 respuestas correctas, y el contexto inicial de cada subagente de 66.700 a 7.500 tokens. Mirá los [benchmarks](/benchmarks#subagent-tokens).
+
+- **Actuá y después leé la observación.** Las herramientas de acción ya devuelven lo que se ve y solo lo que cambió.
+- **Refs antes que coordenadas, snapshots antes que capturas.** Un snapshot tarda alrededor de 1 ms y unos pocos cientos de tokens.
+- **Una auditoría en lugar de muchas capturas.** `browser_audit` cubre layout, accesibilidad, SEO y rendimiento en una sola llamada.
+- **Esperá eventos.** `events_wait` y `cursor_wait` se bloquean hasta que pasa algo.
+- **Subagentes lean.** El perfil `lean` por defecto corre Claude Code con `--strict-mcp-config`, sin slash commands, sin herramientas integradas, sin archivos de configuración y con un system prompt corto, y expone solo los grupos de herramientas que necesita el cursor (`AGORA_TOOLS`) con descripciones de una línea (`AGORA_LEAN=1`). Las definiciones de herramientas bajan de unos 5,7k a 2,9k tokens.
+- **Modelos chicos para trabajos chicos.** Leer una página o completar un formulario rara vez necesita el modelo más grande; pasá `model` y `effort: "low"`.
+- **Coordiná a través del tablero,** así dos subagentes nunca hacen el mismo trabajo.
+- **Agrupá las llamadas independientes** en el mismo turno.
+
+Aplicá los mismos filtros a tu propia configuración con `AGORA_TOOLS` y `AGORA_LEAN` (mirá [Conectar](/agents/connect#environment-variables)).

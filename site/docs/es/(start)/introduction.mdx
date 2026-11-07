@@ -1,0 +1,76 @@
+---
+title: Introducción
+description: >-
+  Agora les da a los agentes de IA una computadora Linux real que pueden
+  compartir. Un escritorio y un Chromium por workspace, muchos agentes a la vez,
+  cada uno con su propio cursor, teclado y pestañas.
+sidebar:
+  icon: compass
+seo:
+  image: /og.jpg
+---
+![Acuarela de un ágora griega: puestos de mercado bajo una columnata, cada uno con ventanas de navegador y un cursor de color](/art/banner.webp)
+
+Agora es un runtime de escritorio nativo para agentes, creado por [Olimpia](https://olimpia.dev). Un único daemon en Go le da a cada agente una computadora Linux real (Chromium, apps X11, una terminal) sin levantar un escritorio ni un navegador por agente. Los agentes son **cursores**: tienen identidad, permisos acotados, su propio puesto de entrada, sus propias pestañas, una jerarquía padre-hijo y resultados estructurados.
+
+## Por qué [#why]
+
+Los escritorios remotos se hicieron para una persona mirando una pantalla. Los agentes necesitan otra cosa:
+
+- **Muchos agentes, una máquina.** Cinco agentes en un mismo workspace de Agora comparten un display Xvfb y un Chromium, con una ventana cada uno. Eso son unos 326 MB contra 1,45 GB de cinco stacks separados de Xvfb + noVNC + Chrome.
+- **Entrada que no choca.** Cada cursor recibe su propio puntero y teclado MPX cuando lo necesita, y las acciones del navegador van directo a la pestaña por CDP. Dos agentes pueden escribir en dos ventanas al mismo tiempo.
+- **Primero control semántico, píxeles cuando hace falta.** Un snapshot compacto con referencias a elementos (`[e3] button "Sign in"`) tarda alrededor de 1 ms y cuesta una fracción de los tokens de una captura de pantalla. El control por píxeles sigue estando para canvas, CAPTCHAs y cualquier app de escritorio.
+- **Humanos en el circuito.** Cuando un agente se topa con un CAPTCHA o un login, pide un humano. Tomás el control desde el visor, lo resolvés y se lo devolvés; el agente sigue en la misma pestaña y sesión.
+- **Nada corre si nadie mira.** Sin visores no hay captura ni codificación. Los workspaces quedan inactivos, se congelan o se suspenden a disco y vuelven con sus pestañas.
+
+## Qué obtenés [#what-you-get]
+
+<CardGroup cols={2}>
+  <Card title="Workspaces" href="/concepts#workspaces" icon="monitor">
+    Computadoras virtuales persistentes con ciclo de vida, presupuestos, checkpoints y forks copy-on-write. No cuestan nada hasta que los usás.
+  </Card>
+  <Card title="Cursors and subagents" href="/concepts#cursors" icon="mouse-pointer-2">
+    Tokens acotados, permisos que solo se restringen al delegar, mensajería, progreso y `wait`. Agora puede lanzar Claude Code o Codex por vos.
+  </Card>
+  <Card title="MCP server" href="/mcp-tools" icon="plug">
+    52 herramientas por stdio para cualquier harness: navegador, escritorio, cursores, eventos y workspaces.
+  </Card>
+  <Card title="Streaming" href="/concepts#streaming" icon="video">
+    H.264 sobre WebRTC o WebSocket, y JPEG guiado por daño para clientes livianos. Se codifica una vez y se reparte a todos los visores.
+  </Card>
+</CardGroup>
+
+## Agora vs noVNC
+
+Medido con `go run ./cmd/agora-bench` contra Xvfb + x11vnc + noVNC + Chrome en un Ryzen 5 3400G (8 hilos). Los resultados completos están en la página de [benchmarks](/benchmarks).
+
+| | Agora | Stack noVNC |
+| --- | ---: | ---: |
+| Escritorio vacío, memoria | 36 MB | 82 MB |
+| Escritorio vacío, arranque | 98 ms | 246 ms |
+| Cinco agentes con navegador, memoria | 326 MB | 1454 MB |
+| Agente nuevo listo | 156 ms | 521 ms |
+| Clic hasta `mousedown` en el DOM (p50) | 1,1 ms | 3,9 ms |
+| Ancho de banda de streaming, 1 visor | 303 kbit/s | 5862 kbit/s |
+| Workspace suspendido, memoria | 41 MB | no es posible |
+
+## Próximos pasos [#next-steps]
+
+<CardGroup cols={2}>
+  <Card title="Install" href="/install" icon="download">
+    Una sola línea en Ubuntu o Debian.
+  </Card>
+  <Card title="Quickstart" href="/quickstart" icon="rocket">
+    Creá un workspace, abrí una pestaña y leela como un agente.
+  </Card>
+  <Card title="Connect your agent" href="/agents/connect" icon="bot">
+    MCP para Claude Code y Codex, más la skill de Agora.
+  </Card>
+  <Card title="Security model" href="/security" icon="shield">
+    Qué aísla Agora y qué no.
+  </Card>
+</CardGroup>
+
+:::note
+Agora es parte de la familia Olimpia, junto con [Olimpia cloud](https://olimpia.dev) ([docs](https://docs.olimpia.dev)) y [Acropolis](https://acropolis.olimpia.dev), un builder de imágenes OCI que todavía es experimental.
+:::

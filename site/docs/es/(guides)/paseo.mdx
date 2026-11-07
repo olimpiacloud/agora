@@ -1,0 +1,30 @@
+---
+title: Plugin de Paseo
+description: >-
+  Mirá y manejá escritorios de Agora desde Paseo, en desktop o en el celular, y
+  dale a cada agente de Paseo su propio cursor de Agora.
+sidebar:
+  icon: smartphone
+---
+[Paseo](https://paseo.sh) corre agentes de programación en tus máquinas y te deja manejarlos desde cualquier lugar. El plugin de Agora conecta Paseo con un daemon de Agora en el mismo host.
+
+## Qué agrega [#what-it-adds]
+
+- **Un panel de Agora en cada workspace** con el escritorio en vivo. Los frames son imágenes JPEG que se mandan solo cuando cambia la pantalla, por la conexión que Paseo ya tiene, así que funciona en el celular y no necesita puertos abiertos. Tocá para hacer clic, mantené apretado para hacer clic derecho, escribí en la ventana con foco, mandá teclas, scrolleá, y tomá o devolvé el control cuando un agente pide a un humano.
+- **Dos vistas:** el escritorio completo y un **muro de agentes** con un mosaico por agente que muestra en vivo la ventana de ese agente, con su nombre y su estado. El cursor de cada agente se dibuja arriba como una flecha de color con su nombre.
+- **Tarjetas de vista previa en vivo en el chat.** Cuando un agente saca una captura o abre una página con las herramientas de Agora, el chat muestra una tarjeta en vivo del escritorio con todos los cursores y los agentes activos. Solo la tarjeta más reciente de cada workspace transmite; las más viejas se quedan con su último frame, y una tarjeta vuelve a la captura guardada cuando el stream no está disponible. Los que miran el mismo workspace comparten un solo stream de Agora, que se cierra cuando nadie lo está mirando.
+- **MCP para cada agente.** Cada agente de Claude o Codex recibe el servidor MCP de Agora con su propio cursor. Los agentes del mismo workspace de Paseo comparten un workspace de Agora (un escritorio y un perfil de navegador), cada uno con sus propias ventanas y su propio puesto de entrada.
+
+## Instalación [#install]
+
+Primero instalá y corré Agora en el host del daemon de Paseo ([instalación](/install)), y después:
+
+```bash
+paseo plugin install /path/to/agora/paseo-plugin
+```
+
+El plugin requiere Paseo 0.15.2 o posterior. Lee el token de admin de `/var/lib/agora/admin.token` (lo podés sobrescribir con `AGORA_HOME` o `AGORA_URL`) y guarda los tokens de cursor de cada agente en `~/.agora-paseo/state.json` con modo 0600.
+
+## Desactivarlo por agente [#opt-out-per-agent]
+
+Agregale la etiqueta `agora/enabled=false` a un agente para saltearlo: no recibe servidor MCP de Agora ni cursor.

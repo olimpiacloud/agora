@@ -1,0 +1,83 @@
+---
+title: Benchmarks
+description: >-
+  Agora frente a un stack de Xvfb + x11vnc + noVNC + Chrome, y el costo en
+  tokens de los subagentes de Agora antes y después del launcher liviano.
+sidebar:
+  icon: gauge
+---
+## Runtime vs noVNC
+
+`go run ./cmd/agora-bench` corre los mismos escenarios en Agora y en una base de comparación de Xvfb + openbox + x11vnc + websockify (noVNC) + Google Chrome. La memoria es PSS sumada sobre todos los procesos de cada stack, Chromium incluido. La CPU se muestrea en ventanas de 10 s.
+
+Host: AMD Ryzen 5 3400G, 8 hilos; Google Chrome 157.0.8103.38; Agora 0.1.0. La máquina corre otras cargas de trabajo, así que tomá las diferencias chicas de CPU como ruido.
+
+| Escenario | Métrica | Agora | Base | Unidad | Notas |
+|---|---|---:|---:|---|---|
+| 1 daemon inactivo | memoria PSS | 11.8 | — | MB | la base no tiene daemon |
+| 1 daemon inactivo | CPU | 0.0 | — | % |  |
+| 2 escritorio vacío | memoria PSS | 36.3 | 81.7 | MB | agora: daemon+Xvfb+WM; base: Xvfb+openbox+x11vnc+websockify |
+| 2 escritorio vacío | CPU en reposo | 0.1 | 0.1 | % |  |
+| 2 escritorio vacío | tiempo de arranque | 98.0 | 246.0 | ms |  |
+| 3 escritorio + Chromium | arranque en frío hasta página cargada | 550.0 | 426.0 | ms |  |
+| 3 escritorio + Chromium | memoria PSS | 281.8 | 325.7 | MB | Chromium incluido en ambos lados |
+| 3 escritorio + Chromium | CPU en reposo, sin visor | 0.5 | — | % |  |
+| 4 captura del agente | latencia de captura completa p50 | 30.3 | 39.0 | ms | agora: captura X shm de todo el escritorio + JPEG; base: CDP Page.captureScreenshot |
+| 4 captura del agente | captura de pestaña vía API p50 | 37.2 | 39.0 | ms | agora suma HTTP+auth+arbitraje sobre CDP directo |
+| 4 captura del agente | snapshot semántico p50 | 1.2 | — | ms | sin equivalente en la base; reemplaza las capturas para los agentes |
+| 5 input | clic → mousedown en el DOM p50 (seat X11) | 1.1 | 3.9 | ms | agora: API→seat MPX propio vía XTEST; base: proceso xdotool |
+| 5 input | clic → mousedown en el DOM p50 (CDP) | 13.8 | — | ms | clic semántico de agora a través de la API |
+| 6 cinco agentes con browser | nuevo agente listo (cursor+ventana vs stack nuevo) | 156.0 | 521.0 | ms |  |
+| 6 cinco agentes con browser | memoria PSS | 326.4 | 1453.8 | MB | agora: 1 escritorio, 1 Chromium, 5 ventanas; base: 5 stacks completos |
+| 6 cinco agentes con browser | CPU en reposo, sin visor | 0.2 | 0.2 | % |  |
+| 7 cursores inactivos | memoria por cursor inactivo | 1.3 | — | KB | 100 cursores lógicos sin gráficos; la base necesitaría un stack para cada uno |
+| 8 página animada, sin visor | CPU | 16.4 | 13.3 | % | costo de la animación de la página en ambos; agora no codifica nada |
+| 9 streaming, 1 visor | CPU del servidor (escritorio+browser+stream) | 20.8 | 14.1 | % | el cliente de la base pide RFB crudo a través de websockify (la codificación más barata para el servidor) |
+| 9 streaming, 1 visor | frames/s entregados | 14.9 | 14.7 | fps |  |
+| 9 streaming, 1 visor | ancho de banda | 302.7 | 5861.6 | kbit/s | H.264 vs RFB crudo |
+| 9b streaming, visor interactuando | CPU del servidor | 31.9 | 14.1 | % | el visor manda movimientos del puntero cada 100 ms; la fila de la base repite el escenario 9 |
+| 9b streaming, visor interactuando | frames/s entregados | 29.3 | 14.7 | fps |  |
+| 10 streaming, 3 visores | CPU del servidor | 22.5 | 19.2 | % | agora codifica una vez y reparte |
+| 11 workspace suspendido | memoria PSS (todo agora) | 41.1 | 331.0 | MB | la base no puede suspender sin perder la sesión en vivo |
+| 11 workspace suspendido | tiempo de suspensión | 189.0 | — | ms | checkpoint + cierre ordenado del browser |
+| 11 workspace suspendido | reanudación hasta restaurar 5 pestañas | 1030.0 | 426.0 | ms | base: arranque en frío de un stack |
+| 12 teardown | destruir workspace | 248.0 | — | ms |  |
+
+### Cómo leer los números [#reading-the-numbers]
+
+- **Donde Agora gana por mucho:** muchos agentes (un escritorio y un Chromium en lugar de un stack para cada uno), latencia de input gracias a sus propios seats MPX, ancho de banda del streaming (H.264 en lugar de RFB crudo) y workspaces suspendidos, algo que noVNC no puede hacer sin perder la sesión.
+- **Donde cuesta más:** un visor de streaming usa más CPU del servidor que RFB crudo, porque Agora codifica H.264. El frame rate se adapta para mantener esto bajo (8 fps observando, 15 fps mirando, 30 fps interactuando), y sin visores no se codifica nada.
+- **El arranque en frío y la reanudación** son más lentos que un stack de noVNC nuevo porque Agora restaura las pestañas anteriores para sus dueños en lugar de arrancar vacío.
+
+### Antes y después de las optimizaciones de streaming [#before-and-after-the-streaming-optimizations]
+
+| Escenario | Antes | Después | noVNC |
+| --- | ---: | ---: | ---: |
+| Streaming, 1 visor mirando (CPU) | 30.4% a 29 fps | 20.8% a 15 fps | 14.1% a 15 fps |
+| Streaming, 3 visores (CPU) | 31.9% | 22.5% | 19.2% |
+| Streaming, visor interactuando (CPU) | 32.5% a 29 fps | 31.9% a 29 fps | — |
+| Ancho de banda, 1 visor | 425 kbit/s | 303 kbit/s | 5,862 kbit/s |
+
+## Tokens de los subagentes [#subagent-tokens]
+
+Tres tareas reproducibles (`bench/agent_bench.py`: una compra en una tienda local, una búsqueda en olimpia.dev y una revisión visual), dos corridas cada una, con subagentes Claude Sonnet 5.5 lanzados por Agora. El costo se calcula a partir de los transcripts de Claude Code a precios de la API, deduplicados por id de mensaje.
+
+| Configuración | Correctas | Costo (6 tareas) | Turnos | Lecturas de caché | Tiempo total |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Antes | 6/6 | $2.009 | 40 | 2.47 M | 175 s |
+| Ronda 1 | 6/6 | $0.308 | 29 | 0.27 M | 69 s |
+| Ronda 2 | 6/6 | $0.246 | 31 | 0.25 M | 60 s |
+| Ronda 2, effort low | 6/6 | $0.227 | 29 | 0.24 M | 54 s |
+
+El contexto inicial por subagente bajó de 66,700 a 7,500 tokens. Una auditoría de UI real de la landing de olimpia.dev con el mismo prompt bajó de $0.927 a $0.299 y de 21 a 17 turnos, con la misma cantidad de capturas.
+
+Qué cambió: el launcher liviano de Claude Code, perfiles de herramientas por permiso con descripciones de una línea, observaciones incrementales después de cada acción, capturas JPEG de 1024 px por defecto y reporte real de uso por cursor. Más detalles en [eficiencia de tokens](/agents/tools#token-efficiency).
+
+## Correlo vos mismo [#run-it-yourself]
+
+```bash
+go build -o bin/agora ./cmd/agora
+go run ./cmd/agora-bench
+```
+
+Los resultados se escriben en `bench/results/`.

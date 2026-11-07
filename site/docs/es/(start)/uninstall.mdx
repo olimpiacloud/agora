@@ -1,0 +1,44 @@
+---
+title: Desinstalar
+description: >-
+  Eliminá Agora y, si querés, todos los workspaces, perfiles de navegador y
+  tokens que guardó.
+sidebar:
+  icon: trash-2
+---
+## Conservar tus datos [#keep-your-data]
+
+Esto detiene el servicio y elimina el binario y la unidad de systemd, pero conserva `/var/lib/agora` (workspaces, perfiles de navegador con sus sesiones iniciadas, checkpoints y tokens). Si lo reinstalás, retoma todo de nuevo.
+
+```bash
+curl -fsSL https://agora.olimpia.dev/uninstall.sh | sh
+```
+
+## Eliminar todo [#remove-everything]
+
+Agregá `--purge` para borrar también el directorio de estado y el usuario de sistema `agora` junto con su home (`/var/lib/agora-apps`):
+
+```bash
+curl -fsSL https://agora.olimpia.dev/uninstall.sh | sh -s -- --purge
+```
+
+:::danger
+La purga borra todos los workspaces, perfiles de navegador (incluidas las sesiones iniciadas), checkpoints y tokens. No se puede deshacer.
+:::
+
+## A mano [#by-hand]
+
+```bash
+sudo systemctl disable --now agora
+sudo rm -f /etc/systemd/system/agora.service /usr/local/bin/agora
+sudo systemctl daemon-reload
+```
+
+Y para purgar:
+
+```bash
+sudo rm -rf /var/lib/agora
+sudo userdel -r agora
+```
+
+Si corriste `agora serve` como usuario normal, su estado está en `~/.agora`.
