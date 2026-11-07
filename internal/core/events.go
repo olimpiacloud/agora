@@ -78,12 +78,7 @@ func (b *Bus) Publish(typ, ws, cursor string, data map[string]any) *Event {
 		}
 		b.audit(e)
 	}
-	subs := make([]*sub, 0, len(b.subs))
 	for s := range b.subs {
-		subs = append(subs, s)
-	}
-	b.mu.Unlock()
-	for _, s := range subs {
 		if s.f.Match(e) {
 			select {
 			case s.ch <- e:
@@ -91,6 +86,7 @@ func (b *Bus) Publish(typ, ws, cursor string, data map[string]any) *Event {
 			}
 		}
 	}
+	b.mu.Unlock()
 	return e
 }
 
@@ -136,7 +132,10 @@ func (b *Bus) Subscribe(f Filter, buf int) (<-chan *Event, func()) {
 	b.mu.Unlock()
 	return s.ch, func() {
 		b.mu.Lock()
-		delete(b.subs, s)
+		if _, ok := b.subs[s]; ok {
+			delete(b.subs, s)
+			close(s.ch)
+		}
 		b.mu.Unlock()
 	}
 }
