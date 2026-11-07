@@ -1,21 +1,21 @@
 import json, subprocess, sys, time, os, glob, re
-sys.path.insert(0, "/projects/agora/scripts")
 import importlib.util
-spec = importlib.util.spec_from_file_location("at", "/projects/agora/scripts/agent-tokens.py")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+spec = importlib.util.spec_from_file_location("at", os.path.join(ROOT, "scripts", "agent-tokens.py"))
 at = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(at)
 
 TASKS = {
     "shop": {
-        "prompt": "En http://127.0.0.1:8899 buscá el producto 'termo', agregalo al carrito, completá Nombre 'Ana Test', Email 'ana@test.com', elegí envío Express y confirmá el pedido. Terminá con cursor_complete y result {\"codigo\": <código del pedido>, \"total\": <total mostrado>}.",
-        "check": lambda r: "CONF-96-EXP" in json.dumps(r, ensure_ascii=False) and "34.500" in json.dumps(r, ensure_ascii=False),
+        "prompt": "At http://127.0.0.1:8899 search for the product 'thermos', add it to the cart, fill in Name 'Ana Test' and Email 'ana@test.com', choose Express shipping and place the order. Finish with cursor_complete and result {\"code\": <order code>, \"total\": <total shown>}.",
+        "check": lambda r: "CONF-96-EXP" in json.dumps(r, ensure_ascii=False) and "34,500" in json.dumps(r, ensure_ascii=False),
     },
     "lookup": {
-        "prompt": "En https://olimpia.dev encontrá el precio mensual del plan Pro y qué incluye. Solo lectura. Terminá con cursor_complete y result {\"precio\": ..., \"incluye\": [...]}.",
+        "prompt": "At https://olimpia.dev find the monthly price of the Pro plan and what it includes. Read only. Finish with cursor_complete and result {\"price\": ..., \"includes\": [...]}.",
         "check": lambda r: "20" in json.dumps(r, ensure_ascii=False),
     },
     "visual": {
-        "prompt": "Abrí http://127.0.0.1:8899, mirala visualmente con una captura y detectá 3 problemas concretos de diseño visual. Terminá con cursor_complete y result {\"issues\": [3 strings cortos]}.",
+        "prompt": "Open http://127.0.0.1:8899, inspect it visually with a screenshot and find 3 concrete visual design problems. Finish with cursor_complete and result {\"issues\": [3 short strings]}.",
         "check": lambda r: isinstance(r, dict) and len(r.get("issues", [])) >= 3,
     },
 }
@@ -59,5 +59,5 @@ if __name__ == "__main__":
             r = run(t, model, label, effort)
             out.append(r)
             print(json.dumps({k: r[k] for k in r if k != "result"}, ensure_ascii=False), flush=True)
-    os.makedirs("/projects/agora/bench/results", exist_ok=True)
-    json.dump(out, open(f"/projects/agora/bench/results/agents-{label}.json", "w"), indent=1, ensure_ascii=False)
+    os.makedirs(os.path.join(ROOT, "bench", "results"), exist_ok=True)
+    json.dump(out, open(os.path.join(ROOT, "bench", "results", f"agents-{label}.json"), "w"), indent=1, ensure_ascii=False)

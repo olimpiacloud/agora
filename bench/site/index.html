@@ -1,18 +1,18 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Tienda Demo</title>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Demo Store</title>
 <style>body{font:16px system-ui;margin:0;background:#f6f3ee;color:#222}header{display:flex;gap:16px;padding:16px 32px;background:#222;color:#fff}header a{color:#fff}main{max-width:900px;margin:24px auto;padding:0 16px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.card{background:#fff;border-radius:8px;padding:16px}.price{font-size:22px;font-weight:700}button{padding:8px 14px}#checkout{display:none;background:#fff;padding:16px;border-radius:8px;margin-top:24px}</style></head>
-<body><header><b>Tienda Demo</b><a href="#">Inicio</a><a href="#">Ofertas</a><a href="#">Ayuda</a></header><main>
-<h1>Productos</h1><input id=q placeholder="Buscar producto" aria-label="Buscar producto"> <button onclick="filter()">Buscar</button>
+<body><header><b>Demo Store</b><a href="#">Home</a><a href="#">Deals</a><a href="#">Help</a></header><main>
+<h1>Products</h1><input id=q placeholder="Search products" aria-label="Search products"> <button onclick="filter()">Search</button>
 <div class=grid id=grid></div>
 <section id=checkout><h2>Checkout</h2><p id=cart></p>
-<label>Nombre <input id=name aria-label="Nombre"></label><br><br><label>Email <input id=email type=email aria-label="Email"></label><br><br>
-<label>Envío <select id=ship aria-label="Envío"><option value="std">Estándar</option><option value="exp">Express</option></select></label><br><br>
-<button id=pay onclick="pay()">Confirmar pedido</button><p id=result role=status></p></section></main>
+<label>Name <input id=name aria-label="Name"></label><br><br><label>Email <input id=email type=email aria-label="Email"></label><br><br>
+<label>Shipping <select id=ship aria-label="Shipping"><option value="std">Standard</option><option value="exp">Express</option></select></label><br><br>
+<button id=pay onclick="pay()">Place order</button><p id=result role=status></p></section></main>
 <script>
-const P=[["Mate de calabaza",8500],["Bombilla de alpaca",6200],["Yerba orgánica 1kg",4900],["Termo acero 1L",32000],["Alfajores x12",7800],["Dulce de leche 450g",3600],["Taza cerámica",5400],["Vino malbec",11900],["Poncho salteño",58000]];
+const P=[["Gourd mate cup",8500],["Alpaca straw",6200],["Organic yerba 1kg",4900],["Steel thermos 1L",32000],["Alfajores x12",7800],["Dulce de leche 450g",3600],["Ceramic mug",5400],["Malbec wine",11900],["Salta poncho",58000]];
 let cart=null;
-function render(list){grid.innerHTML=list.map(([n,p],i)=>`<div class=card><h3>${n}</h3><div class=price>$ ${p.toLocaleString('es-AR')}</div><button onclick="buy(${P.findIndex(x=>x[0]===n)})">Agregar ${n}</button></div>`).join('')}
+function render(list){grid.innerHTML=list.map(([n,p],i)=>`<div class=card><h3>${n}</h3><div class=price>$ ${p.toLocaleString('en-US')}</div><button onclick="buy(${P.findIndex(x=>x[0]===n)})">Add ${n}</button></div>`).join('')}
 function filter(){const q=document.getElementById('q').value.toLowerCase();render(P.filter(([n])=>n.toLowerCase().includes(q)))}
-function buy(i){cart=P[i];checkout.style.display='block';document.getElementById('cart').textContent='En el carrito: '+cart[0]+' ($ '+cart[1].toLocaleString('es-AR')+')';}
-function pay(){const n=document.getElementById('name').value,e=document.getElementById('email').value,s=document.getElementById('ship').value;if(!n||!e.includes('@')){result.textContent='Completá nombre y email';return}const total=cart[1]+(s==='exp'?2500:0);result.textContent='Pedido CONF-'+(cart[1]%997)+'-'+s.toUpperCase()+' confirmado para '+n+'. Total $ '+total.toLocaleString('es-AR');}
+function buy(i){cart=P[i];checkout.style.display='block';document.getElementById('cart').textContent='In your cart: '+cart[0]+' ($ '+cart[1].toLocaleString('en-US')+')';}
+function pay(){const n=document.getElementById('name').value,e=document.getElementById('email').value,s=document.getElementById('ship').value;if(!n||!e.includes('@')){result.textContent='Enter your name and email';return}const total=cart[1]+(s==='exp'?2500:0);result.textContent='Order CONF-'+(cart[1]%997)+'-'+s.toUpperCase()+' confirmed for '+n+'. Total $ '+total.toLocaleString('en-US');}
 render(P);
 </script></body></html>

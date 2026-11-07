@@ -1,29 +1,29 @@
-# Agora: decisión de arquitectura (Fase 0)
+# Architecture
 
-## Decisión
+## Decision
 
-Un daemon Go (monolito modular) que gestiona **un servidor X virtual (Xvfb) por workspace activo**, actúa él mismo como window manager EWMH mínimo, y multiplexa dentro de ese escritorio a todos los cursores (agentes) del workspace:
+A Go daemon (a modular monolith) that runs **one virtual X server (Xvfb) per active workspace**, acts as a minimal EWMH window manager itself, and multiplexes every cursor (agent) of the workspace inside that desktop:
 
-- **Input concurrente real con MPX (XInput 2.2).** Cada cursor que necesita input gráfico recibe, bajo demanda, su propio par *master pointer + master keyboard* con su dispositivo XTEST y su propio foco de teclado. Dos agentes escriben a la vez en dos ventanas distintas sin mezclar teclas ni modificadores (prueba C). Los asientos son un recurso escaso (≈6 por display por el límite de dispositivos del servidor X) y se reciclan tras inactividad.
-- **Input semántico por CDP** para pestañas de Chromium: clicks, teclas e inserción de texto van directo al target, sin foco del sistema operativo, así que los cursores en pestañas distintas no compiten por nada.
-- **Un Chromium por workspace**, controlado por `--remote-debugging-pipe` (sin puerto TCP), corriendo como usuario sin privilegios `agora` con el sandbox de Chrome activo. Cada cursor abre ventanas propias; `isolated=true` usa un BrowserContext separado.
-- **Captura bajo demanda**: XShm del root o, para ventanas tapadas, Composite. El damage tracking (XDamage) despierta al encoder solo cuando cambian píxeles.
-- **Streaming**: H.264 por x264 (cgo, `ultrafast/zerolatency`, IDR a pedido) con fan-out a todos los espectadores. Transporte WebRTC (Pion) cuando hay UDP, WebSocket + WebCodecs como alternativa que atraviesa túneles HTTP, y JPEG por daño para clientes livianos (panel de Paseo, móvil). Sin espectadores no se crea ni el capturador ni el encoder.
-- **Persistencia desacoplada**: el perfil de Chrome vive en disco por nombre; los checkpoints registran pestañas (con dueño), apps a relanzar y cursores. *Freeze* congela todos los procesos (cgroup freezer o SIGSTOP) conservando RAM; *Suspend* hace checkpoint, cierra el navegador ordenadamente y libera todo; *Resume* reconstruye y restaura pestañas a sus dueños.
+- **Truly concurrent input with MPX (XInput 2.2).** Each cursor that needs graphical input gets, on demand, its own *master pointer + master keyboard* pair with its own XTEST device and its own keyboard focus. Two agents type at the same time into two different windows without mixing keys or modifiers (test C). Seats are a scarce resource (about 6 per display, bounded by the X server's device limit) and are recycled after inactivity.
+- **Semantic input over CDP** for Chromium tabs: clicks, keys and text insertion go straight to the target, without OS focus, so cursors on different tabs compete for nothing.
+- **One Chromium per workspace**, driven through `--remote-debugging-pipe` (no TCP port), running as the unprivileged `agora` user with Chrome's sandbox enabled. Each cursor opens its own windows; `isolated=true` uses a separate BrowserContext.
+- **On-demand capture**: XShm of the root window or, for covered windows, Composite. Damage tracking (XDamage) wakes the encoder only when pixels change.
+- **Streaming**: H.264 with x264 (cgo, `ultrafast/zerolatency`, IDR on request) fanned out to every viewer. WebRTC transport (Pion) when UDP is available, WebSocket + WebCodecs as a fallback that crosses HTTP tunnels, and damage-driven JPEG for light clients (the Paseo panel, mobile). With no viewers, neither the capturer nor the encoder exists.
+- **Decoupled persistence**: the Chrome profile lives on disk by name; checkpoints record tabs (with their owner), apps to relaunch and cursors. *Freeze* stops every process (cgroup freezer or SIGSTOP) keeping RAM; *Suspend* checkpoints, closes the browser gracefully and frees everything; *Resume* rebuilds and restores tabs to their owners.
 
-## Alternativas evaluadas
+## Alternatives considered
 
-| Opción | Por qué no (por ahora) |
+| Option | Why not (for now) |
 |---|---|
-| Wayland headless (wlroots/sway, Weston) | Multi-seat nativo y captura por toplevel son atractivos, pero no hay cliente Go maduro para virtual-pointer/keyboard por seat ni screencopy; Chromium y las apps X11 igual terminan en Xwayland. MPX en Xvfb dio input concurrente real con mucho menos riesgo. El backend gráfico está aislado en `internal/x11` para poder agregar uno Wayland. |
-| Xpra | Remoting por ventana muy completo, pero es un stack Python entero con su propio protocolo y cliente; duplica lo que Agora necesita controlar (damage, encoding, input por agente). |
-| VNC/noVNC | Es el baseline: un servidor por escritorio, poll del framebuffer, sin noción de agentes ni de múltiples punteros. |
-| Un Chromium por agente / contenedor por cursor | Lo que la especificación prohíbe; el benchmark muestra el costo (≈3,7× memoria con 5 agentes). |
-| Playwright | No es necesario: CDP por pipe cubre lo que se usa, y la capa semántica propia es más compacta para LLMs. |
+| Headless Wayland (wlroots/sway, Weston) | Native multi-seat and per-toplevel capture are attractive, but there is no mature Go client for per-seat virtual pointer/keyboard or screencopy, and Chromium and X11 apps end up on Xwayland anyway. MPX on Xvfb gave truly concurrent input with much less risk. The graphics backend is isolated in `internal/x11` so a Wayland one can be added. |
+| Xpra | Very complete per-window remoting, but it is a whole Python stack with its own protocol and client; it duplicates what Agora needs to control (damage, encoding, per-agent input). |
+| VNC/noVNC | The baseline: one server per desktop, framebuffer polling, no notion of agents or multiple pointers. |
+| One Chromium per agent / one container per cursor | What the design rules out; the benchmark shows the cost (about 4.6x the memory with 5 agents). |
+| Playwright | Not needed: CDP over a pipe covers what is used, and Agora's own semantic layer is more compact for LLMs. |
 
-## Límites conocidos
+## Known limits
 
-- El aislamiento entre cursores del mismo workspace es lógico (locks, dueños de pestañas, tokens con alcance), no una frontera de seguridad. Para agentes no confiables: workspaces separados (procesos, perfil y display distintos) y, como paso siguiente, sandbox con bubblewrap.
-- *Hibernated* (checkpoint de memoria) no está implementado; no se promete restaurar RAM tras *Suspend*.
-- Xvfb no tiene GPU; Chromium usa rasterizado por software.
-- WebRTC necesita UDP hasta el host; detrás del túnel de Cloudflare se usa WebSocket.
+- Isolation between cursors of the same workspace is logical (locks, tab owners, scoped tokens), not a security boundary. For untrusted agents use separate workspaces (separate processes, profile and display) and, as a next step, a bubblewrap sandbox.
+- *Hibernated* (memory checkpoint) is not implemented; RAM is not restored after *Suspend*.
+- Xvfb has no GPU; Chromium uses software rasterization.
+- WebRTC needs UDP to the host; behind a Cloudflare Tunnel the WebSocket transport is used.
