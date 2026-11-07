@@ -206,8 +206,28 @@ func (r *Runtime) startDisplay(ctx context.Context, cfg WorkspaceConfig) error {
 		if !closing && cur == d {
 			m.Bus.Publish("desktop.crashed", r.id, "", map[string]any{"display": d.Name()})
 			r.mu.Lock()
-			r.display, r.wm, r.core, r.engine = nil, nil, nil, nil
+			eng, clip, core, wm := r.engine, r.clip, r.core, r.wm
+			seats := r.seats
+			r.display, r.wm, r.core, r.engine, r.clip = nil, nil, nil, nil, nil
+			r.seats = map[string]*seatLease{}
 			r.mu.Unlock()
+			r.closeViewers("display crashed")
+			for _, s := range seats {
+				s.seat.Close()
+			}
+			if eng != nil {
+				eng.Close()
+			}
+			if clip != nil {
+				clip.Close()
+			}
+			if core != nil {
+				core.Close()
+			}
+			if wm != nil {
+				wm.Close()
+			}
+			d.Close()
 		}
 	}()
 	m.Bus.Publish("desktop.started", r.id, "", map[string]any{"display": d.Name(), "width": w, "height": h})
@@ -263,7 +283,6 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 	if sw == 0 {
 		sw, sh = m.cfg.Width, m.cfg.Height
 	}
-	var start []string
 	restore := r.lastTabs
 	if len(restore) == 0 && len(cfg.AutostartURLs) > 0 {
 		for _, u := range cfg.AutostartURLs {
@@ -272,7 +291,7 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 	}
 	cgfd, release := r.cgroupFD()
 	defer release()
-	b, err := browser.Launch(ctx, browser.LaunchOptions{CgroupFD: cgfd, Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: cfg.BrowserArgs, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log"), StartURLs: start})
+	b, err := browser.Launch(ctx, browser.LaunchOptions{CgroupFD: cgfd, Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: cfg.BrowserArgs, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log")})
 	if err != nil {
 		return nil, err
 	}
@@ -526,6 +545,14 @@ func (r *Runtime) seatFor(cursorID string) (*x11.Seat, error) {
 		return nil, err
 	}
 	r.mu.Lock()
+	if cur := r.seats[cursorID]; cur != nil || r.display != d {
+		r.mu.Unlock()
+		s.Close()
+		if cur == nil {
+			return nil, errors.New("display restarted; retry")
+		}
+		return cur.seat, nil
+	}
 	r.seats[cursorID] = &seatLease{seat: s, lastUsed: time.Now()}
 	r.mu.Unlock()
 	return s, nil
