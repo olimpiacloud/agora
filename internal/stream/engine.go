@@ -229,6 +229,8 @@ func (e *Engine) loop(stop, done chan struct{}) {
 		select {
 		case <-stop:
 			return
+		case <-e.d.Exited():
+			return
 		case <-dw.C:
 			if glass.IsZero() {
 				glass = time.Now()
@@ -244,6 +246,8 @@ func (e *Engine) loop(stop, done chan struct{}) {
 		if wait := minGap - time.Since(last); wait > 0 {
 			select {
 			case <-stop:
+				return
+			case <-e.d.Exited():
 				return
 			case <-time.After(wait):
 			}
