@@ -58,6 +58,7 @@ type Engine struct {
 	stop     chan struct{}
 	done     chan struct{}
 	keyReq   atomic.Bool
+	softKey  atomic.Bool
 	wake     chan struct{}
 	frames   atomic.Int64
 	bytes    atomic.Int64
@@ -87,15 +88,55 @@ func (e *Engine) poke() {
 	}
 }
 
+var newEncoder = media.NewEncoder
+
+func (e *Engine) startLocked() {
+	e.running = true
+	e.stop = make(chan struct{})
+	e.done = make(chan struct{})
+	go e.loop(e.stop, e.done)
+}
+
+func (e *Engine) alive() bool {
+	select {
+	case <-e.d.Exited():
+		return false
+	default:
+		return true
+	}
+}
+
+func (e *Engine) loopEnded(stop chan struct{}) {
+	select {
+	case <-stop:
+		return
+	default:
+	}
+	e.mu.Lock()
+	restart := false
+	if e.stop == stop && e.running {
+		e.running = false
+		restart = len(e.sinks) > 0 && e.alive()
+	}
+	e.mu.Unlock()
+	if restart {
+		time.AfterFunc(time.Second, func() {
+			e.mu.Lock()
+			if !e.running && len(e.sinks) > 0 && e.alive() {
+				e.startLocked()
+				e.keyReq.Store(true)
+			}
+			e.mu.Unlock()
+		})
+	}
+}
+
 func (e *Engine) AddSink(s Sink) {
 	e.mu.Lock()
 	e.sinks[s.ID()] = s
 	start := !e.running
 	if start {
-		e.running = true
-		e.stop = make(chan struct{})
-		e.done = make(chan struct{})
-		go e.loop(e.stop, e.done)
+		e.startLocked()
 	}
 	e.mu.Unlock()
 	e.keyReq.Store(true)
@@ -140,7 +181,7 @@ func (e *Engine) Close() {
 }
 
 func (e *Engine) RequestKeyframe() {
-	e.keyReq.Store(true)
+	e.softKey.Store(true)
 	e.poke()
 }
 
@@ -198,6 +239,7 @@ func params(m Mode, active bool) (fps, crf, kbps int) {
 }
 
 func (e *Engine) loop(stop, done chan struct{}) {
+	defer e.loopEnded(stop)
 	defer close(done)
 	e.starts.Add(1)
 	cp, err := e.d.NewCapturer()
@@ -224,8 +266,13 @@ func (e *Engine) loop(stop, done chan struct{}) {
 	fpsWin := time.Now()
 	fpsCount := 0
 	var glass time.Time
+	var lastKey time.Time
 	failures := 0
 	for {
+		var keyTimer <-chan time.Time
+		if e.softKey.Load() {
+			keyTimer = time.After(max(0, time.Second-time.Since(lastKey)))
+		}
 		select {
 		case <-stop:
 			return
@@ -236,6 +283,7 @@ func (e *Engine) loop(stop, done chan struct{}) {
 				glass = time.Now()
 			}
 		case <-e.wake:
+		case <-keyTimer:
 		}
 		sinks, mode := e.snapshotSinks()
 		if len(sinks) == 0 {
@@ -257,7 +305,7 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			if enc != nil {
 				enc.Close()
 			}
-			enc, err = media.NewEncoder(media.H264Options{Width: w, Height: h, FPS: fps, CRF: crf, MaxKbps: kbps})
+			enc, err = newEncoder(media.H264Options{Width: w, Height: h, FPS: fps, CRF: crf, MaxKbps: kbps})
 			if err != nil {
 				return
 			}
@@ -274,6 +322,9 @@ func (e *Engine) loop(stop, done chan struct{}) {
 		}
 		t0 := time.Now()
 		key := e.keyReq.Swap(false)
+		if !key && time.Since(lastKey) >= time.Second {
+			key = e.softKey.Swap(false)
+		}
 		now := time.Now()
 		pts := now.Sub(start).Milliseconds()
 		var data []byte
@@ -352,6 +403,8 @@ func (e *Engine) loop(stop, done chan struct{}) {
 		e.encNs.Add(int64(t2.Sub(t1)))
 		if isKey {
 			e.keys.Add(1)
+			lastKey = now
+			e.softKey.Store(false)
 		}
 		fpsCount++
 		if el := time.Since(fpsWin); el >= time.Second {
@@ -362,7 +415,7 @@ func (e *Engine) loop(stop, done chan struct{}) {
 		f := &Frame{Data: data, Key: isKey, PTS: pts, Duration: dur, Width: e.w, Height: e.h}
 		for _, s := range sinks {
 			if !s.Push(f) {
-				e.keyReq.Store(true)
+				e.softKey.Store(true)
 			}
 		}
 	}
