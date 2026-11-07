@@ -22,7 +22,7 @@ Chrome's own sandbox keeps working: its renderers still run under seccomp-bpf (a
 
 ## Why not bubblewrap
 
-We tried bubblewrap first. On Ubuntu 24.04 and later, the AppArmor profile `bwrap-userns-restrict` confines every process started from `/usr/bin/bwrap` with `unpriv_bwrap`, which denies all capabilities. This applies even when the caller is root. Chrome inside it cannot create its user-namespace sandbox, falls back to the setuid helper, and aborts. The only bwrap options are disabling Chrome's sandbox or editing the system AppArmor policy, and we accept neither. The helper does the same mount setup as bwrap, in about 200 lines of Go, from the unconfined `agora` binary.
+We tried bubblewrap first. On Ubuntu 24.04 and later, the AppArmor profile `bwrap-userns-restrict` confines every process started from `/usr/bin/bwrap` with `unpriv_bwrap`, which denies all capabilities. This applies even when the caller is root. Chrome inside it cannot create its user-namespace sandbox, falls back to the setuid helper, and aborts. The only bwrap options are disabling Chrome's sandbox or editing the system AppArmor policy, and we accept neither. The helper does the same mount setup as bwrap, in about 250 lines of Go, from the unconfined `agora` binary.
 
 ## Limits
 
