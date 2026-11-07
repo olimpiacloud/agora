@@ -153,7 +153,7 @@ func (s *Server) routes() {
 		writeJSON(w, 200, sys)
 	}, false))
 	m.HandleFunc("GET /v1/me", s.h(func(w http.ResponseWriter, r *http.Request, p *Principal) {
-		writeJSON(w, 200, map[string]any{"admin": p.Admin, "cursor": p.Cursor})
+		writeJSON(w, 200, map[string]any{"admin": p.Admin, "cursor": p.Cursor.Public()})
 	}, false))
 	m.HandleFunc("POST /v1/viewer-tokens", s.admin(func(w http.ResponseWriter, r *http.Request, p *Principal) {
 		var req struct {
@@ -411,7 +411,7 @@ func (s *Server) routes() {
 		out := []*core.Cursor{}
 		for _, c := range all {
 			if p.Admin || (p.Cursor != nil && (c.Workspace == p.Cursor.Workspace || s.m.IsAncestor(p.Cursor.ID, c.ID))) {
-				out = append(out, c)
+				out = append(out, c.Public())
 			}
 		}
 		writeJSON(w, 200, out)
@@ -422,7 +422,7 @@ func (s *Server) routes() {
 			writeErr(w, err)
 			return
 		}
-		writeJSON(w, 200, c)
+		writeJSON(w, 200, c.Public())
 	}))
 	m.HandleFunc("GET /v1/cursors/{id}/inbox", s.cur(func(w http.ResponseWriter, r *http.Request, p *Principal, id string) {
 		since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
@@ -454,7 +454,7 @@ func (s *Server) routes() {
 		}
 		all := req.All == nil || *req.All
 		cs, err := s.m.WaitCursors(r.Context(), req.IDs, all, time.Duration(req.TimeoutMs)*time.Millisecond)
-		res := map[string]any{"cursors": cs, "timeout": err != nil}
+		res := map[string]any{"cursors": core.PublicCursors(cs), "timeout": err != nil}
 		writeJSON(w, 200, res)
 	}, false))
 
@@ -633,7 +633,7 @@ func (s *Server) createCursor(w http.ResponseWriter, r *http.Request, p *Princip
 		writeErr(w, err)
 		return
 	}
-	res := map[string]any{"cursor": c, "token": tok}
+	res := map[string]any{"cursor": c.Public(), "token": tok}
 	if err != nil {
 		res["error"] = err.Error()
 	}
@@ -713,14 +713,16 @@ func (s *Server) cursorOp(w http.ResponseWriter, r *http.Request, p *Principal) 
 				break
 			}
 		}
-		res, err = s.m.Transfer(id, body.TransferReq)
+		var tc *core.Cursor
+		tc, err = s.m.Transfer(id, body.TransferReq)
+		res = tc.Public()
 	case "wait":
 		var cs []*core.Cursor
 		cs, err = s.m.WaitCursors(r.Context(), []string{id}, true, time.Duration(body.TimeoutMs)*time.Millisecond)
 		if err != nil && len(cs) > 0 {
-			res, err = map[string]any{"cursor": cs[0], "timeout": true}, nil
+			res, err = map[string]any{"cursor": cs[0].Public(), "timeout": true}, nil
 		} else if err == nil {
-			res = map[string]any{"cursor": cs[0], "timeout": false}
+			res = map[string]any{"cursor": cs[0].Public(), "timeout": false}
 		}
 	default:
 		err = fmt.Errorf("%w: unknown op %q", core.ErrNotFound, op)

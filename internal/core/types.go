@@ -177,6 +177,28 @@ type Cursor struct {
 	Labels      map[string]string `json:"labels,omitempty"`
 }
 
+func (c *Cursor) Public() *Cursor {
+	if c == nil {
+		return nil
+	}
+	cp := *c
+	cp.TokenHash = ""
+	if c.Launch != nil {
+		l := *c.Launch
+		l.Env = nil
+		cp.Launch = &l
+	}
+	return &cp
+}
+
+func PublicCursors(cs []*Cursor) []*Cursor {
+	out := make([]*Cursor, len(cs))
+	for i, c := range cs {
+		out[i] = c.Public()
+	}
+	return out
+}
+
 type Worktree struct {
 	ID        string    `json:"id"`
 	Repo      string    `json:"repo"`
