@@ -1,7 +1,9 @@
 package media
 
 /*
-#cgo pkg-config: libva libva-drm
+#cgo LDFLAGS: -ldl
+#include <dlfcn.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +12,94 @@ package media
 #include <va/va.h>
 #include <va/va_drm.h>
 #include <va/va_enc_h264.h>
+
+static __typeof__(&vaGetDisplayDRM) p_vaGetDisplayDRM;
+#define vaGetDisplayDRM p_vaGetDisplayDRM
+static __typeof__(&vaSetErrorCallback) p_vaSetErrorCallback;
+#define vaSetErrorCallback p_vaSetErrorCallback
+static __typeof__(&vaSetInfoCallback) p_vaSetInfoCallback;
+#define vaSetInfoCallback p_vaSetInfoCallback
+static __typeof__(&vaInitialize) p_vaInitialize;
+#define vaInitialize p_vaInitialize
+static __typeof__(&vaTerminate) p_vaTerminate;
+#define vaTerminate p_vaTerminate
+static __typeof__(&vaGetConfigAttributes) p_vaGetConfigAttributes;
+#define vaGetConfigAttributes p_vaGetConfigAttributes
+static __typeof__(&vaCreateConfig) p_vaCreateConfig;
+#define vaCreateConfig p_vaCreateConfig
+static __typeof__(&vaDestroyConfig) p_vaDestroyConfig;
+#define vaDestroyConfig p_vaDestroyConfig
+static __typeof__(&vaCreateSurfaces) p_vaCreateSurfaces;
+#define vaCreateSurfaces p_vaCreateSurfaces
+static __typeof__(&vaDestroySurfaces) p_vaDestroySurfaces;
+#define vaDestroySurfaces p_vaDestroySurfaces
+static __typeof__(&vaCreateContext) p_vaCreateContext;
+#define vaCreateContext p_vaCreateContext
+static __typeof__(&vaDestroyContext) p_vaDestroyContext;
+#define vaDestroyContext p_vaDestroyContext
+static __typeof__(&vaCreateBuffer) p_vaCreateBuffer;
+#define vaCreateBuffer p_vaCreateBuffer
+static __typeof__(&vaDestroyBuffer) p_vaDestroyBuffer;
+#define vaDestroyBuffer p_vaDestroyBuffer
+static __typeof__(&vaMapBuffer) p_vaMapBuffer;
+#define vaMapBuffer p_vaMapBuffer
+static __typeof__(&vaUnmapBuffer) p_vaUnmapBuffer;
+#define vaUnmapBuffer p_vaUnmapBuffer
+static __typeof__(&vaDeriveImage) p_vaDeriveImage;
+#define vaDeriveImage p_vaDeriveImage
+static __typeof__(&vaCreateImage) p_vaCreateImage;
+#define vaCreateImage p_vaCreateImage
+static __typeof__(&vaDestroyImage) p_vaDestroyImage;
+#define vaDestroyImage p_vaDestroyImage
+static __typeof__(&vaPutImage) p_vaPutImage;
+#define vaPutImage p_vaPutImage
+static __typeof__(&vaBeginPicture) p_vaBeginPicture;
+#define vaBeginPicture p_vaBeginPicture
+static __typeof__(&vaRenderPicture) p_vaRenderPicture;
+#define vaRenderPicture p_vaRenderPicture
+static __typeof__(&vaEndPicture) p_vaEndPicture;
+#define vaEndPicture p_vaEndPicture
+static __typeof__(&vaSyncSurface) p_vaSyncSurface;
+#define vaSyncSurface p_vaSyncSurface
+
+static int va_loaded;
+static pthread_once_t va_once = PTHREAD_ONCE_INIT;
+
+static void va_load_once(void) {
+	void *va = dlopen("libva.so.2", RTLD_NOW | RTLD_LOCAL);
+	void *drm = dlopen("libva-drm.so.2", RTLD_NOW | RTLD_LOCAL);
+	if (!va || !drm) return;
+	if (!(p_vaGetDisplayDRM = dlsym(drm, "vaGetDisplayDRM"))) return;
+	if (!(p_vaSetErrorCallback = dlsym(va, "vaSetErrorCallback"))) return;
+	if (!(p_vaSetInfoCallback = dlsym(va, "vaSetInfoCallback"))) return;
+	if (!(p_vaInitialize = dlsym(va, "vaInitialize"))) return;
+	if (!(p_vaTerminate = dlsym(va, "vaTerminate"))) return;
+	if (!(p_vaGetConfigAttributes = dlsym(va, "vaGetConfigAttributes"))) return;
+	if (!(p_vaCreateConfig = dlsym(va, "vaCreateConfig"))) return;
+	if (!(p_vaDestroyConfig = dlsym(va, "vaDestroyConfig"))) return;
+	if (!(p_vaCreateSurfaces = dlsym(va, "vaCreateSurfaces"))) return;
+	if (!(p_vaDestroySurfaces = dlsym(va, "vaDestroySurfaces"))) return;
+	if (!(p_vaCreateContext = dlsym(va, "vaCreateContext"))) return;
+	if (!(p_vaDestroyContext = dlsym(va, "vaDestroyContext"))) return;
+	if (!(p_vaCreateBuffer = dlsym(va, "vaCreateBuffer"))) return;
+	if (!(p_vaDestroyBuffer = dlsym(va, "vaDestroyBuffer"))) return;
+	if (!(p_vaMapBuffer = dlsym(va, "vaMapBuffer"))) return;
+	if (!(p_vaUnmapBuffer = dlsym(va, "vaUnmapBuffer"))) return;
+	if (!(p_vaDeriveImage = dlsym(va, "vaDeriveImage"))) return;
+	if (!(p_vaCreateImage = dlsym(va, "vaCreateImage"))) return;
+	if (!(p_vaDestroyImage = dlsym(va, "vaDestroyImage"))) return;
+	if (!(p_vaPutImage = dlsym(va, "vaPutImage"))) return;
+	if (!(p_vaBeginPicture = dlsym(va, "vaBeginPicture"))) return;
+	if (!(p_vaRenderPicture = dlsym(va, "vaRenderPicture"))) return;
+	if (!(p_vaEndPicture = dlsym(va, "vaEndPicture"))) return;
+	if (!(p_vaSyncSurface = dlsym(va, "vaSyncSurface"))) return;
+	va_loaded = 1;
+}
+
+static int va_load(void) {
+	pthread_once(&va_once, va_load_once);
+	return va_loaded;
+}
 
 #define LOG2_MAX_FRAME_NUM 8
 
@@ -269,6 +359,7 @@ static void write_slice_header(venc *e, bw *w, int idr) {
 static void venc_silent(void *ctx, const char *msg) {}
 
 static int venc_open(const char *dev, int w, int h, int fps, int kbps, int minqp, int vpp, venc **out) {
+	if (!va_load()) return -1;
 	venc *e = calloc(1, sizeof(venc));
 	e->fd = -1;
 	e->cfg = e->ctx = e->coded = VA_INVALID_ID;
