@@ -144,7 +144,9 @@ func (x *H264Encoder) Encode(bgrx []byte, stride, srcW, srcH int, ptsMs int64, i
 	yP := unsafe.Slice((*byte)(unsafe.Pointer(C.cenc_plane(x.e, 0))), int(C.cenc_stride(x.e, 0))*x.h)
 	uP := unsafe.Slice((*byte)(unsafe.Pointer(C.cenc_plane(x.e, 1))), int(C.cenc_stride(x.e, 1))*x.h/2)
 	vP := unsafe.Slice((*byte)(unsafe.Pointer(C.cenc_plane(x.e, 2))), int(C.cenc_stride(x.e, 2))*x.h/2)
-	BGRXToI420(bgrx, stride, srcW, srcH, yP, int(C.cenc_stride(x.e, 0)), uP, vP, int(C.cenc_stride(x.e, 1)), x.w, x.h)
+	if err := BGRXToI420(bgrx, stride, srcW, srcH, yP, int(C.cenc_stride(x.e, 0)), uP, vP, int(C.cenc_stride(x.e, 1)), x.w, x.h); err != nil {
+		return nil, false, err
+	}
 	var key C.int
 	idrI := 0
 	if idr {
@@ -174,7 +176,9 @@ func (x *H264Encoder) EncodeRect(src []byte, stride, rx, ry, rw, rh int, ptsMs i
 		yP := unsafe.Slice((*byte)(unsafe.Pointer(C.cenc_plane(x.e, 0))), ys*x.h)
 		uP := unsafe.Slice((*byte)(unsafe.Pointer(C.cenc_plane(x.e, 1))), uvs*x.h/2)
 		vP := unsafe.Slice((*byte)(unsafe.Pointer(C.cenc_plane(x.e, 2))), uvs*x.h/2)
-		BGRXRectToI420(src, stride, rx, ry, rw, rh, yP, ys, uP, vP, uvs)
+		if err := BGRXRectToI420(src, stride, rx, ry, rw, rh, yP, ys, uP, vP, uvs); err != nil {
+			return nil, false, err
+		}
 	}
 	var key C.int
 	idrI := 0

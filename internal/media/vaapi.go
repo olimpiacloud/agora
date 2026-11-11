@@ -698,9 +698,12 @@ func (x *VAAPIEncoder) Encode(bgrx []byte, stride, srcW, srcH int, ptsMs int64, 
 	if err != nil {
 		return nil, false, err
 	}
-	BGRXToNV12(bgrx, stride, srcW, srcH, y, ys, uv, uvs, x.w, x.h)
+	cerr := BGRXToNV12(bgrx, stride, srcW, srcH, y, ys, uv, uvs, x.w, x.h)
 	if C.venc_unmap(x.e, 0, 0, C.int(x.w), C.int(x.h)) != 0 {
 		return nil, false, errors.New("vaapi: upload failed")
+	}
+	if cerr != nil {
+		return nil, false, cerr
 	}
 	return x.encode(idr)
 }
@@ -720,15 +723,21 @@ func (x *VAAPIEncoder) EncodeRect(src []byte, stride, rx, ry, rw, rh int, ptsMs 
 		if err != nil {
 			return nil, false, err
 		}
-		BGRXRectToNV12(src, stride, rx, ry, rw, rh, y, ys, uv, uvs)
+		cerr := BGRXRectToNV12(src, stride, rx, ry, rw, rh, y, ys, uv, uvs)
 		if C.venc_unmap(x.e, C.int(rx), C.int(ry), C.int(rw), C.int(rh)) != 0 {
 			return nil, false, errors.New("vaapi: upload failed")
+		}
+		if cerr != nil {
+			return nil, false, cerr
 		}
 	}
 	return x.encode(idr)
 }
 
 func (x *VAAPIEncoder) copyRGB(src []byte, stride, rx, ry, rw, rh int) error {
+	if !fits(src, stride, rw, rh) {
+		return ErrShortFrame
+	}
 	var p *C.uint8_t
 	var cs C.int
 	if C.venc_map_rgb(x.e, &p, &cs) != 0 {

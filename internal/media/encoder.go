@@ -48,6 +48,9 @@ func NewEncoder(o H264Options) (Encoder, error) {
 }
 
 func EncoderFailed(e Encoder, err error) {
+	if errors.Is(err, ErrShortFrame) {
+		return
+	}
 	if e.Name() == "vaapi" && EncoderPref() == "auto" && !vaapiBroken.Swap(true) {
 		log.Printf("encoder: %v, falling back to x264", err)
 	}

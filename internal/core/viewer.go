@@ -89,7 +89,7 @@ func (v *Viewer) sendHello() {
 	w, h := 0, 0
 	v.r.mu.Lock()
 	if v.r.display != nil {
-		w, h = v.r.display.Width, v.r.display.Height
+		w, h = v.r.display.Size()
 	}
 	v.r.mu.Unlock()
 	b, _ := json.Marshal(map[string]any{"type": "hello", "viewer": v.ID, "width": w, "height": h, "cursors": cs, "locks": m.Arb.List(v.Workspace), "control": v.Control})

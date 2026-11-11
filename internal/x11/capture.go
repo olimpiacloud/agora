@@ -127,7 +127,7 @@ func (cp *Capturer) grab(dr xproto.Drawable, x, y, w, h int, dst *Frame) (*Frame
 func (cp *Capturer) Grab(x, y, w, h int, dst *Frame) (*Frame, error) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
-	sw, sh := cp.d.Width, cp.d.Height
+	sw, sh := cp.d.Size()
 	if x < 0 {
 		w += x
 		x = 0
@@ -150,7 +150,8 @@ func (cp *Capturer) Grab(x, y, w, h int, dst *Frame) (*Frame, error) {
 }
 
 func (cp *Capturer) GrabScreen(dst *Frame) (*Frame, error) {
-	return cp.Grab(0, 0, cp.d.Width, cp.d.Height, dst)
+	w, h := cp.d.Size()
+	return cp.Grab(0, 0, w, h, dst)
 }
 
 func (cp *Capturer) GrabWindow(id uint32, dst *Frame) (*Frame, error) {

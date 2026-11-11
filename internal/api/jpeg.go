@@ -284,7 +284,8 @@ func (s *Server) produceJPEG(ctx context.Context, ws string, d *x11.Display, cur
 			} else {
 				region = core.WindowRegion(d, uint32(winID))
 			}
-			region = region.Intersect(image.Rect(0, 0, d.Width, d.Height))
+			sw, sh := d.Size()
+			region = region.Intersect(image.Rect(0, 0, sw, sh))
 		}
 		if region.Dx() > 1 && region.Dy() > 1 {
 			frame, err = cp.Grab(region.Min.X, region.Min.Y, region.Dx(), region.Dy(), frame)
@@ -295,7 +296,8 @@ func (s *Server) produceJPEG(ctx context.Context, ws string, d *x11.Display, cur
 			continue
 		}
 		if region != sent {
-			msg, _ := json.Marshal(map[string]any{"type": "region", "x": region.Min.X, "y": region.Min.Y, "w": frame.Width, "h": frame.Height, "screen_w": d.Width, "screen_h": d.Height})
+			sw, sh := d.Size()
+			msg, _ := json.Marshal(map[string]any{"type": "region", "x": region.Min.X, "y": region.Min.Y, "w": frame.Width, "h": frame.Height, "screen_w": sw, "screen_h": sh})
 			pub(true, msg)
 			sent = region
 			lastSum = 0

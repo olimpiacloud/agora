@@ -138,6 +138,7 @@ func (r *RTC) Answer(ctx context.Context, id string, mode Mode, offer string, h 
 	s.Sink = NewQueueSink(id, mode, 6, func(f *Frame) error {
 		return track.WriteSample(media.Sample{Data: f.Data, Duration: f.Duration})
 	})
+	s.Sink.OnError = func(error) { pc.Close() }
 	pc.OnConnectionStateChange(func(st webrtc.PeerConnectionState) { s.stateChanged(st, h.OnClose) })
 	fail := func(err error) (*RTCSession, string, error) {
 		s.Sink.Close()

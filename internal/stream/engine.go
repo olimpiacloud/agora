@@ -219,6 +219,9 @@ func (e *Engine) snapshotSinks() ([]Sink, Mode) {
 	out := make([]Sink, 0, len(e.sinks))
 	mode := Observation
 	for _, s := range e.sinks {
+		if d, ok := s.(interface{ Dead() bool }); ok && d.Dead() {
+			continue
+		}
 		out = append(out, s)
 		if s.Mode() == Interactive {
 			mode = Interactive
@@ -268,6 +271,7 @@ func (e *Engine) loop(stop, done chan struct{}) {
 	var glass time.Time
 	var lastKey time.Time
 	failures := 0
+	var retry <-chan time.Time
 	for {
 		var keyTimer <-chan time.Time
 		if e.softKey.Load() {
@@ -284,7 +288,9 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			}
 		case <-e.wake:
 		case <-keyTimer:
+		case <-retry:
 		}
+		retry = nil
 		sinks, mode := e.snapshotSinks()
 		if len(sinks) == 0 {
 			continue
@@ -300,7 +306,7 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			case <-time.After(wait):
 			}
 		}
-		w, h := e.d.Width, e.d.Height
+		w, h := e.d.Size()
 		if enc == nil || w&^1 != e.w || h&^1 != e.h {
 			if enc != nil {
 				enc.Close()
@@ -332,9 +338,15 @@ func (e *Engine) loop(stop, done chan struct{}) {
 		rx, ry, rw, rh, ok := dw.AckRegion()
 		ew, eh := e.w, e.h
 		var t1 time.Time
+		if !ok && !key && !needFull {
+			glass = time.Time{}
+			continue
+		}
 		if needFull || !ok {
 			frame, err = cp.Grab(0, 0, ew, eh, frame)
 			if err != nil {
+				needFull = true
+				retry = time.After(minGap)
 				continue
 			}
 			t1 = time.Now()
@@ -358,7 +370,9 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			}
 			if x1 > x0 && y1 > y0 {
 				frame, err = cp.Grab(x0, y0, x1-x0, y1-y0, frame)
-				if err != nil {
+				if err != nil || frame.Width != x1-x0 || frame.Height != y1-y0 {
+					needFull = true
+					retry = time.After(minGap)
 					continue
 				}
 			}

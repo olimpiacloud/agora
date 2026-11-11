@@ -12,13 +12,28 @@ func (d *Display) SetSize(w, h int) error {
 	return d.setSize(w, h)
 }
 
+func (d *Display) Size() (int, int) {
+	d.sizeMu.Lock()
+	defer d.sizeMu.Unlock()
+	return d.Width, d.Height
+}
+
+func (d *Display) storeSize(w, h int) {
+	d.sizeMu.Lock()
+	d.Width, d.Height = w, h
+	d.sizeMu.Unlock()
+}
+
 func (d *Display) setSize(w, h int) error {
 	c := d.conn
-	if err := extInit(randr.Init, c); err != nil {
-		return err
-	}
-	if _, err := randr.QueryVersion(c, 1, 5).Reply(); err != nil {
-		return err
+	if !d.randr {
+		if err := extInit(randr.Init, c); err != nil {
+			return err
+		}
+		if _, err := randr.QueryVersion(c, 1, 5).Reply(); err != nil {
+			return err
+		}
+		d.randr = true
 	}
 	res, err := randr.GetScreenResourcesCurrent(c, d.root).Reply()
 	if err != nil {
@@ -34,7 +49,7 @@ func (d *Display) setSize(w, h int) error {
 		return err
 	}
 	if int(ci.Width) == w && int(ci.Height) == h {
-		d.Width, d.Height = w, h
+		d.storeSize(w, h)
 		return nil
 	}
 	name := fmt.Sprintf("%dx%d", w, h)
@@ -69,6 +84,6 @@ func (d *Display) setSize(w, h int) error {
 	if err := randr.SetScreenSizeChecked(c, d.root, uint16(w), uint16(h), mmw, mmh).Check(); err != nil {
 		return fmt.Errorf("screen size: %w", err)
 	}
-	d.Width, d.Height = w, h
+	d.storeSize(w, h)
 	return nil
 }

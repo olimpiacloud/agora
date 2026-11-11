@@ -169,6 +169,7 @@ func (s *Server) streamRTC(w http.ResponseWriter, r *http.Request, p *Principal)
 	go func() {
 		<-sess.Closed()
 		sess.Close()
+		s.m.DetachViewer(ws, id)
 	}()
 	writeJSON(w, 200, map[string]any{"sdp": answer, "viewer": id})
 }

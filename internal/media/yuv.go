@@ -1,16 +1,31 @@
 package media
 
 import (
+	"errors"
 	"runtime"
 	"sync"
 )
 
-func BGRXToI420(src []byte, stride, sw, sh int, y []byte, ys int, u, v []byte, uvs int, w, h int) {
-	bgrxToYUV(src, stride, sw, sh, y, ys, u, v, uvs, 1, w, h)
+var ErrShortFrame = errors.New("media: frame buffer shorter than its size")
+
+func fits(src []byte, stride, w, h int) bool {
+	return w > 0 && h > 0 && stride >= w*4 && len(src) >= (h-1)*stride+w*4
 }
 
-func BGRXToNV12(src []byte, stride, sw, sh int, y []byte, ys int, uv []byte, uvs int, w, h int) {
+func BGRXToI420(src []byte, stride, sw, sh int, y []byte, ys int, u, v []byte, uvs int, w, h int) error {
+	if !fits(src, stride, sw, sh) {
+		return ErrShortFrame
+	}
+	bgrxToYUV(src, stride, sw, sh, y, ys, u, v, uvs, 1, w, h)
+	return nil
+}
+
+func BGRXToNV12(src []byte, stride, sw, sh int, y []byte, ys int, uv []byte, uvs int, w, h int) error {
+	if !fits(src, stride, sw, sh) {
+		return ErrShortFrame
+	}
 	bgrxToYUV(src, stride, sw, sh, y, ys, uv, uv[1:], uvs, 2, w, h)
+	return nil
 }
 
 func bgrxToYUV(src []byte, stride, sw, sh int, y []byte, ys int, u, v []byte, uvs, step int, w, h int) {
@@ -86,12 +101,20 @@ func bgrxToYUV(src []byte, stride, sw, sh int, y []byte, ys int, u, v []byte, uv
 	wg.Wait()
 }
 
-func BGRXRectToI420(src []byte, stride int, rx, ry, rw, rh int, y []byte, ys int, u, v []byte, uvs int) {
+func BGRXRectToI420(src []byte, stride int, rx, ry, rw, rh int, y []byte, ys int, u, v []byte, uvs int) error {
+	if !fits(src, stride, rw, rh) {
+		return ErrShortFrame
+	}
 	bgrxRectToYUV(src, stride, rx, ry, rw, rh, y, ys, u, v, uvs, 1)
+	return nil
 }
 
-func BGRXRectToNV12(src []byte, stride int, rx, ry, rw, rh int, y []byte, ys int, uv []byte, uvs int) {
+func BGRXRectToNV12(src []byte, stride int, rx, ry, rw, rh int, y []byte, ys int, uv []byte, uvs int) error {
+	if !fits(src, stride, rw, rh) {
+		return ErrShortFrame
+	}
 	bgrxRectToYUV(src, stride, rx, ry, rw, rh, y, ys, uv, uv[1:], uvs, 2)
+	return nil
 }
 
 func bgrxRectToYUV(src []byte, stride int, rx, ry, rw, rh int, y []byte, ys int, u, v []byte, uvs, step int) {

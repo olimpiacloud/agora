@@ -47,6 +47,8 @@ type Display struct {
 	root     xproto.Window
 	screen   *xproto.ScreenInfo
 	mu       sync.Mutex
+	sizeMu   sync.Mutex
+	randr    bool
 	exited   chan struct{}
 	exitErr  error
 	keymap   *keymap
