@@ -75,6 +75,12 @@ if user_has codex && as_user "codex mcp get agora" >/dev/null 2>&1; then
 	say "Removing the agora MCP server from Codex ($AGENT_USER)"
 	as_user "codex mcp remove agora" >/dev/null 2>&1 || warn "codex mcp remove failed"
 fi
+user_home=$(getent passwd "$AGENT_USER" | cut -d: -f6 || true)
+if [ -n "$user_home" ] && [ -f "$user_home/.config/agora/token" ]; then
+	say "Removing the saved admin token ($user_home/.config/agora/token)"
+	rm -f "$user_home/.config/agora/token"
+	rmdir "$user_home/.config/agora" 2>/dev/null || true
+fi
 if user_has bunx; then
 	runner="bunx skills"
 elif user_has npx; then

@@ -49,7 +49,7 @@ Ubuntu or Debian, amd64 or arm64:
 curl -fsSL https://agora.olimpia.dev/install.sh | sudo sh
 ```
 
-The installer is idempotent. It installs Xvfb, VA-API and Google Chrome (Chromium on arm64), creates the unprivileged `agora` user, downloads the release binary and checks its SHA-256 (or builds from source when there is no release), installs `/usr/local/bin/agora` and the `agora.service` systemd unit, and starts it. If Claude Code, Codex or Paseo are installed it registers the Agora MCP server, the Agora skill and the Paseo plugin. Options go after `sh -s --`: `--version vX.Y.Z`, `--prefix DIR`, `--source DIR`, `--no-agents`, `--no-paseo`.
+The installer is idempotent. It installs Xvfb, VA-API and Google Chrome (Chromium on arm64), creates the unprivileged `agora` user, downloads the release binary and checks its SHA-256 (it stops with an error if the release cannot be found; `--source DIR` builds a local checkout instead), installs `/usr/local/bin/agora` and the `agora.service` systemd unit, and starts it. If Claude Code, Codex or Paseo are installed it registers the Agora MCP server, the Agora skill and the Paseo plugin; for a `sudo` user it saves the admin token in `~/.config/agora/token` (mode 0600) and points the MCP server at it with `AGORA_TOKEN_FILE`. Options go after `sh -s --`: `--version vX.Y.Z`, `--prefix DIR`, `--source DIR`, `--no-agents`, `--no-paseo`.
 
 Uninstall with `curl -fsSL https://agora.olimpia.dev/uninstall.sh | sudo sh`. It stops and removes the service, the binary and the agent configuration. `--purge` also deletes `/var/lib/agora` (every workspace and browser profile) and the `agora` user.
 

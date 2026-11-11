@@ -76,6 +76,7 @@ Restart the agent session after adding the server so the tools load.
 | --- | --- | --- |
 | `AGORA_URL` | `http://127.0.0.1:7788` | The daemon. |
 | `AGORA_TOKEN` | the admin token from `AGORA_HOME`, `/var/lib/agora` or `~/.agora`, if readable | A cursor token (recommended) or the admin token. |
+| `AGORA_TOKEN_FILE` | none | File holding the token, read when `AGORA_TOKEN` is empty. Keeps the token out of the agent config; the installer uses `~/.config/agora/token`. |
 | `AGORA_WORKSPACE` | none | Default workspace when the token is not bound to one. |
 | `AGORA_TOOLS` | all groups | Comma-separated tool groups to expose: `browser`, `browserx`, `desktop`, `spawn`, `workspace`, `process`. The `self` group is always on. |
 | `AGORA_LEAN` | off | `1` shortens tool descriptions to one sentence. |

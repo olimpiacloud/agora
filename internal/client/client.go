@@ -25,8 +25,16 @@ func FromEnv() *Client {
 	if u == "" {
 		u = "http://127.0.0.1:7788"
 	}
-	tok := os.Getenv("AGORA_TOKEN")
-	if tok == "" {
+	tok := strings.TrimSpace(os.Getenv("AGORA_TOKEN"))
+	file := os.Getenv("AGORA_TOKEN_FILE")
+	if tok == "" && file != "" {
+		if b, err := os.ReadFile(file); err == nil {
+			tok = strings.TrimSpace(string(b))
+		} else {
+			fmt.Fprintf(os.Stderr, "agora: AGORA_TOKEN_FILE: %v\n", err)
+		}
+	}
+	if tok == "" && file == "" {
 		for _, p := range []string{os.Getenv("AGORA_HOME"), "/var/lib/agora", filepath.Join(os.Getenv("HOME"), ".agora")} {
 			if p == "" {
 				continue

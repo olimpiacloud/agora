@@ -56,6 +56,7 @@ agora api POST /v1/workspaces '{"name":"demo"}'
 | --- | --- | --- |
 | `AGORA_URL` | clients | Daemon URL. Default `http://127.0.0.1:7788`. |
 | `AGORA_TOKEN` | clients | Token to send. Default: the admin token from `AGORA_HOME`, `/var/lib/agora` or `~/.agora`, whichever is readable. |
+| `AGORA_TOKEN_FILE` | clients | File holding the token, used when `AGORA_TOKEN` is empty. When set, the admin token fallback is skipped. |
 | `AGORA_ACT_AS` | clients | With the admin token, act as this cursor (sent as `X-Agora-Cursor`). |
 | `AGORA_HOME` | all | State directory. |
 | `AGORA_ALLOW_PUBLIC` | `serve` | `1` allows binding to non-loopback addresses. |

@@ -20,9 +20,9 @@ The installer takes care of all of it: Xvfb, VA-API, Google Chrome (Chromium on 
 curl -fsSL https://agora.olimpia.dev/install.sh | sudo sh
 ```
 
-It downloads the latest release for your architecture and checks its SHA-256 (or builds from source when there is no release yet), installs `/usr/local/bin/agora`, creates the unprivileged `agora` user that runs apps and browsers, and enables the `agora` systemd service. Running it again upgrades in place and restarts the service only if something changed. Read the script first if you prefer: [agora.olimpia.dev/install.sh](https://agora.olimpia.dev/install.sh).
+It downloads the latest release for your architecture and checks its SHA-256 (if the release cannot be found or downloaded it stops with an error; use `--source DIR` to build a local checkout), installs `/usr/local/bin/agora`, creates the unprivileged `agora` user that runs apps and browsers, and enables the `agora` systemd service. Running it again upgrades in place and restarts the service only if something changed. Read the script first if you prefer: [agora.olimpia.dev/install.sh](https://agora.olimpia.dev/install.sh).
 
-If Claude Code, Codex or Paseo are installed for the user who ran `sudo`, it also registers the Agora MCP server (`agora mcp`), installs the Agora skill and installs the Paseo plugin.
+If Claude Code, Codex or Paseo are installed for the user who ran `sudo`, it also registers the Agora MCP server (`agora mcp`), installs the Agora skill and installs the Paseo plugin. The MCP server gets the admin token through `AGORA_TOKEN_FILE=~/.config/agora/token`, a file only that user can read (mode 0600), so the token never appears in a command line or in the agent configs.
 
 Pass options after `sh -s --`, for example `curl -fsSL https://agora.olimpia.dev/install.sh | sudo sh -s -- --no-agents`:
 
