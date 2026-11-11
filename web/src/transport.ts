@@ -23,6 +23,7 @@ export class DesktopSession {
   private pc?: RTCPeerConnection
   private input?: RTCDataChannel
   private decoder?: VideoDecoder
+  private failure = ''
   private decodeErrors = 0
   private closed = false
   private frames = 0
@@ -98,7 +99,8 @@ export class DesktopSession {
       return
     }
     const d = Math.min(8000, 500 * 2 ** this.retry++)
-    this.cb.onStatus(`reconnecting in ${Math.round(d / 1000)}s`)
+    const why = this.failure ? `${this.failure}, ` : ''
+    this.cb.onStatus(`${why}reconnecting in ${Math.round(d / 1000)}s`)
     setTimeout(() => !this.closed && this.start(), d)
   }
 
@@ -166,7 +168,9 @@ export class DesktopSession {
         this.decoder = undefined
         if (this.closed || this.ws !== ws || ws.readyState >= WebSocket.CLOSING) return
         if (++this.decodeErrors > 5) {
-          this.cb.onStatus('video decoder keeps failing')
+          this.failure = 'video decoder keeps failing'
+          this.cb.onStatus(this.failure)
+          ws.close()
           return
         }
         this.newDecoder(ws, ctx)
@@ -197,6 +201,7 @@ export class DesktopSession {
     this.needKey = true
     ws.onopen = () => {
       this.retry = 0
+      this.failure = ''
       this.cb.onStatus('')
       this.startPing((m) => this.send(m))
     }
