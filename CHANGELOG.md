@@ -15,6 +15,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - `board_read` returns posts oldest first with `more: true` when there are more than `limit`, so posts are no longer skipped.
 - `agora serve --sandbox-default` (on by default): new workspaces are sandboxed unless the admin creates them with `"sandbox": false`; cursors cannot opt out. Existing workspaces keep their stored setting.
 - `agora serve --worktree-roots`: directories where cursors may create git worktrees.
+- `agora serve --x-user`: the user Xvfb runs as.
 - Deleting a cursor closes its tabs and stops its apps, and tabs owned by cursors that already ended can be used by others.
 - The Paseo live panel takes pointer, wheel and keyboard input.
 - `AGORA_TOKEN_FILE` for the CLI and MCP server.
@@ -41,9 +42,9 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Tab actions on a tab with an open JavaScript dialog fail at once with the dialog text instead of waiting for the timeout, and an action that opens a dialog returns it.
 - Encoder rate control keeps the VBV buffer at the real bitrate when the frame rate changes, failed grabs refresh the frame without forcing a keyframe, and a WebRTC viewer asks for a keyframe when it connects.
 - The Paseo plugin times out daemon requests after 10 s, and the web viewer reconnects after repeated decoder errors.
-- The Paseo panel sends input over its viewer socket (control is held as a human viewer, held buttons and keys are released when the panel goes away), the agent wall shares one cursor-metadata poll and only polls visible tiles, and toolbar chips no longer remount on every frame.
+- The Paseo panel sends input over its viewer socket (held buttons and keys are released when the panel goes away, and non-finite coordinates are dropped), the agent wall shares one cursor-metadata poll and only polls visible tiles, and toolbar chips no longer remount on every frame.
 - Screenshots are kept per workspace (64 shots or 24 MB each, 256 MB in total) and dropped when the workspace suspends or is destroyed.
-- MCP tool calls are cancelled on `notifications/cancelled` and when the client disconnects.
+- MCP tool calls are cancelled on `notifications/cancelled`; after stdin closes, running calls get up to 30 s to finish.
 
 ### Security
 
@@ -66,11 +67,11 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Password and one-time-code inputs no longer leak their value as the element name in snapshots.
 - Worktree git commands run without repository hooks or fsmonitor, and worktree port counts are limited to 20.
 - The agent environment allowlist also passes `AWS_`, `GOOGLE_`, `CLOUD_ML_`, `AZURE_` and `VERTEX_` variables, and logs the names of variables it drops.
-- Xvfb runs as the apps user instead of root; MIT-SHM segments are handed to that user with mode 0600.
+- Xvfb runs as a dedicated X user (`agora serve --x-user`, `agora-x` by default, created by the installer) instead of root, and never as the apps user: apps cannot signal it, attach its MIT-SHM segments or replace its socket, and the daemon checks the socket owner and peer credentials before dialing. Without that user it falls back to root and logs why.
 - Sandboxed workspaces get a minimal `/dev` (null, zero, full, random, urandom, tty, a private devpts and `/dev/shm`) and a `nodev` root.
 - Human control (`control-take`, `control-return`) is admin-only.
 - Cursors only get worktrees of repositories owned by the daemon user, inside `--worktree-roots` when set.
-- The installer writes the agents' token to a `0600` file and registers it as `AGORA_TOKEN_FILE` instead of passing it in argv and storing it in agent configs, and aborts instead of building `main` when no release is found.
+- The installer writes the agents' token to a `0600` file and registers it as `AGORA_TOKEN_FILE` instead of passing it in argv and storing it in agent configs (existing inline entries are migrated), and aborts instead of building `main` when no release is found. The uninstaller removes that file as its owner.
 - Read-only tab actions no longer claim a tab, and claims are atomic, so a cursor that only looked at a tab cannot close it when it ends.
 
 ### Fixed
