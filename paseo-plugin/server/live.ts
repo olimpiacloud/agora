@@ -56,13 +56,24 @@ function meta(workspace: string): Meta {
   return m;
 }
 
+const metaWake = new Map<string, ReturnType<typeof setTimeout>>();
+
 function bumpMeta(workspace: string) {
   const m = metas.get(workspace);
   if (!m) return;
   m.seq++;
-  for (const h of m.hubs) wake(h);
-  for (const w of m.waiters) w();
-  m.waiters.clear();
+  if (metaWake.has(workspace)) return;
+  metaWake.set(
+    workspace,
+    setTimeout(() => {
+      metaWake.delete(workspace);
+      const cur = metas.get(workspace);
+      if (!cur) return;
+      for (const h of cur.hubs) wake(h);
+      for (const w of cur.waiters) w();
+      cur.waiters.clear();
+    }, 100),
+  );
 }
 
 function scheduleRefresh(workspace: string, delay: number) {
@@ -246,11 +257,13 @@ export async function pollLive(input: RpcInput<typeof live>) {
   const fresh = () => hub.seq > input.after || m.seq > input.metaAfter;
   if (!fresh()) {
     await new Promise<void>((resolve) => {
-      const t = setTimeout(resolve, 8000);
-      hub.waiters.add(() => {
+      const done = () => {
         clearTimeout(t);
+        hub.waiters.delete(done);
         resolve();
-      });
+      };
+      const t = setTimeout(done, 8000);
+      hub.waiters.add(done);
     });
   }
   hub.lastPoll = Date.now();
