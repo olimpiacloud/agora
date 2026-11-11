@@ -32,6 +32,7 @@ type Config struct {
 	SuspendAfter    time.Duration
 	TabIdle         time.Duration
 	CursorRetention time.Duration
+	MaxAgents       int
 	RTC             stream.RTCOptions
 	AgoraBinary     string
 	ListenURL       string
@@ -40,6 +41,8 @@ type Config struct {
 }
 
 const DefaultCursorRetention = 7 * 24 * time.Hour
+
+const DefaultMaxAgents = 16
 
 var (
 	ErrNotFound  = errors.New("not found")

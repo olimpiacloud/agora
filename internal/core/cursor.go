@@ -89,6 +89,9 @@ func (m *Manager) CreateCursor(ctx context.Context, req CreateCursorReq) (*Curso
 				req.Budget.MaxDepth = -1
 			}
 		}
+		if parent.Budget.MaxCursors > 0 && (req.Budget.MaxCursors <= 0 || req.Budget.MaxCursors > parent.Budget.MaxCursors) {
+			req.Budget.MaxCursors = parent.Budget.MaxCursors
+		}
 	}
 	if req.Workspace != "" {
 		w := m.ws[req.Workspace]
@@ -107,6 +110,18 @@ func (m *Manager) CreateCursor(ctx context.Context, req CreateCursorReq) (*Curso
 				m.mu.Unlock()
 				return nil, "", fmt.Errorf("workspace cursor limit reached (%d)", n)
 			}
+		}
+	}
+	if req.Launch != nil && m.cfg.MaxAgents > 0 {
+		n := 0
+		for _, c := range m.cursors {
+			if c.Launch != nil && !c.Status.Terminal() {
+				n++
+			}
+		}
+		if n >= m.cfg.MaxAgents {
+			m.mu.Unlock()
+			return nil, "", fmt.Errorf("launched agent limit reached (%d); the admin can raise agora serve --max-agents", n)
 		}
 	}
 	if parent == nil && len(req.Permissions) == 0 {
