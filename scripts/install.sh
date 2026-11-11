@@ -226,31 +226,70 @@ save_token() {
 	fi
 }
 
+inline_token() {
+	printf '%s\n' "$1" | grep -Eq 'AGORA_TOKEN([^_]|$)'
+}
+
+migrate_mcp() {
+	if [ -z "$envflag" ] && [ "$AGENT_USER" != root ]; then
+		warn "the agora MCP server in $1 ($AGENT_USER) has an inline AGORA_TOKEN and no token file could be saved: leaving it as is"
+		return 1
+	fi
+	say "Moving the inline AGORA_TOKEN of the agora MCP server in $1 ($AGENT_USER) to ${envflag:-the admin token file}"
+	if ! as_user "$2" >/dev/null 2>&1; then
+		warn "could not remove the agora MCP server from $1 ($2)"
+		return 1
+	fi
+	MIGRATED=1
+}
+
 configure_agents() {
 	AGENT_USER=${SUDO_USER:-root}
 	id "$AGENT_USER" >/dev/null 2>&1 || AGENT_USER=root
 	envflag=
+	MIGRATED=0
 	if [ "$AGENT_USER" != root ] && [ -s "$HOME_DIR/admin.token" ] && { user_has claude || user_has codex; }; then
 		save_token
 	fi
 	configured=0
 	if user_has claude; then
-		if as_user "claude mcp get agora" >/dev/null 2>&1; then
-			say "Claude Code already has the agora MCP server"
-		else
+		add=1
+		if cfg=$(as_user "claude mcp get agora" 2>/dev/null); then
+			add=0
+			if inline_token "$cfg"; then
+				if migrate_mcp "Claude Code" "claude mcp remove agora -s user"; then
+					add=1
+				fi
+			else
+				say "Claude Code already has the agora MCP server"
+			fi
+		fi
+		if [ "$add" -eq 1 ]; then
 			say "Adding the agora MCP server to Claude Code ($AGENT_USER)"
 			as_user "claude mcp add agora -s user ${envflag:+-e '$envflag'} -- $PREFIX/bin/agora mcp" >/dev/null || warn "claude mcp add failed"
 		fi
 		configured=1
 	fi
 	if user_has codex; then
-		if as_user "codex mcp get agora" >/dev/null 2>&1; then
-			say "Codex already has the agora MCP server"
-		else
+		add=1
+		if cfg=$(as_user "codex mcp get agora" 2>/dev/null); then
+			add=0
+			if inline_token "$cfg"; then
+				if migrate_mcp "Codex" "codex mcp remove agora"; then
+					add=1
+				fi
+			else
+				say "Codex already has the agora MCP server"
+			fi
+		fi
+		if [ "$add" -eq 1 ]; then
 			say "Adding the agora MCP server to Codex ($AGENT_USER)"
 			as_user "codex mcp add agora ${envflag:+--env '$envflag'} -- $PREFIX/bin/agora mcp" >/dev/null || warn "codex mcp add failed"
 		fi
 		configured=1
+	fi
+	if [ "$MIGRATED" -eq 1 ]; then
+		warn "the admin token was stored in plain text in the agent configuration: rotate it with 'sudo rm $HOME_DIR/admin.token && sudo systemctl restart agora', then run this installer again to save the new token"
 	fi
 	if [ "$configured" -eq 1 ]; then
 		if user_has bunx; then

@@ -78,8 +78,13 @@ fi
 user_home=$(getent passwd "$AGENT_USER" | cut -d: -f6 || true)
 if [ -n "$user_home" ] && [ -f "$user_home/.config/agora/token" ]; then
 	say "Removing the saved admin token ($user_home/.config/agora/token)"
-	rm -f "$user_home/.config/agora/token"
-	rmdir "$user_home/.config/agora" 2>/dev/null || true
+	if [ "$AGENT_USER" = root ]; then
+		rm -f "$user_home/.config/agora/token"
+		rmdir "$user_home/.config/agora" 2>/dev/null || true
+	else
+		runuser -u "$AGENT_USER" -- rm -f "$user_home/.config/agora/token" || warn "could not remove $user_home/.config/agora/token"
+		runuser -u "$AGENT_USER" -- rmdir "$user_home/.config/agora" 2>/dev/null || true
+	fi
 fi
 if user_has bunx; then
 	runner="bunx skills"
