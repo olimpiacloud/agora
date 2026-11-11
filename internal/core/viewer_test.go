@@ -3,12 +3,14 @@ package core
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestControlViewerNoopTakesNoLock(t *testing.T) {
 	m := &Manager{Arb: NewArbiter(nil), ws: map[string]*Workspace{}}
-	r := &Runtime{m: m, id: "ws1"}
+	r := &Runtime{m: m, id: "ws1", viewers: map[string]*Viewer{}}
 	v := &Viewer{ID: "v1", Workspace: "ws1", Control: true, r: r, m: m, held: map[uint32]bool{}, buttons: map[int]bool{}}
+	r.viewers[v.ID] = v
 	v.Input([]byte(`{"t":"noop"}`))
 	if l := m.Arb.List("ws1"); len(l) != 0 {
 		t.Fatalf("noop from a control viewer created locks: %+v", l)
@@ -71,5 +73,47 @@ func TestViewerHelloRedactsCursors(t *testing.T) {
 		if strings.Contains(s, leak) {
 			t.Fatalf("hello leaks %q: %s", leak, s)
 		}
+	}
+}
+
+func idleTestRuntime(t *testing.T) (*Manager, string, *Runtime) {
+	t.Helper()
+	m := newTestManager(t)
+	id, r := newTestRuntime(t, m)
+	setActivity(r, time.Now().Add(-time.Hour))
+	if !m.markIdle(id, r, time.Minute) {
+		t.Fatal("runtime not marked idle")
+	}
+	if s := wsState(t, m, id); s != StateIdle {
+		t.Fatalf("state %s, want idle", s)
+	}
+	return m, id, r
+}
+
+func TestDetachedViewerInputDoesNotTouchRuntime(t *testing.T) {
+	m, id, r := idleTestRuntime(t)
+	v := &Viewer{ID: "v1", Workspace: id, Control: true, r: r, m: m, held: map[uint32]bool{}, buttons: map[int]bool{}}
+	v.Input([]byte(`{"t":"move","x":1,"y":1}`))
+	if s := wsState(t, m, id); s != StateIdle {
+		t.Fatalf("detached viewer input made the workspace %s", s)
+	}
+	if l := m.Arb.List(id); len(l) != 0 {
+		t.Fatalf("detached viewer input took locks: %+v", l)
+	}
+}
+
+func TestTouchIgnoresClosingRuntime(t *testing.T) {
+	m, id, r := idleTestRuntime(t)
+	r.mu.Lock()
+	r.closing = true
+	r.mu.Unlock()
+	t.Cleanup(func() {
+		r.mu.Lock()
+		r.closing = false
+		r.mu.Unlock()
+	})
+	r.touch()
+	if s := wsState(t, m, id); s != StateIdle {
+		t.Fatalf("touch on a closing runtime made the workspace %s", s)
 	}
 }

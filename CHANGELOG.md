@@ -117,6 +117,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - A paused agent whose status changed without `resume` (a CAPTCHA followed by a human returning control, or a `status` call) stayed stopped while shown as running; its process is now resumed whenever the cursor leaves `paused`, and cancelling a paused agent no longer waits 5 seconds.
 - A cascading cancel marks the cursor cancelled before its children, so a subagent spawned during the cancel can no longer survive it.
 - An expired workspace is destroyed once: `workspace.expired` and `workspace.destroyed` are no longer published again every two seconds while the destroy runs, and destroying an already destroyed workspace does nothing.
+- Input from a viewer that was already detached no longer marks a suspended or frozen workspace active or restarts it, a call that arrives while an idle suspend is queued keeps its runtime, the list of tabs to restore survives a restore that restored nothing, and a browser crash is recorded (with its tabs and a `browser.crashed` event) even when an API call notices it before the watcher does.
 
 ## [0.1.0] - 2026-11-06
 
