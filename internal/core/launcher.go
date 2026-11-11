@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -180,17 +181,19 @@ var agentEnvKeys = map[string]bool{
 	"SSL_CERT_FILE": true, "SSL_CERT_DIR": true, "NODE_EXTRA_CA_CERTS": true,
 }
 
-var agentEnvPrefixes = []string{"LC_", "ANTHROPIC_", "CLAUDE_", "OPENAI_", "CODEX_"}
+var agentEnvPrefixes = []string{"LC_", "ANTHROPIC_", "CLAUDE_", "OPENAI_", "CODEX_", "AWS_", "GOOGLE_", "CLOUD_ML_", "AZURE_", "VERTEX_"}
 
-func agentEnv(environ []string) []string {
-	out := []string{}
+func agentEnv(environ []string) ([]string, []string) {
+	out, dropped := []string{}, []string{}
 	for _, kv := range environ {
 		k, _, _ := strings.Cut(kv, "=")
 		if agentEnvAllowed(k) {
 			out = append(out, kv)
+		} else {
+			dropped = append(dropped, k)
 		}
 	}
-	return out
+	return out, dropped
 }
 
 func agentEnvAllowed(k string) bool {
@@ -215,7 +218,11 @@ func (m *Manager) launchAgent(id, tok string) error {
 		return err
 	}
 	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Env = append(agentEnv(os.Environ()), env...)
+	kept, dropped := agentEnv(os.Environ())
+	if len(dropped) > 0 {
+		log.Printf("cursor %s: not passing environment variables outside the agent allowlist: %s", id, strings.Join(dropped, ", "))
+	}
+	cmd.Env = append(kept, env...)
 	for k, v := range c.Launch.Env {
 		if !strings.HasPrefix(k, "AGORA_") {
 			cmd.Env = append(cmd.Env, k+"="+v)

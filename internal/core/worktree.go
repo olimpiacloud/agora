@@ -22,6 +22,10 @@ type WorktreeReq struct {
 
 var branchRe = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
+func gitCmd(ctx context.Context, args ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, "git", append([]string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}, args...)...)
+}
+
 func portsFree(base, n int) bool {
 	for p := base; p < base+n; p++ {
 		l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p))
@@ -68,11 +72,14 @@ func (m *Manager) releasePorts(base int) {
 }
 
 func (m *Manager) CreateWorktree(ctx context.Context, req WorktreeReq, cursor, ws string) (*Worktree, error) {
+	if req.Ports < 0 || req.Ports > 20 {
+		return nil, fmt.Errorf("ports must be between 1 and 20 (0 keeps the default of 10)")
+	}
 	repo, err := filepath.Abs(req.Repo)
 	if err != nil {
 		return nil, err
 	}
-	top, err := exec.CommandContext(ctx, "git", "-C", repo, "rev-parse", "--show-toplevel").Output()
+	top, err := gitCmd(ctx, "-C", repo, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		return nil, fmt.Errorf("%s is not a git repository", repo)
 	}
@@ -99,10 +106,10 @@ func (m *Manager) CreateWorktree(ctx context.Context, req WorktreeReq, cursor, w
 	}
 	path := filepath.Join(m.cfg.Home, "worktrees", id)
 	args := []string{"-C", repo, "worktree", "add", "-b", req.Branch, path, req.Base}
-	if exec.CommandContext(ctx, "git", "-C", repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+req.Branch).Run() == nil {
+	if gitCmd(ctx, "-C", repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+req.Branch).Run() == nil {
 		args = []string{"-C", repo, "worktree", "add", path, req.Branch}
 	}
-	if out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput(); err != nil {
+	if out, err := gitCmd(ctx, args...).CombinedOutput(); err != nil {
 		m.releasePorts(base)
 		return nil, fmt.Errorf("git worktree add: %v: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -138,11 +145,11 @@ func (m *Manager) RemoveWorktree(ctx context.Context, id string, force bool) err
 	if force {
 		args = append(args, "--force")
 	}
-	if out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput(); err != nil {
+	if out, err := gitCmd(ctx, args...).CombinedOutput(); err != nil {
 		if _, serr := os.Stat(wt.Path); serr == nil {
 			return fmt.Errorf("git worktree remove: %v: %s", err, strings.TrimSpace(string(out)))
 		}
-		exec.CommandContext(ctx, "git", "-C", wt.Repo, "worktree", "prune").Run()
+		gitCmd(ctx, "-C", wt.Repo, "worktree", "prune").Run()
 	}
 	m.mu.Lock()
 	delete(m.worktrees, id)

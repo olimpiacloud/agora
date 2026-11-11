@@ -293,7 +293,13 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 	case "select":
 		err = tab.SelectRef(ctx, a.Ref, a.Values)
 	case "upload":
-		err = tab.SetFiles(ctx, a.Ref, a.Files)
+		files := a.Files
+		if c != nil {
+			files, err = m.uploadPaths(ws, a.Files)
+		}
+		if err == nil {
+			err = tab.SetFiles(ctx, a.Ref, files)
+		}
 	case "eval":
 		var v any
 		err = tab.Eval(ctx, a.Expr, &v)

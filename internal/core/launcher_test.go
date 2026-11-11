@@ -98,11 +98,15 @@ func TestAgentCommandPromptCannotBecomeAnOption(t *testing.T) {
 func TestAgentEnvKeepsOnlyAllowedVariables(t *testing.T) {
 	in := []string{
 		"PATH=/usr/bin", "HOME=/root", "LC_ALL=C.UTF-8", "ANTHROPIC_API_KEY=k", "CLAUDE_CONFIG_DIR=/c", "OPENAI_API_KEY=o", "CODEX_HOME=/x", "https_proxy=http://p", "NODE_EXTRA_CA_CERTS=/ca.pem",
-		"AGORA_HOME=/var/lib/agora", "AWS_SECRET_ACCESS_KEY=s", "LD_PRELOAD=/tmp/x.so", "PATHX=1", "DATABASE_URL=postgres://", "NOTIFY_SOCKET=/run/systemd/notify",
+		"AGORA_HOME=/var/lib/agora", "AWS_REGION=us-east-1", "GOOGLE_CLOUD_PROJECT=p", "CLOUD_ML_REGION=us-east5", "AZURE_API_KEY=a", "VERTEX_REGION_CLAUDE_4_0_OPUS=r", "LD_PRELOAD=/tmp/x.so", "PATHX=1", "DATABASE_URL=postgres://", "NOTIFY_SOCKET=/run/systemd/notify",
 	}
-	want := []string{"PATH=/usr/bin", "HOME=/root", "LC_ALL=C.UTF-8", "ANTHROPIC_API_KEY=k", "CLAUDE_CONFIG_DIR=/c", "OPENAI_API_KEY=o", "CODEX_HOME=/x", "https_proxy=http://p", "NODE_EXTRA_CA_CERTS=/ca.pem"}
-	if got := agentEnv(in); strings.Join(got, "\n") != strings.Join(want, "\n") {
+	want := []string{"PATH=/usr/bin", "HOME=/root", "LC_ALL=C.UTF-8", "ANTHROPIC_API_KEY=k", "CLAUDE_CONFIG_DIR=/c", "OPENAI_API_KEY=o", "CODEX_HOME=/x", "https_proxy=http://p", "NODE_EXTRA_CA_CERTS=/ca.pem", "AWS_REGION=us-east-1", "GOOGLE_CLOUD_PROJECT=p", "CLOUD_ML_REGION=us-east5", "AZURE_API_KEY=a", "VERTEX_REGION_CLAUDE_4_0_OPUS=r"}
+	got, dropped := agentEnv(in)
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("agentEnv:\n got %q\nwant %q", got, want)
+	}
+	if strings.Join(dropped, ",") != "AGORA_HOME,LD_PRELOAD,PATHX,DATABASE_URL,NOTIFY_SOCKET" {
+		t.Fatalf("dropped names: %q", dropped)
 	}
 }
 
