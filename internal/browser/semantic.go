@@ -13,7 +13,9 @@ import (
 const snapshotJS = `(() => {
 const VO = %t;
 const MAXE = %d;
+const BASE = %d;
 const R = window.__agora || (window.__agora = {n: 0, m: new Map(), w: new WeakMap()});
+if (R.n < BASE) R.n = BASE;
 for (const [k, w] of R.m) if (!w.deref()) R.m.delete(k);
 const out = [];
 const vw = innerWidth, vh = innerHeight;
@@ -84,7 +86,7 @@ const MAXT = %d;
 let text = '';
 if (VO) { const parts = []; let len = 0; const tw = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT); let n; while ((n = tw.nextNode()) && len < MAXT) { const t = n.textContent.replace(/\s+/g, ' ').trim(); if (!t) continue; const p = n.parentElement; if (!p) continue; const r = p.getBoundingClientRect(); if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw || r.width === 0) continue; parts.push(t); len += t.length + 1; } text = parts.join(' ').slice(0, MAXT); }
 else text = (document.body ? document.body.innerText : '').replace(/\n{3,}/g, '\n\n').slice(0, MAXT);
-return {url: location.href, title: document.title, viewport: [vw, vh], scroll: [scrollX, scrollY, (document.documentElement || {}).scrollHeight || 0], elements: out, text};
+return {url: location.href, title: document.title, viewport: [vw, vh], scroll: [scrollX, scrollY, (document.documentElement || {}).scrollHeight || 0], elements: out, text, refs: R.n};
 })()`
 
 type Element struct {
@@ -160,11 +162,22 @@ func (t *Tab) snapshot(ctx context.Context, maxText, maxElements int, viewportOn
 	if maxElements == 0 {
 		maxElements = 400
 	}
-	var s Snapshot
+	var s struct {
+		Snapshot
+		Refs int `json:"refs"`
+	}
 	var err error
 	for i := 0; i < 3; i++ {
-		if err = t.Eval(ctx, fmt.Sprintf(snapshotJS, viewportOnly, maxElements, maxText), &s); err == nil {
-			return &s, nil
+		t.mu.Lock()
+		base := t.refs
+		t.mu.Unlock()
+		if err = t.Eval(ctx, fmt.Sprintf(snapshotJS, viewportOnly, maxElements, base, maxText), &s); err == nil {
+			t.mu.Lock()
+			if s.Refs > t.refs {
+				t.refs = s.Refs
+			}
+			t.mu.Unlock()
+			return &s.Snapshot, nil
 		}
 		t.waitReady(ctx, 5*time.Second, "interactive")
 	}
@@ -213,14 +226,19 @@ func (t *Tab) HoverRef(ctx context.Context, ref string) error {
 }
 
 func (t *Tab) FillRef(ctx context.Context, ref, text string, submit bool) error {
-	js := fmt.Sprintf(`(() => { const w = window.__agora && window.__agora.m.get(%q); const el = w && w.deref(); if (!el) return false; el.focus();
-if ('value' in el && el.tagName !== 'SELECT') { el.select && el.select(); } else if (el.isContentEditable) { const s = getSelection(); const r = document.createRange(); r.selectNodeContents(el); s.removeAllRanges(); s.addRange(r); } return true; })()`, ref)
-	var ok bool
-	if err := t.Eval(ctx, js, &ok); err != nil {
+	js := fmt.Sprintf(`(() => { const w = window.__agora && window.__agora.m.get(%q); const el = w && w.deref(); if (!el || !el.isConnected) return 'gone'; el.focus();
+if (el.getRootNode().activeElement !== el && el.ownerDocument.activeElement !== el) return 'nofocus';
+if ('value' in el && el.tagName !== 'SELECT') { el.select && el.select(); } else if (el.isContentEditable) { const s = getSelection(); const r = document.createRange(); r.selectNodeContents(el); s.removeAllRanges(); s.addRange(r); } return 'ok'; })()`, ref)
+	var st string
+	if err := t.Eval(ctx, js, &st); err != nil {
 		return err
 	}
-	if !ok {
-		return fmt.Errorf("element %s not found", ref)
+	switch st {
+	case "ok":
+	case "nofocus":
+		return fmt.Errorf("element %s cannot take focus", ref)
+	default:
+		return fmt.Errorf("element %s not found (take a new snapshot)", ref)
 	}
 	if text == "" {
 		if err := t.Press(ctx, "Delete"); err != nil {
@@ -237,17 +255,21 @@ if ('value' in el && el.tagName !== 'SELECT') { el.select && el.select(); } else
 
 func (t *Tab) SelectRef(ctx context.Context, ref string, values []string) error {
 	b, _ := json.Marshal(values)
-	js := fmt.Sprintf(`(() => { const w = window.__agora && window.__agora.m.get(%q); const el = w && w.deref(); if (!el || el.tagName !== 'SELECT') return false; const vals = %s;
+	js := fmt.Sprintf(`(() => { const w = window.__agora && window.__agora.m.get(%q); const el = w && w.deref(); if (!el || !el.isConnected) return 'gone'; if (el.tagName !== 'SELECT') return 'type'; const vals = %s;
 for (const o of el.options) o.selected = vals.includes(o.value) || vals.includes(o.label) || vals.includes(o.text);
-el.dispatchEvent(new Event('input', {bubbles:true})); el.dispatchEvent(new Event('change', {bubbles:true})); return true; })()`, ref, b)
-	var ok bool
-	if err := t.Eval(ctx, js, &ok); err != nil {
+el.dispatchEvent(new Event('input', {bubbles:true})); el.dispatchEvent(new Event('change', {bubbles:true})); return 'ok'; })()`, ref, b)
+	var st string
+	if err := t.Eval(ctx, js, &st); err != nil {
 		return err
 	}
-	if !ok {
+	switch st {
+	case "ok":
+		return nil
+	case "type":
 		return fmt.Errorf("element %s is not a select", ref)
+	default:
+		return fmt.Errorf("element %s not found (take a new snapshot)", ref)
 	}
-	return nil
 }
 
 func (t *Tab) SetFiles(ctx context.Context, ref string, files []string) error {
@@ -265,11 +287,11 @@ func (t *Tab) SetFiles(ctx context.Context, ref string, files []string) error {
 			ObjectID string `json:"objectId"`
 		} `json:"result"`
 	}
-	if err := t.call(ctx, "Runtime.evaluate", map[string]any{"expression": fmt.Sprintf(`(() => { const w = window.__agora && window.__agora.m.get(%q); return w && w.deref(); })()`, ref)}, &r); err != nil {
+	if err := t.call(ctx, "Runtime.evaluate", map[string]any{"expression": fmt.Sprintf(`(() => { const w = window.__agora && window.__agora.m.get(%q); const el = w && w.deref(); return el && el.isConnected ? el : null; })()`, ref)}, &r); err != nil {
 		return err
 	}
 	if r.Result.ObjectID == "" {
-		return fmt.Errorf("element %s not found", ref)
+		return fmt.Errorf("element %s not found (take a new snapshot)", ref)
 	}
 	return t.call(ctx, "DOM.setFileInputFiles", map[string]any{"files": files, "objectId": r.Result.ObjectID}, nil)
 }

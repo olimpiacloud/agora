@@ -182,3 +182,121 @@ func (t *Tab) WindowTitleMarker(ctx context.Context, marker string) (func(), err
 		t.Eval(c, fmt.Sprintf("document.title=%s", b), nil)
 	}, nil
 }
+
+func launchTestBrowser(t *testing.T) *Browser {
+	t.Helper()
+	requireXvfb(t)
+	uid, gid := appUser(t)
+	dir, _ := os.MkdirTemp("/tmp", "agora-bt-")
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	os.Chown(dir, int(uid), int(gid))
+	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 1280, Height: 800, RunDir: dir + "/run", AuthUid: int(uid), AuthGid: int(gid)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	os.Chown(d.AuthFile, int(uid), int(gid))
+	wm, err := d.StartWM(x11.LayoutTile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { wm.Close() })
+	env := append([]string{"HOME=" + dir, "DBUS_SESSION_BUS_ADDRESS=disabled:"}, d.Env()...)
+	ctx := context.Background()
+	b, err := Launch(ctx, LaunchOptions{UserDataDir: dir + "/profile", Env: env, Uid: uid, Gid: gid, LogPath: dir + "/chrome.log"})
+	if err != nil {
+		lg, _ := os.ReadFile(dir + "/chrome.log")
+		t.Fatal(err, string(lg))
+	}
+	t.Cleanup(func() { b.Close(context.Background()) })
+	return b
+}
+
+func refNum(t *testing.T, ref string) int {
+	t.Helper()
+	n, err := strconv.Atoi(strings.TrimPrefix(ref, "e"))
+	if err != nil {
+		t.Fatalf("bad ref %q", ref)
+	}
+	return n
+}
+
+func TestStaleRefsFail(t *testing.T) {
+	b := launchTestBrowser(t)
+	ctx := context.Background()
+	pageA := `data:text/html,<title>A</title><input id=a placeholder=first><input id=b placeholder=second><select id=s><option>x</option><option>y</option></select><button>One</button>`
+	tab, err := b.NewTab(ctx, NewTabOptions{URL: pageA, NewWindow: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	s, err := tab.Snapshot(ctx, 200, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first, second, sel string
+	maxA := 0
+	for _, e := range s.Elements {
+		switch {
+		case e.Name == "first":
+			first = e.Ref
+		case e.Name == "second":
+			second = e.Ref
+		case e.Role == "combobox":
+			sel = e.Ref
+		}
+		if n := refNum(t, e.Ref); n > maxA {
+			maxA = n
+		}
+	}
+	if first == "" || second == "" || sel == "" {
+		t.Fatalf("refs missing: first=%q second=%q select=%q in %s", first, second, sel, s.Compact(false))
+	}
+	if err := tab.Eval(ctx, "document.getElementById('b').remove(); document.getElementById('a').focus(); true", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := tab.FillRef(ctx, second, "hunter2", false); err == nil || !strings.Contains(err.Error(), "take a new snapshot") {
+		t.Fatalf("fill on a removed input: %v", err)
+	}
+	var v string
+	if err := tab.Eval(ctx, "document.getElementById('a').value", &v); err != nil {
+		t.Fatal(err)
+	}
+	if v != "" {
+		t.Fatalf("text went to the focused input: %q", v)
+	}
+	if err := tab.Eval(ctx, "document.getElementById('s').remove(); true", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := tab.SelectRef(ctx, sel, []string{"y"}); err == nil {
+		t.Fatal("select on a removed select succeeded")
+	}
+	if err := tab.FillRef(ctx, first, "hola", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := tab.Eval(ctx, "document.getElementById('a').value", &v); err != nil {
+		t.Fatal(err)
+	}
+	if v != "hola" {
+		t.Fatalf("a.value=%q", v)
+	}
+	pageB := `data:text/html,<title>B</title><button>Three</button><button>Four</button><input placeholder=third>`
+	if err := tab.Navigate(ctx, pageB, "", 10*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	s, err = tab.Snapshot(ctx, 200, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Elements) == 0 {
+		t.Fatalf("no elements on page B: %s", s.Compact(false))
+	}
+	for _, e := range s.Elements {
+		if refNum(t, e.Ref) <= maxA {
+			t.Fatalf("ref %s on page B reuses a number from page A (max %d)", e.Ref, maxA)
+		}
+	}
+	if err := tab.ClickRef(ctx, first, "", 1); err == nil || !strings.Contains(err.Error(), "take a new snapshot") {
+		t.Fatalf("click on an old ref after navigation: %v", err)
+	}
+}

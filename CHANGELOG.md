@@ -112,6 +112,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Detailed usage of a suspending workspace, and the set of purged workspace logs, no longer grow without bound.
 - The Paseo plugin removes the Agora workspace of a Paseo workspace when it is archived, and its periodic reconcile removes workspaces whose Paseo workspace no longer exists (never-started ones are purged; ones that ran keep their profile on disk). Busy workspaces and workspaces without a Paseo label are left alone. Scheduled Paseo runs no longer pile up workspaces.
 - X connections of the display, the input seats and the screen capturers now read their event queue; they used to stop answering for good after 5000 queued events or errors, which froze input, the window list or the stream of a workspace. Desktop input refuses button numbers outside 1-9, more than 10 clicks and more than 100 scroll notches per call, a key combination that fails halfway releases the keys it pressed, and the back and forward mouse buttons of a viewer reach the desktop as buttons 8 and 9 instead of wheel scrolls.
+- Element refs are never reused inside a tab: after a navigation an old ref fails with "take a new snapshot" instead of acting on a different element of the new page. `fill`, `select` and `upload` on an element that was removed from the page now fail too; `fill` used to type into whatever field had focus and report success.
 
 ## [0.1.0] - 2026-11-06
 

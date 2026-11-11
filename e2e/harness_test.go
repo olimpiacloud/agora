@@ -125,6 +125,19 @@ func (h *H) act(c *client.Client, ws, target string, a map[string]any) map[strin
 	return h.do(c, "POST", "/v1/workspaces/"+ws+"/tabs/"+target, a)
 }
 
+func (h *H) ref(c *client.Client, ws, target, role, name string) string {
+	h.t.Helper()
+	snap, _ := h.act(c, ws, target, map[string]any{"action": "snapshot"})["snapshot"].(string)
+	want := fmt.Sprintf("] %s %q", role, name)
+	for _, l := range strings.Split(snap, "\n") {
+		if strings.Contains(l, want) {
+			return strings.Trim(strings.Fields(l)[0], "[]")
+		}
+	}
+	h.t.Fatalf("no %s %q in\n%s", role, name, snap)
+	return ""
+}
+
 func (h *H) eval(c *client.Client, ws, target, expr string) any {
 	return h.act(c, ws, target, map[string]any{"action": "eval", "expression": expr})["value"]
 }
