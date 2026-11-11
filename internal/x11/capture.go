@@ -60,6 +60,7 @@ func (d *Display) NewCapturer() (*Capturer, error) {
 	if err != nil {
 		return nil, err
 	}
+	drain(c)
 	cp := &Capturer{d: d, c: c}
 	if err := extInit("MIT-SHM", c); err == nil {
 		size := 3840 * 2160 * 4

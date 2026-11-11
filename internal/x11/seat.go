@@ -10,6 +10,12 @@ import (
 	"github.com/jezek/xgb/xtest"
 )
 
+const (
+	maxButton = 9
+	maxClicks = 10
+	maxScroll = 100
+)
+
 type Seat struct {
 	Name     string
 	Pointer  uint16
@@ -79,6 +85,7 @@ func (d *Display) openSeat(name string, ptr, kbd uint16, owned bool) (*Seat, err
 		c.Close()
 		return nil, err
 	}
+	drain(c)
 	s := &Seat{Name: name, Pointer: ptr, Keyboard: kbd, owned: owned, d: d, c: c, held: map[uint32]bool{}}
 	s.x, s.y, _, _ = xiQueryPointer(c, d.root, ptr)
 	return s, nil
@@ -128,6 +135,9 @@ func (s *Seat) Move(x, y int) error {
 }
 
 func (s *Seat) Button(b int, down bool) error {
+	if b < 1 || b > maxButton {
+		return fmt.Errorf("button %d out of range (1-%d)", b, maxButton)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t := byte(5)
@@ -140,14 +150,20 @@ func (s *Seat) Button(b int, down bool) error {
 }
 
 func (s *Seat) Click(x, y, b, count int) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if b == 0 {
 		b = 1
 	}
 	if count == 0 {
 		count = 1
 	}
+	if b < 1 || b > maxButton {
+		return fmt.Errorf("button %d out of range (1-%d)", b, maxButton)
+	}
+	if count < 1 || count > maxClicks {
+		return fmt.Errorf("click count %d out of range (1-%d)", count, maxClicks)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.moveLocked(x, y)
 	for i := 0; i < count; i++ {
 		xtest.FakeInput(s.c, 4, byte(b), 0, s.d.root, 0, 0, 0)
@@ -179,6 +195,9 @@ func (s *Seat) Drag(x0, y0, x1, y1 int, steps int) error {
 }
 
 func (s *Seat) Scroll(x, y, dx, dy int) error {
+	if dx > maxScroll || dx < -maxScroll || dy > maxScroll || dy < -maxScroll {
+		return fmt.Errorf("scroll is limited to %d notches per call", maxScroll)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.moveLocked(x, y)
@@ -241,8 +260,12 @@ func (s *Seat) Press(combo string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, k := range syms {
+	for i, k := range syms {
 		if err := s.keyLocked(k, true); err != nil {
+			for j := i - 1; j >= 0; j-- {
+				s.keyLocked(syms[j], false)
+			}
+			s.sync()
 			return err
 		}
 	}

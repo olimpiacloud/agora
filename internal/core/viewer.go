@@ -296,12 +296,16 @@ func (v *Viewer) Input(raw []byte) {
 				wm.Raise(w)
 			}
 		}
-		core.Button(btn(msg.B), true)
-		v.buttons[btn(msg.B)] = true
+		if b := btn(msg.B); b != 0 {
+			core.Button(b, true)
+			v.buttons[b] = true
+		}
 	case "up":
 		core.Move(x, y)
-		core.Button(btn(msg.B), false)
-		delete(v.buttons, btn(msg.B))
+		if b := btn(msg.B); b != 0 {
+			core.Button(b, false)
+			delete(v.buttons, b)
+		}
 	case "wheel":
 		core.Scroll(x, y, sign(msg.DX), sign(msg.DY))
 	case "key":
@@ -328,8 +332,12 @@ func btn(b int) int {
 		return 2
 	case 2:
 		return 3
+	case 3:
+		return 8
+	case 4:
+		return 9
 	}
-	return b + 1
+	return 0
 }
 
 func sign(f float64) int {

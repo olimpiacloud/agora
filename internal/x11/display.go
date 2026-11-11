@@ -228,6 +228,7 @@ func StartDisplay(ctx context.Context, o DisplayOptions) (*Display, error) {
 		c, err := d.Dial()
 		if err == nil {
 			d.conn = c
+			drain(c)
 			break
 		}
 		select {
@@ -331,6 +332,17 @@ func (d *Display) Socket() string { return socketPath(d.Num) }
 func (d *Display) Root() xproto.Window { return d.root }
 
 func (d *Display) Conn() *xgb.Conn { return d.conn }
+
+func drain(c *xgb.Conn) {
+	go func() {
+		for {
+			ev, err := c.WaitForEvent()
+			if ev == nil && err == nil {
+				return
+			}
+		}
+	}()
+}
 
 func (d *Display) Pid() int {
 	if d.proc != nil && d.proc.Process != nil {
