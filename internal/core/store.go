@@ -7,15 +7,21 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Store struct {
-	dir     string
-	mu      sync.Mutex
-	pending map[string]storeOp
-	running bool
-	idle    *sync.Cond
-	onError func(kind, id string, err error)
+	dir      string
+	mu       sync.Mutex
+	pending  map[string]storeOp
+	failed   map[string]storeOp
+	running  bool
+	backoff  time.Duration
+	retryAt  time.Time
+	kick     chan struct{}
+	settled  chan struct{}
+	onError  func(kind, id string, err error)
+	flushMax time.Duration
 }
 
 type storeOp struct {
@@ -25,15 +31,18 @@ type storeOp struct {
 	del  bool
 }
 
+const (
+	storeMinBackoff = 100 * time.Millisecond
+	storeMaxBackoff = 30 * time.Second
+)
+
 func NewStore(dir string) (*Store, error) {
 	for _, k := range []string{"workspaces", "cursors", "worktrees"} {
 		if err := os.MkdirAll(filepath.Join(dir, k), 0700); err != nil {
 			return nil, err
 		}
 	}
-	s := &Store{dir: dir, pending: map[string]storeOp{}}
-	s.idle = sync.NewCond(&s.mu)
-	return s, nil
+	return &Store{dir: dir, pending: map[string]storeOp{}, failed: map[string]storeOp{}, kick: make(chan struct{}, 1), settled: make(chan struct{}), flushMax: 5 * time.Second}, nil
 }
 
 func (s *Store) path(kind, id string) string {
@@ -56,38 +65,82 @@ func (s *Store) Delete(kind, id string) error {
 
 func (s *Store) Flush() {
 	s.mu.Lock()
-	for s.running {
-		s.idle.Wait()
+	if !s.running {
+		s.mu.Unlock()
+		return
 	}
+	if len(s.failed) > 0 {
+		s.retryAt = time.Now()
+	}
+	ch := s.settled
 	s.mu.Unlock()
+	s.wake()
+	t := time.NewTimer(s.flushMax)
+	defer t.Stop()
+	select {
+	case <-ch:
+	case <-t.C:
+		log.Printf("store: flush gave up after %v", s.flushMax)
+	}
+}
+
+func (s *Store) wake() {
+	select {
+	case s.kick <- struct{}{}:
+	default:
+	}
 }
 
 func (s *Store) enqueue(op storeOp) {
+	k := op.kind + "/" + op.id
 	s.mu.Lock()
-	s.pending[op.kind+"/"+op.id] = op
+	s.pending[k] = op
+	delete(s.failed, k)
 	if !s.running {
 		s.running = true
 		go s.run()
 	}
 	s.mu.Unlock()
+	s.wake()
 }
 
 func (s *Store) run() {
 	for {
 		s.mu.Lock()
-		if len(s.pending) == 0 {
-			s.running = false
-			s.idle.Broadcast()
-			s.mu.Unlock()
-			return
-		}
 		batch := s.pending
 		s.pending = map[string]storeOp{}
+		retrying := len(s.failed) > 0 && !time.Now().Before(s.retryAt)
+		if retrying {
+			for k, op := range s.failed {
+				batch[k] = op
+			}
+			s.failed = map[string]storeOp{}
+		}
+		if len(batch) == 0 {
+			close(s.settled)
+			s.settled = make(chan struct{})
+			if len(s.failed) == 0 {
+				s.running = false
+				s.mu.Unlock()
+				return
+			}
+			wait := time.Until(s.retryAt)
+			s.mu.Unlock()
+			t := time.NewTimer(wait)
+			select {
+			case <-t.C:
+			case <-s.kick:
+			}
+			t.Stop()
+			continue
+		}
 		s.mu.Unlock()
+		failed := map[string]storeOp{}
 		dirs := map[string]bool{}
-		for _, op := range batch {
+		for k, op := range batch {
 			if err := s.apply(op); err != nil {
 				s.fail(op, err)
+				failed[k] = op
 				continue
 			}
 			dirs[op.kind] = true
@@ -98,6 +151,20 @@ func (s *Store) run() {
 				d.Close()
 			}
 		}
+		s.mu.Lock()
+		for k, op := range failed {
+			if _, newer := s.pending[k]; !newer {
+				s.failed[k] = op
+			}
+		}
+		switch {
+		case len(failed) > 0 && (retrying || s.backoff == 0):
+			s.backoff = min(max(s.backoff*2, storeMinBackoff), storeMaxBackoff)
+			s.retryAt = time.Now().Add(s.backoff)
+		case len(s.failed) == 0:
+			s.backoff = 0
+		}
+		s.mu.Unlock()
 	}
 }
 

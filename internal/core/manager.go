@@ -173,12 +173,45 @@ func (m *Manager) Shutdown() {
 		}(id)
 	}
 	wg.Wait()
+	exited, unsub := m.Bus.Subscribe(Filter{Types: []string{"agent.exited"}}, 64)
+	defer unsub()
 	m.mu.Lock()
-	for _, l := range m.launches {
+	waiting := map[string]bool{}
+	for id, l := range m.launches {
 		l.kill()
+		waiting[id] = false
 	}
 	m.mu.Unlock()
+	m.waitLaunches(waiting, exited, 7*time.Second)
 	m.store.Flush()
+}
+
+func (m *Manager) waitLaunches(waiting map[string]bool, exited <-chan *Event, timeout time.Duration) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		m.mu.Lock()
+		for id, done := range waiting {
+			if c := m.cursors[id]; done && (c == nil || c.Status.Terminal()) {
+				delete(waiting, id)
+			}
+		}
+		m.mu.Unlock()
+		if len(waiting) == 0 {
+			return
+		}
+		select {
+		case e := <-exited:
+			if _, ok := waiting[e.Cursor]; ok {
+				waiting[e.Cursor] = true
+			}
+		case <-tick.C:
+		case <-deadline.C:
+			return
+		}
+	}
 }
 
 func (m *Manager) wsLock(id string) *sync.Mutex {

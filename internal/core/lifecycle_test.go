@@ -2,8 +2,12 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"os/exec"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -298,5 +302,43 @@ func TestProfileReservationConcurrent(t *testing.T) {
 	m.mu.Unlock()
 	if left != 0 {
 		t.Fatalf("%d leases leaked", left)
+	}
+}
+
+func TestShutdownWaitsForLaunchExitWrites(t *testing.T) {
+	m := newTestManager(t)
+	id := newCursor(t, m, "agent", "")
+	if err := m.setCursorStatus(id, CursorRunning, "", false); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sleep", "30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	m.launches[id] = &launchProc{cmd: cmd}
+	m.mu.Unlock()
+	go func() {
+		cmd.Wait()
+		m.mu.Lock()
+		delete(m.launches, id)
+		m.mu.Unlock()
+		time.Sleep(200 * time.Millisecond)
+		m.Bus.Publish("agent.exited", "", id, nil)
+		time.Sleep(200 * time.Millisecond)
+		m.Fail(id, "agent exited")
+	}()
+	m.Shutdown()
+	b, err := os.ReadFile(m.store.path("cursors", id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c Cursor
+	if err := json.Unmarshal(b, &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Status != CursorFailed {
+		t.Fatalf("persisted status %s after shutdown", c.Status)
 	}
 }
