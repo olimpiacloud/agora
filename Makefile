@@ -26,4 +26,4 @@ check:
 	go vet ./...
 	go test ./internal/... -count=1
 	cd web && bun install --frozen-lockfile && npx tsc --noEmit -p tsconfig.json
-	cd paseo-plugin && bun install --frozen-lockfile && bun run typecheck
+	cd paseo-plugin && bun install --frozen-lockfile && bun run typecheck && bun test

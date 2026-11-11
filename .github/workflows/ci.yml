@@ -97,6 +97,8 @@ jobs:
         working-directory: paseo-plugin
       - run: bun run typecheck
         working-directory: paseo-plugin
+      - run: bun test
+        working-directory: paseo-plugin
 
   scripts:
     name: scripts
