@@ -46,3 +46,11 @@ func TestDetachedViewerTakeLeavesNoLock(t *testing.T) {
 		t.Fatalf("take from a closed viewer left a lock: %+v", l)
 	}
 }
+
+func TestViewerButtons(t *testing.T) {
+	for in, want := range map[int]int{0: 1, 1: 2, 2: 3, 3: 8, 4: 9, 5: 0, -1: 0, 1000: 0} {
+		if got := btn(in); got != want {
+			t.Errorf("btn(%d) = %d, want %d", in, got, want)
+		}
+	}
+}
