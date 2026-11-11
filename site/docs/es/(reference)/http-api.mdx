@@ -10,7 +10,7 @@ El daemon sirve una API JSON bajo `/v1` en `127.0.0.1:7788`, además del dashboa
 
 ## Convenciones [#conventions]
 
-- **Auth:** `Authorization: Bearer <token>` en todos los endpoints salvo `GET /v1/health`. Los endpoints de streaming también aceptan `?token=`. Mirá [tokens](/security#tokens).
+- **Auth:** `Authorization: Bearer <token>` en todos los endpoints salvo `GET /v1/health`. Los endpoints de streaming también aceptan un token de viewer como `?token=`. Mirá [tokens](/security#tokens).
 - **Actuar como un cursor:** con el token de admin, mandá `X-Agora-Cursor: <cursor id>` para actuar como ese cursor.
 - **`self`:** en `/v1/cursors/{id}/...`, un token de cursor puede usar `self` como id.
 - **Errores:** `{"error": "..."}` con `400` (solicitud inválida), `401` (token faltante o inválido), `403` (no permitido), `404` (no encontrado), `409` (superficie bloqueada; el cuerpo incluye el `lock`) o `504` (timeout).
@@ -129,7 +129,7 @@ Cuerpo: `{"action": "...", ...}`. Con `observe: true`, las acciones que cambian 
 
 ## Streaming
 
-Estos aceptan un token de viewer, un token de cursor del mismo workspace (solo para mirar) o el token de admin, como header o `?token=`. `?mode=observation` baja el frame rate a 8 fps.
+Estos aceptan un token de viewer, un token de cursor del mismo workspace (solo para mirar) o el token de admin como header. Como `?token=` solo se aceptan tokens de viewer. `?mode=observation` baja el frame rate a 8 fps.
 
 | Método y ruta | Descripción |
 | --- | --- |

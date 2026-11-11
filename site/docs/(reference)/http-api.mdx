@@ -9,7 +9,7 @@ The daemon serves a JSON API under `/v1` on `127.0.0.1:7788`, plus the dashboard
 
 ## Conventions
 
-- **Auth:** `Authorization: Bearer <token>` on every endpoint except `GET /v1/health`. Streaming endpoints also accept `?token=`. See [tokens](/security#tokens).
+- **Auth:** `Authorization: Bearer <token>` on every endpoint except `GET /v1/health`. Streaming endpoints also accept a viewer token as `?token=`. See [tokens](/security#tokens).
 - **Acting as a cursor:** with the admin token, send `X-Agora-Cursor: <cursor id>` to act as that cursor.
 - **`self`:** in `/v1/cursors/{id}/...`, a cursor token can use `self` as the id.
 - **Errors:** `{"error": "..."}` with `400` (bad request), `401` (missing or invalid token), `403` (not allowed), `404` (not found), `409` (surface locked; the body includes the `lock`) or `504` (timeout).
@@ -128,7 +128,7 @@ Body: `{"action": "...", ...}`. With `observe: true`, actions that change the pa
 
 ## Streaming
 
-These accept a viewer token, a cursor token of the same workspace (watch only) or the admin token, as a header or `?token=`. `?mode=observation` lowers the frame rate to 8 fps.
+These accept a viewer token, a cursor token of the same workspace (watch only) or the admin token as a header. Only viewer tokens are accepted as `?token=`. `?mode=observation` lowers the frame rate to 8 fps.
 
 | Method and path | Description |
 | --- | --- |

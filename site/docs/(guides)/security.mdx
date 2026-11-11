@@ -17,7 +17,7 @@ Agora controls a real computer with logged-in browser sessions. Treat access to 
 
 ## Tokens
 
-Every API call needs `Authorization: Bearer <token>`. Streaming endpoints also accept `?token=` because browsers cannot set headers on WebSocket and `<img>` requests.
+Every API call needs `Authorization: Bearer <token>`. Streaming endpoints also accept a viewer token as `?token=` because browsers cannot set headers on WebSocket and `<img>` requests. Admin and cursor tokens are refused in the query string so they never end up in proxy logs or browser history.
 
 | Token | Scope | Where it comes from |
 | --- | --- | --- |
