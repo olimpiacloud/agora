@@ -59,6 +59,8 @@ type Manager struct {
 	launches  map[string]*launchProc
 	cpuPrev   map[string]cpuSample
 	usage     map[string]*WorkspaceUsage
+	profiles  map[string]*profileLease
+	portsHeld map[int]bool
 	started   time.Time
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -93,7 +95,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	m := &Manager{cfg: cfg, store: st, Bus: NewBus(filepath.Join(cfg.Home, "events"), 4096), ws: map[string]*Workspace{}, rt: map[string]*Runtime{}, wsLocks: map[string]*sync.Mutex{}, cursors: map[string]*Cursor{}, tokens: map[string]string{}, worktrees: map[string]*Worktree{}, mail: map[string][]Message{}, launches: map[string]*launchProc{}, cpuPrev: map[string]cpuSample{}, usage: map[string]*WorkspaceUsage{}, started: time.Now()}
+	m := &Manager{cfg: cfg, store: st, Bus: NewBus(filepath.Join(cfg.Home, "events"), 4096), ws: map[string]*Workspace{}, rt: map[string]*Runtime{}, wsLocks: map[string]*sync.Mutex{}, cursors: map[string]*Cursor{}, tokens: map[string]string{}, worktrees: map[string]*Worktree{}, mail: map[string][]Message{}, launches: map[string]*launchProc{}, cpuPrev: map[string]cpuSample{}, usage: map[string]*WorkspaceUsage{}, profiles: map[string]*profileLease{}, portsHeld: map[int]bool{}, started: time.Now()}
 	m.Arb = NewArbiter(func(ws string, l Lock, by string) {
 		m.Bus.Publish("control.lost", ws, l.Holder, map[string]any{"surface": l.Surface, "by": by})
 	})

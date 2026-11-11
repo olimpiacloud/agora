@@ -164,28 +164,21 @@ func (m *Manager) checkpointLocked(ctx context.Context, id, reason string, snaps
 	cp := &Checkpoint{ID: NewID("ckpt"), Time: time.Now().UTC(), Reason: reason, Layout: w.Config.Layout, Width: w.Config.Width, Height: w.Config.Height, Apps: []AppSpec{}, Tabs: []TabRecord{}}
 	r := m.runtime(id)
 	if r != nil {
-		r.brMu.Lock()
-		b := r.browser
-		r.brMu.Unlock()
-		if b != nil {
-			cp.Tabs = r.tabRecordsFrom(b)
-		} else {
-			r.mu.Lock()
-			cp.Tabs = append(cp.Tabs, r.lastTabs...)
-			r.mu.Unlock()
-		}
+		cp.Tabs = r.currentTabs()
 		r.mu.Lock()
 		for _, p := range r.procs {
 			if p.App.Restore {
 				cp.Apps = append(cp.Apps, p.App)
 			}
 		}
-		if r.display != nil {
-			if ws, err := r.display.Windows(); err == nil {
+		frozen := r.frozen
+		d := r.display
+		r.mu.Unlock()
+		if d != nil && !frozen {
+			if ws, err := d.Windows(); err == nil {
 				cp.Windows = len(ws)
 			}
 		}
-		r.mu.Unlock()
 		if snapshot {
 			dst := filepath.Join(m.cfg.Home, "checkpoints", id, cp.ID)
 			if err := m.snapshotProfile(r, w.Config.Profile, dst); err != nil {
@@ -221,7 +214,13 @@ func (m *Manager) snapshotProfile(r *Runtime, profile, dst string) error {
 		return nil
 	}
 	var pids []int
+	frozen := false
 	if r != nil {
+		r.mu.Lock()
+		frozen = r.frozen
+		r.mu.Unlock()
+	}
+	if r != nil && !frozen {
 		r.brMu.Lock()
 		if r.browser != nil {
 			pids = Descendants([]int{r.browser.Pid()})
@@ -250,22 +249,54 @@ func (m *Manager) Suspend(ctx context.Context, id, reason string) error {
 	return m.suspendLocked(ctx, id, reason)
 }
 
+func (m *Manager) suspendIfIdle(ctx context.Context, id string, r *Runtime, threshold time.Duration, reason string) error {
+	defer func() {
+		r.mu.Lock()
+		r.suspending = false
+		r.mu.Unlock()
+	}()
+	l := m.wsLock(id)
+	l.Lock()
+	defer l.Unlock()
+	if m.runtime(id) != r {
+		return nil
+	}
+	r.mu.Lock()
+	recent := time.Since(r.activity) < threshold
+	r.mu.Unlock()
+	if recent {
+		return nil
+	}
+	return m.suspendLocked(ctx, id, reason)
+}
+
+func (r *Runtime) claimSuspend() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.suspending || r.closing {
+		return false
+	}
+	r.suspending = true
+	return true
+}
+
 func (m *Manager) suspendLocked(ctx context.Context, id, reason string) error {
+	w, err := m.GetWorkspace(id)
+	if err != nil {
+		return err
+	}
+	if w.State == StateDestroyed {
+		return fmt.Errorf("%w: workspace is destroyed", ErrState)
+	}
 	r := m.runtime(id)
 	if r == nil {
-		w, err := m.GetWorkspace(id)
-		if err != nil {
-			return err
-		}
 		if w.State == StateCreated {
 			return nil
 		}
 		m.setState(id, StateSuspended, reason)
 		return nil
 	}
-	if r.frozen {
-		r.thaw()
-	}
+	r.thaw()
 	if _, err := m.checkpointLocked(ctx, id, "suspend:"+reason, false); err != nil {
 		return err
 	}
@@ -297,6 +328,26 @@ func (m *Manager) Freeze(ctx context.Context, id string) error {
 	if r == nil {
 		return ErrState
 	}
+	return m.freezeLocked(id, r)
+}
+
+func (m *Manager) freezeIfIdle(id string, r *Runtime, threshold time.Duration) error {
+	l := m.wsLock(id)
+	l.Lock()
+	defer l.Unlock()
+	if m.runtime(id) != r {
+		return nil
+	}
+	r.mu.Lock()
+	skip := r.closing || !r.idle || time.Since(r.activity) < threshold
+	r.mu.Unlock()
+	if skip {
+		return nil
+	}
+	return m.freezeLocked(id, r)
+}
+
+func (m *Manager) freezeLocked(id string, r *Runtime) error {
 	if err := r.freeze(); err != nil {
 		return err
 	}
@@ -317,8 +368,18 @@ func (m *Manager) Fork(ctx context.Context, id, name string) (*Workspace, error)
 	nid := NewID("ws")
 	cfg := src.Config
 	cfg.Profile = nid
+	l := m.wsLock(id)
+	l.Lock()
 	r := m.runtime(id)
-	if err := m.snapshotProfile(r, src.Config.Profile, m.profileDir(nid)); err != nil {
+	var tabs []TabRecord
+	if r != nil {
+		for _, t := range r.currentTabs() {
+			tabs = append(tabs, TabRecord{URL: t.URL, Title: t.Title})
+		}
+	}
+	err = m.snapshotProfile(r, src.Config.Profile, m.profileDir(nid))
+	l.Unlock()
+	if err != nil {
 		return nil, err
 	}
 	m.chownApps(m.profileDir(nid))
@@ -332,17 +393,7 @@ func (m *Manager) Fork(ctx context.Context, id, name string) (*Workspace, error)
 	}
 	now := time.Now().UTC()
 	w := &Workspace{ID: nid, Name: name, State: StateCreated, Config: cfg, Owner: src.Owner, ForkOf: id, Created: now, Updated: now, LastActive: now}
-	var tabs []TabRecord
-	if r != nil {
-		r.brMu.Lock()
-		b := r.browser
-		r.brMu.Unlock()
-		if b != nil {
-			for _, t := range r.tabRecordsFrom(b) {
-				tabs = append(tabs, TabRecord{URL: t.URL, Title: t.Title})
-			}
-		}
-	} else if src.Checkpoint != nil {
+	if r == nil && src.Checkpoint != nil {
 		for _, t := range src.Checkpoint.Tabs {
 			tabs = append(tabs, TabRecord{URL: t.URL, Title: t.Title})
 		}
@@ -460,10 +511,13 @@ func (m *Manager) SetLayout(ctx context.Context, id, layout string) error {
 	if err != nil {
 		return err
 	}
-	if r.wm == nil {
+	r.mu.Lock()
+	wm := r.wm
+	r.mu.Unlock()
+	if wm == nil {
 		return ErrState
 	}
-	r.wm.SetLayout(x11Layout(layout))
+	wm.SetLayout(x11Layout(layout))
 	m.mu.Lock()
 	if ws := m.ws[id]; ws != nil {
 		ws.Config.Layout = layout
@@ -498,6 +552,12 @@ func (r *Runtime) launch(spec AppSpec) (*Proc, error) {
 	}
 	if spec.ID == "" {
 		spec.ID = NewID("app")
+	}
+	r.mu.Lock()
+	closing := r.closing
+	r.mu.Unlock()
+	if closing {
+		return nil, fmt.Errorf("%w: workspace is stopping", ErrState)
 	}
 	cmd := exec.Command(spec.Command, spec.Args...)
 	attr := &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
@@ -534,6 +594,16 @@ func (r *Runtime) launch(spec AppSpec) (*Proc, error) {
 	}
 	p := &Proc{Pid: cmd.Process.Pid, App: spec, Started: time.Now(), cmd: cmd, done: make(chan struct{})}
 	r.mu.Lock()
+	if r.closing {
+		r.mu.Unlock()
+		syscall.Kill(-p.Pid, syscall.SIGKILL)
+		cmd.Process.Kill()
+		cmd.Wait()
+		if logf != nil {
+			logf.Close()
+		}
+		return nil, fmt.Errorf("%w: workspace is stopping", ErrState)
+	}
 	r.procs[p.Pid] = p
 	r.mu.Unlock()
 	r.m.Bus.Publish("process.started", r.id, spec.Owner, map[string]any{"pid": p.Pid, "command": spec.Command, "app": spec.ID})

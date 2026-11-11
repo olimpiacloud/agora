@@ -337,23 +337,26 @@ func (m *Manager) WindowOp(ctx context.Context, ws, cursorID string, win uint32,
 		return err
 	}
 	r.touch()
-	if r.wm == nil {
+	r.mu.Lock()
+	wm := r.wm
+	r.mu.Unlock()
+	if wm == nil {
 		return ErrState
 	}
 	switch req.Action {
 	case "raise", "focus":
-		r.wm.Raise(win)
+		wm.Raise(win)
 		if c != nil {
 			if s, err := r.seatFor(c.ID); err == nil {
 				s.Focus(xwin(win))
 			}
 		}
 	case "move", "resize":
-		r.wm.MoveResize(win, req.X, req.Y, req.Width, req.Height)
+		wm.MoveResize(win, req.X, req.Y, req.Width, req.Height)
 	case "tile", "release":
-		r.wm.Release(win)
+		wm.Release(win)
 	case "close":
-		r.wm.CloseWindow(win)
+		wm.CloseWindow(win)
 	default:
 		return fmt.Errorf("unknown window action %q", req.Action)
 	}

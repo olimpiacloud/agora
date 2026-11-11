@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -41,6 +42,10 @@ func (m *Manager) AttachViewer(ctx context.Context, ws, id string, mode stream.M
 	}
 	v := &Viewer{ID: id, Workspace: ws, Control: control, Mode: mode, sink: sink, send: send, r: r, m: m, held: map[uint32]bool{}, buttons: map[int]bool{}}
 	r.mu.Lock()
+	if r.closing || r.engine != eng {
+		r.mu.Unlock()
+		return nil, fmt.Errorf("%w: workspace is stopping", ErrState)
+	}
 	r.viewers[id] = v
 	n := len(r.viewers)
 	r.mu.Unlock()

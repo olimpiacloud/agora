@@ -35,33 +35,34 @@ type seatLease struct {
 }
 
 type Runtime struct {
-	m         *Manager
-	id        string
-	mu        sync.Mutex
-	display   *x11.Display
-	wm        *x11.WM
-	clip      *x11.Clipboard
-	brMu      sync.Mutex
-	browser   *browser.Browser
-	brCrashes int
-	noTabs    time.Time
-	human     time.Time
-	reaping   bool
-	engine    *stream.Engine
-	core      *x11.Seat
-	seats     map[string]*seatLease
-	procs     map[int]*Proc
-	frozen    bool
-	viewers   map[string]*Viewer
-	activity  time.Time
-	started   time.Time
-	tabOwner  map[string]string
-	lastTabs  []TabRecord
-	idle      bool
-	closing   bool
-	restored  bool
-	lastObs   map[string]string
-	offsets   map[string][3]int
+	m          *Manager
+	id         string
+	mu         sync.Mutex
+	display    *x11.Display
+	wm         *x11.WM
+	clip       *x11.Clipboard
+	brMu       sync.Mutex
+	browser    *browser.Browser
+	brCrashes  int
+	noTabs     time.Time
+	human      time.Time
+	reaping    bool
+	engine     *stream.Engine
+	core       *x11.Seat
+	seats      map[string]*seatLease
+	procs      map[int]*Proc
+	frozen     bool
+	viewers    map[string]*Viewer
+	activity   time.Time
+	started    time.Time
+	tabOwner   map[string]string
+	lastTabs   []TabRecord
+	idle       bool
+	closing    bool
+	suspending bool
+	restored   bool
+	lastObs    map[string]string
+	offsets    map[string][3]int
 }
 
 func (m *Manager) runtime(id string) *Runtime {
@@ -84,7 +85,7 @@ func (r *Runtime) touch() {
 func (m *Manager) setState(id string, st WSState, reason string) {
 	m.mu.Lock()
 	w := m.ws[id]
-	if w == nil || w.State == st {
+	if w == nil || w.State == st || w.State == StateDestroyed {
 		m.mu.Unlock()
 		return
 	}
@@ -130,17 +131,21 @@ func (m *Manager) ensureRuntimeLocked(ctx context.Context, id string, display bo
 			r.lastTabs = w.Checkpoint.Tabs
 		}
 	}
-	if r.frozen {
-		if err := r.thaw(); err != nil {
-			return nil, err
-		}
+	if err := r.thaw(); err != nil {
+		return nil, err
 	}
-	if display && !cfg.Headless && r.display == nil {
+	r.mu.Lock()
+	d := r.display
+	r.mu.Unlock()
+	if display && !cfg.Headless && d == nil {
 		if err := r.startDisplay(ctx, cfg); err != nil {
 			return nil, err
 		}
+		r.mu.Lock()
+		d = r.display
+		r.mu.Unlock()
 	}
-	if !r.restored && (r.display != nil || cfg.Headless) {
+	if !r.restored && (d != nil || cfg.Headless) {
 		r.restored = true
 		m.mu.Lock()
 		cp := w.Checkpoint
@@ -295,8 +300,11 @@ func (r *Runtime) appEnv() []string {
 		"XDG_RUNTIME_DIR=" + filepath.Join(home, ".xdg-run"),
 		"AGORA_WORKSPACE=" + r.id,
 	}
-	if r.display != nil {
-		env = append(env, r.display.Env()...)
+	r.mu.Lock()
+	d := r.display
+	r.mu.Unlock()
+	if d != nil {
+		env = append(env, d.Env()...)
 	}
 	return env
 }
@@ -312,21 +320,35 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 			return r.browser, nil
 		}
 	}
+	r.mu.Lock()
+	closing := r.closing
+	d := r.display
+	r.mu.Unlock()
+	if closing {
+		return nil, fmt.Errorf("%w: workspace is stopping", ErrState)
+	}
 	m := r.m
 	m.mu.Lock()
 	w := m.ws[r.id]
 	cfg := w.Config
 	m.mu.Unlock()
-	if !cfg.Headless && r.display == nil {
+	if !cfg.Headless && d == nil {
 		return nil, errors.New("workspace display not running")
 	}
 	profile := cfg.Profile
 	if profile == "" {
 		profile = r.id
 	}
-	if other := m.profileHolder(profile, r.id); other != "" {
+	lease, other := m.reserveProfile(profile, r.id)
+	if other != "" {
 		return nil, fmt.Errorf("profile %q is open in workspace %s; fork the workspace or suspend it first", profile, other)
 	}
+	launched := false
+	defer func() {
+		if !launched {
+			m.releaseProfile(profile, lease)
+		}
+	}()
 	pdir := m.profileDir(profile)
 	dl := filepath.Join(m.wsDir(r.id), "home", "Downloads")
 	sw, sh := cfg.Width, cfg.Height
@@ -352,6 +374,10 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 	if err != nil {
 		return nil, err
 	}
+	launched = true
+	m.mu.Lock()
+	lease.b = b
+	m.mu.Unlock()
 	b.OnEvent = func(kind string, data map[string]any) {
 		cur := ""
 		if t, ok := data["target"].(string); ok {
@@ -376,7 +402,7 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 	}
 	r.browser = b
 	m.Bus.Publish("browser.started", r.id, "", map[string]any{"pid": b.Pid(), "profile": profile})
-	go r.watchBrowser(b)
+	go r.watchBrowser(b, profile, lease)
 	if len(restore) > 0 {
 		go r.restoreTabs(b, restore)
 	}
@@ -450,8 +476,9 @@ func (r *Runtime) restoreTabs(b *browser.Browser, tabs []TabRecord) {
 	r.mu.Unlock()
 }
 
-func (r *Runtime) watchBrowser(b *browser.Browser) {
+func (r *Runtime) watchBrowser(b *browser.Browser, profile string, lease *profileLease) {
 	<-b.Exited()
+	r.m.releaseProfile(profile, lease)
 	r.brMu.Lock()
 	current := r.browser == b
 	if current {
@@ -473,6 +500,28 @@ func (r *Runtime) tabRecordsFrom(b *browser.Browser) []TabRecord {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	b.Refresh(ctx)
 	cancel()
+	return r.cachedTabRecords(b)
+}
+
+func (r *Runtime) currentTabs() []TabRecord {
+	r.mu.Lock()
+	frozen := r.frozen
+	last := append([]TabRecord{}, r.lastTabs...)
+	r.mu.Unlock()
+	r.brMu.Lock()
+	b := r.browser
+	r.brMu.Unlock()
+	switch {
+	case b == nil:
+		return last
+	case frozen:
+		return r.cachedTabRecords(b)
+	default:
+		return r.tabRecordsFrom(b)
+	}
+}
+
+func (r *Runtime) cachedTabRecords(b *browser.Browser) []TabRecord {
 	out := []TabRecord{}
 	for _, t := range b.Targets() {
 		r.mu.Lock()
@@ -484,28 +533,38 @@ func (r *Runtime) tabRecordsFrom(b *browser.Browser) []TabRecord {
 	return out
 }
 
-func (m *Manager) profileHolder(profile, except string) string {
+type profileLease struct {
+	ws string
+	b  *browser.Browser
+}
+
+func (m *Manager) reserveProfile(profile, ws string) (*profileLease, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for id, r := range m.rt {
-		if id == except {
-			continue
-		}
-		w := m.ws[id]
-		p := w.Config.Profile
-		if p == "" {
-			p = id
-		}
-		if p == profile {
-			r.brMu.Lock()
-			running := r.browser != nil
-			r.brMu.Unlock()
-			if running {
-				return id
+	if l := m.profiles[profile]; l != nil && l.ws != ws {
+		running := l.b == nil
+		if l.b != nil {
+			select {
+			case <-l.b.Exited():
+			default:
+				running = true
 			}
 		}
+		if running {
+			return nil, l.ws
+		}
 	}
-	return ""
+	l := &profileLease{ws: ws}
+	m.profiles[profile] = l
+	return l, ""
+}
+
+func (m *Manager) releaseProfile(profile string, l *profileLease) {
+	m.mu.Lock()
+	if m.profiles[profile] == l {
+		delete(m.profiles, profile)
+	}
+	m.mu.Unlock()
 }
 
 func (r *Runtime) cgroupFD() (int, func()) {

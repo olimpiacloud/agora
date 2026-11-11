@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -32,19 +33,38 @@ func portsFree(base, n int) bool {
 	return true
 }
 
-func (m *Manager) allocPorts(n int) int {
-	m.mu.Lock()
-	used := map[int]bool{}
-	for _, w := range m.worktrees {
-		used[w.PortBase] = true
-	}
-	m.mu.Unlock()
+func (m *Manager) allocPorts(n int) (int, error) {
 	for base := 21000; base < 40000; base += 20 {
-		if !used[base] && portsFree(base, n) {
-			return base
+		if !m.holdPorts(base) {
+			continue
+		}
+		if portsFree(base, n) {
+			return base, nil
+		}
+		m.releasePorts(base)
+	}
+	return 0, errors.New("no free port block for the worktree")
+}
+
+func (m *Manager) holdPorts(base int) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.portsHeld[base] {
+		return false
+	}
+	for _, w := range m.worktrees {
+		if w.PortBase == base {
+			return false
 		}
 	}
-	return 0
+	m.portsHeld[base] = true
+	return true
+}
+
+func (m *Manager) releasePorts(base int) {
+	m.mu.Lock()
+	delete(m.portsHeld, base)
+	m.mu.Unlock()
 }
 
 func (m *Manager) CreateWorktree(ctx context.Context, req WorktreeReq, cursor, ws string) (*Worktree, error) {
@@ -73,17 +93,23 @@ func (m *Manager) CreateWorktree(ctx context.Context, req WorktreeReq, cursor, w
 	if req.Ports == 0 {
 		req.Ports = 10
 	}
+	base, err := m.allocPorts(req.Ports)
+	if err != nil {
+		return nil, err
+	}
 	path := filepath.Join(m.cfg.Home, "worktrees", id)
 	args := []string{"-C", repo, "worktree", "add", "-b", req.Branch, path, req.Base}
 	if exec.CommandContext(ctx, "git", "-C", repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+req.Branch).Run() == nil {
 		args = []string{"-C", repo, "worktree", "add", path, req.Branch}
 	}
 	if out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput(); err != nil {
+		m.releasePorts(base)
 		return nil, fmt.Errorf("git worktree add: %v: %s", err, strings.TrimSpace(string(out)))
 	}
-	wt := &Worktree{ID: id, Repo: repo, Path: path, Branch: req.Branch, Base: req.Base, Cursor: cursor, Workspace: ws, PortBase: m.allocPorts(req.Ports), Ports: req.Ports, Created: time.Now().UTC()}
+	wt := &Worktree{ID: id, Repo: repo, Path: path, Branch: req.Branch, Base: req.Base, Cursor: cursor, Workspace: ws, PortBase: base, Ports: req.Ports, Created: time.Now().UTC()}
 	m.mu.Lock()
 	m.worktrees[id] = wt
+	delete(m.portsHeld, base)
 	m.store.Put("worktrees", id, wt)
 	m.mu.Unlock()
 	m.Bus.Publish("worktree.created", ws, cursor, map[string]any{"id": id, "branch": wt.Branch, "path": path, "port_base": wt.PortBase})

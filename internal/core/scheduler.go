@@ -86,7 +86,7 @@ func (m *Manager) lifecycleTick() {
 		}
 		if frozen {
 			if suspendAfter > 0 && idleFor > suspendAfter {
-				go m.Suspend(context.Background(), it.w.ID, "idle")
+				m.suspendIdle(it.w.ID, r, suspendAfter, "idle")
 			}
 			continue
 		}
@@ -94,28 +94,51 @@ func (m *Manager) lifecycleTick() {
 		m.reap(it.w.ID, r)
 		if viewers > 0 {
 			if suspendAfter > 0 && idleFor > suspendAfter {
-				go m.Suspend(context.Background(), it.w.ID, "idle")
+				m.suspendIdle(it.w.ID, r, suspendAfter, "idle")
 			}
 			continue
 		}
 		if m.hasActiveAgents(it.w.ID) && idleFor < 30*time.Minute {
 			continue
 		}
-		if !idle && it.w.Config.IdleAfter.Duration > 0 && idleFor > it.w.Config.IdleAfter.Duration {
-			r.mu.Lock()
-			r.idle = true
-			r.mu.Unlock()
-			r.releaseSeats(0)
-			m.setState(it.w.ID, StateIdle, "no activity")
-			if it.w.Config.FreezeOnIdle {
-				go m.Freeze(context.Background(), it.w.ID)
+		if idleAfter := it.w.Config.IdleAfter.Duration; !idle && idleAfter > 0 && idleFor > idleAfter {
+			if m.markIdle(it.w.ID, r, idleAfter) && it.w.Config.FreezeOnIdle {
+				go m.freezeIfIdle(it.w.ID, r, idleAfter)
 			}
 			continue
 		}
 		if suspendAfter > 0 && idleFor > suspendAfter {
-			go m.Suspend(context.Background(), it.w.ID, "idle")
+			m.suspendIdle(it.w.ID, r, suspendAfter, "idle")
 		}
 	}
+}
+
+func (m *Manager) markIdle(id string, r *Runtime, threshold time.Duration) bool {
+	r.mu.Lock()
+	flip := !r.idle && !r.closing && time.Since(r.activity) > threshold
+	if flip {
+		r.idle = true
+	}
+	r.mu.Unlock()
+	if !flip {
+		return false
+	}
+	r.releaseSeats(0)
+	m.setState(id, StateIdle, "no activity")
+	r.mu.Lock()
+	still := r.idle
+	r.mu.Unlock()
+	if !still {
+		m.setState(id, StateActive, "activity")
+	}
+	return still
+}
+
+func (m *Manager) suspendIdle(id string, r *Runtime, threshold time.Duration, reason string) {
+	if !r.claimSuspend() {
+		return
+	}
+	go m.suspendIfIdle(context.Background(), id, r, threshold, reason)
 }
 
 func (m *Manager) reap(id string, r *Runtime) {
@@ -481,9 +504,9 @@ func (m *Manager) relieve(id string, r *Runtime, hard bool) {
 			}
 		}
 	}
-	if hard {
+	if hard && r.claimSuspend() {
 		m.Bus.Publish("scheduler.suspend", id, "", map[string]any{"reason": "memory budget exceeded by >25%"})
-		m.Suspend(context.Background(), id, "memory budget")
+		m.suspendIfIdle(context.Background(), id, r, 0, "memory budget")
 	}
 }
 
