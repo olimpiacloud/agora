@@ -530,6 +530,8 @@ func (r *Runtime) tabRecordsFrom(b *browser.Browser) []TabRecord {
 	return r.cachedTabRecords(b)
 }
 
+var liveTabRecords = (*Runtime).tabRecordsFrom
+
 func (r *Runtime) currentTabs() []TabRecord {
 	r.mu.Lock()
 	frozen := r.frozen
@@ -544,7 +546,7 @@ func (r *Runtime) currentTabs() []TabRecord {
 	case frozen:
 		return r.cachedTabRecords(b)
 	default:
-		return r.tabRecordsFrom(b)
+		return liveTabRecords(r, b)
 	}
 }
 

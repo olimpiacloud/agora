@@ -1,16 +1,20 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/olimpiacloud/agora/internal/browser"
 	"github.com/olimpiacloud/agora/internal/stream"
 )
 
@@ -340,5 +344,100 @@ func TestShutdownWaitsForLaunchExitWrites(t *testing.T) {
 	}
 	if c.Status != CursorFailed {
 		t.Fatalf("persisted status %s after shutdown", c.Status)
+	}
+}
+
+func procState(t *testing.T, pid int) byte {
+	t.Helper()
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := bytes.LastIndexByte(b, ')')
+	if i < 0 || i+2 >= len(b) {
+		t.Fatalf("bad stat %q", b)
+	}
+	return b[i+2]
+}
+
+func TestFrozenRuntimeWithBrowserSkipsCDP(t *testing.T) {
+	m := newTestManager(t)
+	id, r := newTestRuntime(t, m)
+	orig := liveTabRecords
+	var calls atomic.Int32
+	liveTabRecords = func(*Runtime, *browser.Browser) []TabRecord {
+		calls.Add(1)
+		return nil
+	}
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := cmd.Process.Pid
+	t.Cleanup(func() {
+		liveTabRecords = orig
+		r.brMu.Lock()
+		r.browser = nil
+		r.brMu.Unlock()
+		r.mu.Lock()
+		delete(r.procs, pid)
+		r.mu.Unlock()
+		cmd.Process.Kill()
+		cmd.Wait()
+	})
+	if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; procState(t, pid) != 'T'; i++ {
+		if i > 200 {
+			t.Fatal("process did not stop")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	r.mu.Lock()
+	r.procs[pid] = &Proc{Pid: pid, cmd: cmd, done: make(chan struct{})}
+	r.frozen = true
+	r.mu.Unlock()
+	r.brMu.Lock()
+	r.browser = &browser.Browser{}
+	r.brMu.Unlock()
+	run := func(name string, f func() error) {
+		done := make(chan error, 1)
+		go func() { done <- f() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s of frozen runtime hung", name)
+		}
+	}
+	run("checkpoint", func() error {
+		_, err := m.Checkpoint(context.Background(), id, "test", true)
+		return err
+	})
+	run("fork", func() error {
+		_, err := m.Fork(context.Background(), id, "")
+		return err
+	})
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("CDP tab refresh called %d times on a frozen runtime", n)
+	}
+	if st := procState(t, pid); st != 'T' {
+		t.Fatalf("frozen process state %c, SIGCONT was sent", st)
+	}
+	r.mu.Lock()
+	frozen := r.frozen
+	r.mu.Unlock()
+	if !frozen {
+		t.Fatal("runtime thawed")
+	}
+	r.mu.Lock()
+	r.frozen = false
+	r.mu.Unlock()
+	r.currentTabs()
+	if calls.Load() != 1 {
+		t.Fatal("live tab refresh not used for a running runtime")
 	}
 }
