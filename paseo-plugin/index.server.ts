@@ -1,5 +1,5 @@
 import type { PluginHookContext, PluginServerContext } from "@getpaseo/plugin/server";
-import { agentCursor, bytes, call, AGORA_BIN, linkedWorkspace, nameFromCwd, reconcileAgentCursors, releaseAgentCursor } from "./server/agora";
+import { agentCursor, bytes, call, AGORA_BIN, linkedWorkspace, nameFromCwd, reconcileAgentCursors, reconcileWorkspaces, releaseAgentCursor, releasePaseoWorkspace } from "./server/agora";
 import { control, ensureWorkspace, getShot, listWorkspaces, live, liveInput, resolveWorkspace } from "./shared/agora";
 import { closeAll, pollLive, sendLiveInput, wakeHubs } from "./server/live";
 
@@ -66,8 +66,13 @@ export default function contribute(server: PluginServerContext) {
 
   const reconcile = (paseo: PluginHookContext["paseo"]) => {
     reconcileAgentCursors(paseo)
-      .then((n) => n && console.log(`agora: removed ${n} cursors of closed or archived Paseo agents`))
-      .catch((e) => console.error("agora: could not reconcile cursors:", errText(e)));
+      .then(async (n) => {
+        if (n === null) return;
+        if (n) console.log(`agora: removed ${n} cursors of closed or archived Paseo agents`);
+        const w = await reconcileWorkspaces(paseo);
+        if (w) console.log(`agora: removed ${w} workspaces of archived Paseo workspaces`);
+      })
+      .catch((e) => console.error("agora: could not reconcile:", errText(e)));
   };
 
   server.addHook("agent.open.before", async ({ request }, { paseo }) => {
@@ -109,6 +114,14 @@ export default function contribute(server: PluginServerContext) {
   };
   server.addHook("agent.close.after", release);
   server.addHook("agent.archive.after", release);
+  server.addHook("workspace.archive.after", async ({ workspace }) => {
+    try {
+      const n = await releasePaseoWorkspace(workspace.id);
+      if (n) console.log(`agora: removed ${n} workspaces of archived Paseo workspace ${workspace.id}`);
+    } catch (e) {
+      console.error("agora: could not release workspace:", errText(e));
+    }
+  });
 
   return () => closeAll();
 }

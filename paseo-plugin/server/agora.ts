@@ -2,6 +2,7 @@ import type { PluginHookContext } from "@getpaseo/plugin/server";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { idleWorkspace, orphanWorkspaces, type AgoraWorkspace } from "./cleanup";
 
 const URL_BASE = process.env.AGORA_URL || "http://127.0.0.1:7788";
 const HOME = process.env.AGORA_HOME || "/var/lib/agora";
@@ -174,11 +175,65 @@ export function nameFromCwd(cwd: string): string {
   return basename(cwd) || "paseo";
 }
 
+async function retireWorkspace(w: AgoraWorkspace): Promise<void> {
+  const purge = w.state === "created" ? "?purge=1" : "";
+  await call("DELETE", `/v1/workspaces/${encodeURIComponent(w.id)}${purge}`);
+}
+
+function forgetWorkspace(paseoWorkspaceId: string) {
+  updateState((s) => {
+    delete s.workspaces[paseoWorkspaceId];
+  });
+}
+
+export async function releasePaseoWorkspace(paseoWorkspaceId: string): Promise<number> {
+  return serialize(`workspace:${paseoWorkspaceId}`, async () => {
+    const all: AgoraWorkspace[] = await call("GET", "/v1/workspaces");
+    let n = 0;
+    for (const w of all) {
+      if (w.labels?.paseo_workspace !== paseoWorkspaceId || !idleWorkspace(w)) continue;
+      await retireWorkspace(w);
+      n++;
+    }
+    forgetWorkspace(paseoWorkspaceId);
+    return n;
+  });
+}
+
+async function livePaseoWorkspaces(paseo: PluginHookContext["paseo"]): Promise<Set<string>> {
+  const live = new Set<string>();
+  let cursor: string | undefined;
+  for (let i = 0; i < 50; i++) {
+    const r = await paseo.workspaces.list({ filter: { includeBackground: true, includeInternal: true }, page: { limit: 200, cursor } });
+    for (const w of r.entries) live.add(w.id);
+    if (!r.pageInfo?.hasMore || !r.pageInfo.nextCursor) return live;
+    cursor = r.pageInfo.nextCursor;
+  }
+  throw new Error("too many Paseo workspace pages");
+}
+
+export async function reconcileWorkspaces(paseo: PluginHookContext["paseo"]): Promise<number> {
+  const live = await livePaseoWorkspaces(paseo);
+  const all: AgoraWorkspace[] = await call("GET", "/v1/workspaces");
+  let n = 0;
+  for (const w of orphanWorkspaces(all, live)) {
+    const p = w.labels!.paseo_workspace;
+    await serialize(`workspace:${p}`, async () => {
+      await retireWorkspace(w);
+      forgetWorkspace(p);
+    }).then(
+      () => n++,
+      () => {},
+    );
+  }
+  return n;
+}
+
 const RECONCILE_EVERY = 10 * 60 * 1000;
 let reconciledAt = 0;
 
-export async function reconcileAgentCursors(paseo: PluginHookContext["paseo"]): Promise<number> {
-  if (Date.now() - reconciledAt < RECONCILE_EVERY) return 0;
+export async function reconcileAgentCursors(paseo: PluginHookContext["paseo"]): Promise<number | null> {
+  if (Date.now() - reconciledAt < RECONCILE_EVERY) return null;
   reconciledAt = Date.now();
   const cursors: any[] = await call("GET", "/v1/cursors?active=1");
   const ids = new Set<string>(Object.keys(loadState().agents));
