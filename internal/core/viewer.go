@@ -220,13 +220,32 @@ func (v *Viewer) Input(raw []byte) {
 		eng.Interact()
 	}
 	v.r.mu.Unlock()
+	gone := func() bool {
+		v.mu.Lock()
+		closed := v.closed
+		v.mu.Unlock()
+		v.r.mu.Lock()
+		attached := v.r.viewers[v.ID] == v
+		v.r.mu.Unlock()
+		return closed || !attached
+	}
 	switch msg.T {
 	case "take":
+		if gone() {
+			return
+		}
 		if _, err := m.Arb.Acquire(v.Workspace, "workspace", "human:"+v.ID, PrioHuman, 0, "human takeover"); err == nil {
+			if gone() {
+				m.Arb.Release(v.Workspace, "workspace", "human:"+v.ID)
+				return
+			}
 			m.Bus.Publish("control.taken", v.Workspace, "", map[string]any{"viewer": v.ID})
 		}
 		return
 	case "release":
+		if gone() {
+			return
+		}
 		if m.Arb.Release(v.Workspace, "workspace", "human:"+v.ID) {
 			m.Bus.Publish("control.returned", v.Workspace, "", map[string]any{"viewer": v.ID})
 			m.resumeNeedsHuman(v.Workspace)
