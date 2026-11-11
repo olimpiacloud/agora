@@ -19,6 +19,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Deleting a cursor closes its tabs and stops its apps, and tabs owned by cursors that already ended can be used by others.
 - The Paseo live panel takes pointer, wheel and keyboard input.
 - `AGORA_TOKEN_FILE` for the CLI and MCP server.
+- `agora serve --workspace-retention` (7 days by default, `0` keeps them): destroyed workspaces are purged after that time, together with their browser profile (unless a live workspace shares it), home and checkpoints. They used to stay on disk forever. On the first start after upgrading, workspaces destroyed more than 7 days ago are purged within a minute. Deleting a cursor also removes its `agents/<id>` directory and log.
 
 ### Changed
 

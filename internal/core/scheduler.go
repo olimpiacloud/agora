@@ -42,6 +42,7 @@ func (m *Manager) schedule() {
 		m.lifecycleTick()
 		if n%30 == 0 {
 			m.reapCursors()
+			m.pruneWorkspaces(m.cfg.WorkspaceRetention)
 		}
 		if n%5 == 0 {
 			m.usageTick()
@@ -340,6 +341,23 @@ func (m *Manager) pruneCursors(retention time.Duration) {
 		} else if !running {
 			m.Bus.CloseLog(ws)
 		}
+	}
+}
+
+func (m *Manager) pruneWorkspaces(retention time.Duration) {
+	if retention <= 0 {
+		return
+	}
+	var old []string
+	m.mu.Lock()
+	for id, w := range m.ws {
+		if w.State == StateDestroyed && time.Since(w.Updated) > retention {
+			old = append(old, id)
+		}
+	}
+	m.mu.Unlock()
+	for _, id := range old {
+		m.Destroy(context.Background(), id, true)
 	}
 }
 

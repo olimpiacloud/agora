@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"syscall"
 	"time"
@@ -356,6 +358,7 @@ func (m *Manager) DeleteCursor(id string) error {
 	delete(m.mail, id)
 	m.mu.Unlock()
 	m.store.Delete("cursors", id)
+	os.RemoveAll(filepath.Join(m.cfg.Home, "agents", id))
 	m.Bus.Publish("cursor.deleted", c.Workspace, id, nil)
 	return nil
 }
