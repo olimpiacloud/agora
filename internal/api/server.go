@@ -88,13 +88,17 @@ func principal(r *http.Request) *Principal {
 type handler func(w http.ResponseWriter, r *http.Request, p *Principal)
 
 func (s *Server) h(f handler, query bool) http.HandlerFunc {
+	return s.handle(f, query, query)
+}
+
+func (s *Server) handle(f handler, query, viewer bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, err := s.auth.Resolve(r, query)
 		if err != nil {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": err.Error()})
 			return
 		}
-		if p.Viewer != nil && !query {
+		if p.Viewer != nil && !viewer {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "viewer token only valid for streaming"})
 			return
 		}
@@ -441,9 +445,14 @@ func (s *Server) routes() {
 		}
 		writeJSON(w, 201, post)
 	}, false))
-	m.HandleFunc("GET /v1/workspaces/{id}/locks", s.ws(func(w http.ResponseWriter, r *http.Request, p *Principal, id string) {
+	m.HandleFunc("GET /v1/workspaces/{id}/locks", s.handle(func(w http.ResponseWriter, r *http.Request, p *Principal) {
+		id := r.PathValue("id")
+		if !p.CanWorkspace(id) {
+			writeErr(w, fmt.Errorf("%w: no access to workspace %s", core.ErrForbidden, id))
+			return
+		}
 		writeJSON(w, 200, s.m.Arb.List(id))
-	}))
+	}, false, true))
 	m.HandleFunc("GET /v1/workspaces/{id}/stream/ws", s.h(s.streamWS, true))
 	m.HandleFunc("POST /v1/workspaces/{id}/stream/webrtc", s.h(s.streamRTC, true))
 	m.HandleFunc("GET /v1/workspaces/{id}/stream/jpeg", s.h(s.streamJPEG, true))
@@ -581,7 +590,11 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 		writeErr(w, err)
 		return
 	}
-	privileged := map[string]bool{"suspend": true, "freeze": true, "checkpoint": true, "fork": true, "resize": true, "layout": true, "browser-restart": true, "control-take": true, "control-return": true}
+	privileged := map[string]bool{"suspend": true, "freeze": true, "checkpoint": true, "fork": true, "resize": true, "layout": true, "browser-restart": true}
+	if (op == "control-take" || op == "control-return") && !p.Admin {
+		writeErr(w, fmt.Errorf("%w: only a human (the admin) can take or return control; call human_request instead", core.ErrForbidden))
+		return
+	}
 	if privileged[op] {
 		if err := need(p, "workspace"); err != nil {
 			writeErr(w, err)

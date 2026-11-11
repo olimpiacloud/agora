@@ -76,6 +76,20 @@ func (e *env) reqAs(cursor, method, path string, body any) (int, map[string]any)
 	return resp.StatusCode, out
 }
 
+func (e *env) reqList(tok, path string) (int, []map[string]any) {
+	e.t.Helper()
+	r, _ := http.NewRequest("GET", e.srv.URL+path, nil)
+	r.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out []map[string]any
+	json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
 func (e *env) workspace() string {
 	code, out := e.req(e.admin, "POST", "/v1/workspaces", map[string]any{"name": "w"})
 	if code != 201 {
@@ -195,6 +209,29 @@ func TestViewerTokenScope(t *testing.T) {
 	vt := out["token"].(string)
 	if code, _ := e.req(vt, "GET", "/v1/workspaces/"+wa, nil); code != 403 {
 		t.Fatalf("viewer token on REST: got %d, want 403", code)
+	}
+	for _, rd := range []struct{ method, path string }{
+		{"GET", "/v1/workspaces"},
+		{"GET", "/v1/workspaces/" + wa + "/windows"},
+		{"GET", "/v1/workspaces/" + wa + "/tabs"},
+		{"POST", "/v1/workspaces/" + wa + "/acquire"},
+		{"POST", "/v1/workspaces/" + wa + "/control-take"},
+		{"GET", "/v1/cursors"},
+	} {
+		if code, _ := e.req(vt, rd.method, rd.path, nil); code != 403 {
+			t.Fatalf("viewer token on %s %s: got %d, want 403", rd.method, rd.path, code)
+		}
+	}
+	e.req(e.admin, "POST", "/v1/workspaces/"+wa+"/acquire", map[string]any{"surface": "win:7"})
+	code, raw := e.reqList(vt, "/v1/workspaces/"+wa+"/locks")
+	if code != 200 || len(raw) != 1 || raw[0]["surface"] != "win:7" {
+		t.Fatalf("viewer token on its workspace locks: %d %v", code, raw)
+	}
+	if code, _ := e.reqList(vt, "/v1/workspaces/"+wb+"/locks"); code != 403 {
+		t.Fatalf("viewer token on foreign locks: got %d, want 403", code)
+	}
+	if code := e.queryStatus("/v1/workspaces/" + wa + "/locks?token=" + vt); code != 401 {
+		t.Fatalf("viewer token in locks query string: got %d, want 401", code)
 	}
 	if code, _ := e.req(vt, "GET", "/v1/events/stream?workspace="+wb, nil); code != 403 {
 		t.Fatalf("viewer token on foreign events: got %d, want 403", code)
@@ -327,6 +364,26 @@ func TestPrivilegedWorkspaceOpsNeedWorkspacePermission(t *testing.T) {
 	}
 	if code, out := e.req(plain, "POST", "/v1/workspaces/"+ws+"/thaw", nil); code != 200 {
 		t.Fatalf("thaw without workspace permission: %d %v, want 200", code, out)
+	}
+}
+
+func TestHumanControlIsAdminOnly(t *testing.T) {
+	e := newEnv(t)
+	ws := e.headlessWorkspace()
+	_, wsPerm := e.cursor(e.admin, map[string]any{"workspace": ws, "permissions": []string{"workspace", "desktop", "browser"}})
+	for _, op := range []string{"control-take", "control-return"} {
+		if code, _ := e.req(wsPerm, "POST", "/v1/workspaces/"+ws+"/"+op, nil); code != 403 {
+			t.Fatalf("%s by cursor with workspace permission: got %d, want 403", op, code)
+		}
+	}
+	if locks := e.m.Arb.List(ws); len(locks) != 0 {
+		t.Fatalf("cursor left locks: %v", locks)
+	}
+	if code, out := e.req(e.admin, "POST", "/v1/workspaces/"+ws+"/control-take", nil); code != 200 || out["holder"] != "human:api" {
+		t.Fatalf("admin control-take: %d %v", code, out)
+	}
+	if code, out := e.req(e.admin, "POST", "/v1/workspaces/"+ws+"/control-return", nil); code != 200 || out["released"] != true {
+		t.Fatalf("admin control-return: %d %v", code, out)
 	}
 }
 

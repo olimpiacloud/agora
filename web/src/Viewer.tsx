@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { getToken, mintViewer, type Cursor, type Lock } from './api'
+import { api, getToken, mintViewer, type Cursor, type Lock } from './api'
 import { useSmoothPoint } from './smooth'
 import { DesktopSession, keyName, type Mode, type Transport } from './transport'
 
@@ -77,8 +77,7 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
           } else if (e.type === 'human.requested') {
             setNeedHuman({ cursor: e.cursor, reason: (d.reason as string) || 'needs a human' })
           } else if (e.type.startsWith('control.')) {
-            fetch(`/v1/workspaces/${ws}/locks`, { headers: { Authorization: `Bearer ${localStorage.getItem('agora.token') || ''}` } })
-              .then((r) => (r.ok ? r.json() : null))
+            api<Lock[]>('GET', `/v1/workspaces/${ws}/locks`, undefined, getToken() || token)
               .then((l) => l && setLocks(l))
               .catch(() => {})
             if (e.type === 'control.taken') setLocks((l) => [...l.filter((x) => x.surface !== 'workspace'), { surface: 'workspace', holder: 'human:' + ((d.viewer as string) || ''), priority: 100 }])
