@@ -233,6 +233,10 @@ func (m *Manager) ancestorLocked(anc, id string) bool {
 }
 
 func (m *Manager) setCursorStatus(id string, st CursorStatus, detail string, force bool) error {
+	return m.setCursorStatusWith(id, st, detail, force, nil)
+}
+
+func (m *Manager) setCursorStatusWith(id string, st CursorStatus, detail string, force bool, set func(*Cursor)) error {
 	m.mu.Lock()
 	c := m.cursors[id]
 	if c == nil {
@@ -244,6 +248,9 @@ func (m *Manager) setCursorStatus(id string, st CursorStatus, detail string, for
 		return fmt.Errorf("cursor already %s", c.Status)
 	}
 	prev := c.Status
+	if set != nil {
+		set(c)
+	}
 	c.Status = st
 	c.Detail = detail
 	if st.Terminal() && c.Ended == nil {
@@ -292,35 +299,11 @@ func (m *Manager) Report(id, msg string, pct int) error {
 }
 
 func (m *Manager) Complete(id string, result json.RawMessage) error {
-	m.mu.Lock()
-	c := m.cursors[id]
-	if c == nil {
-		m.mu.Unlock()
-		return ErrNotFound
-	}
-	if c.Status.Terminal() {
-		m.mu.Unlock()
-		return fmt.Errorf("cursor already %s", c.Status)
-	}
-	c.Result = result
-	m.mu.Unlock()
-	return m.setCursorStatus(id, CursorDone, "", false)
+	return m.setCursorStatusWith(id, CursorDone, "", false, func(c *Cursor) { c.Result = result })
 }
 
 func (m *Manager) Fail(id, msg string) error {
-	m.mu.Lock()
-	c := m.cursors[id]
-	if c == nil {
-		m.mu.Unlock()
-		return ErrNotFound
-	}
-	if c.Status.Terminal() {
-		m.mu.Unlock()
-		return fmt.Errorf("cursor already %s", c.Status)
-	}
-	c.Error = msg
-	m.mu.Unlock()
-	return m.setCursorStatus(id, CursorFailed, msg, false)
+	return m.setCursorStatusWith(id, CursorFailed, msg, false, func(c *Cursor) { c.Error = msg })
 }
 
 func (m *Manager) CancelCursor(id, reason string, cascade bool) error {
