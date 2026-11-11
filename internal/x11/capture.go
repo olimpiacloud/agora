@@ -24,7 +24,13 @@ type Frame struct {
 }
 
 func (f *Frame) RGBA() *image.RGBA {
-	img := image.NewRGBA(image.Rect(0, 0, f.Width, f.Height))
+	return f.RGBAInto(nil)
+}
+
+func (f *Frame) RGBAInto(img *image.RGBA) *image.RGBA {
+	if img == nil || img.Rect != image.Rect(0, 0, f.Width, f.Height) {
+		img = image.NewRGBA(image.Rect(0, 0, f.Width, f.Height))
+	}
 	for y := 0; y < f.Height; y++ {
 		src := f.Pix[y*f.Stride : y*f.Stride+f.Width*4]
 		dst := img.Pix[y*img.Stride : y*img.Stride+f.Width*4]

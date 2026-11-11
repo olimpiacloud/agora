@@ -261,10 +261,16 @@ func (m *Manager) Screenshot(ctx context.Context, ws string, o ShotOpts) ([]byte
 }
 
 func downscale(src *image.RGBA, maxW int) *image.RGBA {
+	return downscaleInto(nil, src, maxW)
+}
+
+func downscaleInto(dst, src *image.RGBA, maxW int) *image.RGBA {
 	sw, sh := src.Bounds().Dx(), src.Bounds().Dy()
 	dw := maxW
 	dh := sh * dw / sw
-	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
+	if dst == nil || dst.Rect != image.Rect(0, 0, dw, dh) {
+		dst = image.NewRGBA(image.Rect(0, 0, dw, dh))
+	}
 	for y := 0; y < dh; y++ {
 		sy0 := y * sh / dh
 		sy1 := (y + 1) * sh / dh
@@ -382,8 +388,12 @@ func (m *Manager) Clipboard(ctx context.Context, ws string, set *string) (string
 }
 
 func Downscale(src *image.RGBA, maxW int) *image.RGBA {
+	return DownscaleInto(nil, src, maxW)
+}
+
+func DownscaleInto(dst, src *image.RGBA, maxW int) *image.RGBA {
 	if src.Bounds().Dx() <= maxW {
 		return src
 	}
-	return downscale(src, maxW)
+	return downscaleInto(dst, src, maxW)
 }

@@ -254,6 +254,7 @@ func (s *Server) produceJPEG(ctx context.Context, ws string, d *x11.Display, cur
 	defer dw.Close()
 	gap := time.Second / time.Duration(fps)
 	var frame *x11.Frame
+	var rgba, small *image.RGBA
 	var last, resolved time.Time
 	var buf bytes.Buffer
 	var region, sent image.Rectangle
@@ -307,8 +308,11 @@ func (s *Server) produceJPEG(ctx context.Context, ws string, d *x11.Display, cur
 			continue
 		}
 		lastSum = sum
-		img := frame.RGBA()
-		out := core.Downscale(img, maxW)
+		rgba = frame.RGBAInto(rgba)
+		out := core.DownscaleInto(small, rgba, maxW)
+		if out != rgba {
+			small = out
+		}
 		buf.Reset()
 		buf.Write(make([]byte, 8))
 		if err := jpeg.Encode(&buf, out, &jpeg.Options{Quality: quality}); err != nil {
