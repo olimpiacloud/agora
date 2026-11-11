@@ -64,6 +64,11 @@ func (d *Display) NewCapturer() (*Capturer, error) {
 	if err := extInit("MIT-SHM", c); err == nil {
 		size := 3840 * 2160 * 4
 		id, err := unix.SysvShmGet(unix.IPC_PRIVATE, size, unix.IPC_CREAT|0600)
+		if err == nil && d.uid != 0 {
+			if err = shmOwner(id, d.uid, d.gid); err != nil {
+				unix.SysvShmCtl(id, unix.IPC_RMID, nil)
+			}
+		}
 		if err == nil {
 			b, err := unix.SysvShmAttach(id, 0, 0)
 			if err == nil {
@@ -81,6 +86,18 @@ func (d *Display) NewCapturer() (*Capturer, error) {
 		}
 	}
 	return cp, nil
+}
+
+func shmOwner(id, uid, gid int) error {
+	var ds unix.SysvShmDesc
+	if _, err := unix.SysvShmCtl(id, unix.IPC_STAT, &ds); err != nil {
+		return err
+	}
+	ds.Perm.Uid = uint32(uid)
+	ds.Perm.Gid = uint32(gid)
+	ds.Perm.Mode = 0600
+	_, err := unix.SysvShmCtl(id, unix.IPC_SET, &ds)
+	return err
 }
 
 func (cp *Capturer) Close() {

@@ -48,6 +48,8 @@ type Display struct {
 	Height   int
 	AuthFile string
 	cookie   string
+	uid      int
+	gid      int
 	proc     *exec.Cmd
 	conn     *xgb.Conn
 	root     xproto.Window
@@ -78,6 +80,17 @@ func freeDisplay(min int) (int, *os.File, error) {
 		return n, f, nil
 	}
 	return 0, nil, errors.New("no free X display")
+}
+
+func socketDir() error {
+	const dir = "/tmp/.X11-unix"
+	if err := os.Mkdir(dir, 0700); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil
+		}
+		return err
+	}
+	return os.Chmod(dir, 0777|os.ModeSticky)
 }
 
 func writeXauth(path string, num int, cookie []byte, uid, gid int) error {
@@ -177,17 +190,23 @@ func StartDisplay(ctx context.Context, o DisplayOptions) (*Display, error) {
 	}
 	cmd := exec.Command(o.Xvfb, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
+	if o.AuthUid != 0 {
+		if err := socketDir(); err != nil {
+			return nil, err
+		}
+		cmd.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(o.AuthUid), Gid: uint32(o.AuthGid)}
+	}
 	if o.CgroupFD > 0 {
 		cmd.SysProcAttr.UseCgroupFD = true
 		cmd.SysProcAttr.CgroupFD = o.CgroupFD
 	}
-	logf, _ := os.OpenFile(filepath.Join(o.RunDir, fmt.Sprintf("xvfb-%d.log", num)), os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0666)
+	logf, _ := os.OpenFile(filepath.Join(o.RunDir, fmt.Sprintf("xvfb-%d.log", num)), os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0600)
 	cmd.Stdout = logf
 	cmd.Stderr = logf
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	d := &Display{Num: num, Width: o.Width, Height: o.Height, AuthFile: auth, cookie: hex.EncodeToString(raw), proc: cmd, exited: make(chan struct{})}
+	d := &Display{Num: num, Width: o.Width, Height: o.Height, AuthFile: auth, cookie: hex.EncodeToString(raw), uid: o.AuthUid, gid: o.AuthGid, proc: cmd, exited: make(chan struct{})}
 	go func() {
 		d.exitErr = cmd.Wait()
 		if logf != nil {
