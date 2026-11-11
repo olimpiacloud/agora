@@ -17,20 +17,23 @@ import (
 )
 
 type Config struct {
-	Home         string
-	AppsUser     string
-	ChromeBinary string
-	Width        int
-	Height       int
-	MaxSeats     int
-	SeatIdle     time.Duration
-	IdleAfter    time.Duration
-	SuspendAfter time.Duration
-	TabIdle      time.Duration
-	RTC          stream.RTCOptions
-	AgoraBinary  string
-	ListenURL    string
+	Home            string
+	AppsUser        string
+	ChromeBinary    string
+	Width           int
+	Height          int
+	MaxSeats        int
+	SeatIdle        time.Duration
+	IdleAfter       time.Duration
+	SuspendAfter    time.Duration
+	TabIdle         time.Duration
+	CursorRetention time.Duration
+	RTC             stream.RTCOptions
+	AgoraBinary     string
+	ListenURL       string
 }
+
+const DefaultCursorRetention = 7 * 24 * time.Hour
 
 var (
 	ErrNotFound  = errors.New("not found")

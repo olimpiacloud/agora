@@ -267,6 +267,60 @@ func (m *Manager) reapCursors() {
 	for _, id := range stale {
 		m.CancelCursor(id, "never started", false)
 	}
+	m.pruneCursors(m.cfg.CursorRetention)
+}
+
+func (m *Manager) pruneCursors(retention time.Duration) {
+	if retention <= 0 {
+		return
+	}
+	old := map[string]string{}
+	m.mu.Lock()
+	busy := map[string]bool{}
+	for _, c := range m.cursors {
+		if c.Status.Terminal() {
+			continue
+		}
+		p := c.Parent
+		for i := 0; i < 32 && p != "" && !busy[p]; i++ {
+			busy[p] = true
+			pc := m.cursors[p]
+			if pc == nil {
+				break
+			}
+			p = pc.Parent
+		}
+	}
+	for id, c := range m.cursors {
+		if !c.Status.Terminal() || busy[id] {
+			continue
+		}
+		last := c.Updated
+		if c.Ended != nil && c.Ended.After(last) {
+			last = *c.Ended
+		}
+		if time.Since(last) > retention {
+			old[id] = c.Workspace
+		}
+	}
+	m.mu.Unlock()
+	touched := map[string]bool{}
+	for id, ws := range old {
+		if m.DeleteCursor(id) == nil && ws != "" {
+			touched[ws] = true
+		}
+	}
+	for ws := range touched {
+		m.mu.Lock()
+		_, known := m.ws[ws]
+		running := m.rt[ws] != nil
+		m.mu.Unlock()
+		if !known {
+			m.Bus.RemoveLog(ws)
+		} else if !running {
+			m.Bus.CloseLog(ws)
+		}
+	}
 }
 
 func (m *Manager) Asleep(ws string) bool {
@@ -330,7 +384,7 @@ func (m *Manager) usageTick() {
 		if prev := m.usage[id]; prev != nil && prev.Detailed && time.Since(prev.Time) < time.Minute {
 			prev.CPU, prev.CgroupMB, prev.RSSMB, prev.Procs = u.CPU, u.CgroupMB, u.RSSMB, u.Procs
 			u = prev
-		} else {
+		} else if m.rt[id] == r {
 			m.usage[id] = u
 		}
 		w := m.ws[id]
@@ -362,7 +416,9 @@ func (m *Manager) measureLight(id string, r *Runtime) *WorkspaceUsage {
 		u.Procs = len(m.cg.Pids(id))
 		m.mu.Lock()
 		prev, ok := m.cpuPrev[id]
-		m.cpuPrev[id] = cpuSample{t: time.Now(), usec: usec}
+		if m.rt[id] == r {
+			m.cpuPrev[id] = cpuSample{t: time.Now(), usec: usec}
+		}
 		m.mu.Unlock()
 		if ok && usec >= prev.usec {
 			u.CPU = float64(usec-prev.usec) / 1e6 / time.Since(prev.t).Seconds() * 100
@@ -382,7 +438,9 @@ func (m *Manager) measureLight(id string, r *Runtime) *WorkspaceUsage {
 	}
 	m.mu.Lock()
 	prev, ok := m.cpuPrev[id]
-	m.cpuPrev[id] = cpuSample{t: time.Now(), ticks: ticks}
+	if m.rt[id] == r {
+		m.cpuPrev[id] = cpuSample{t: time.Now(), ticks: ticks}
+	}
 	m.mu.Unlock()
 	if ok {
 		el := time.Since(prev.t).Seconds()

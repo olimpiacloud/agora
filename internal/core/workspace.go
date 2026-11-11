@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -204,8 +205,55 @@ func (m *Manager) checkpointLocked(ctx context.Context, id, reason string, snaps
 	os.MkdirAll(filepath.Join(m.cfg.Home, "checkpoints", id), 0700)
 	b, _ := json.MarshalIndent(cp, "", "  ")
 	os.WriteFile(filepath.Join(m.cfg.Home, "checkpoints", id, cp.ID+".json"), b, 0600)
+	pruneCheckpoints(filepath.Join(m.cfg.Home, "checkpoints", id), keepCheckpoints)
 	m.Bus.Publish("workspace.checkpoint", id, "", map[string]any{"checkpoint": cp.ID, "tabs": len(cp.Tabs), "apps": len(cp.Apps), "snapshot": cp.Snapshot != "", "reason": reason})
 	return cp, nil
+}
+
+const keepCheckpoints = 20
+
+func pruneCheckpoints(dir string, keep int) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	snap := map[string]bool{}
+	for _, e := range ents {
+		if e.IsDir() {
+			snap[e.Name()] = true
+		}
+	}
+	var files []os.DirEntry
+	for _, e := range ents {
+		name, ok := strings.CutSuffix(e.Name(), ".json")
+		if ok && !e.IsDir() && !snap[name] {
+			files = append(files, e)
+		}
+	}
+	if len(files) <= keep {
+		return
+	}
+	type ckpt struct {
+		name string
+		t    time.Time
+	}
+	all := make([]ckpt, 0, len(files))
+	for _, e := range files {
+		c := ckpt{name: e.Name()}
+		var v struct {
+			Time time.Time `json:"time"`
+		}
+		if b, err := os.ReadFile(filepath.Join(dir, e.Name())); err == nil && json.Unmarshal(b, &v) == nil && !v.Time.IsZero() {
+			c.t = v.Time
+		} else if fi, err := e.Info(); err == nil {
+			c.t = fi.ModTime()
+		}
+		all = append(all, c)
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].t.After(all[j].t) })
+	for _, c := range all[keep:] {
+		os.Remove(filepath.Join(dir, c.name))
+	}
 }
 
 func (m *Manager) snapshotProfile(r *Runtime, profile, dst string) error {
@@ -304,11 +352,13 @@ func (m *Manager) suspendLocked(ctx context.Context, id, reason string) error {
 	m.mu.Lock()
 	delete(m.rt, id)
 	delete(m.usage, id)
+	delete(m.cpuPrev, id)
 	m.mu.Unlock()
 	if m.cg != nil {
 		m.cg.Remove(id)
 	}
 	m.setState(id, StateSuspended, reason)
+	m.Bus.CloseLog(id)
 	return nil
 }
 
@@ -421,6 +471,7 @@ func (m *Manager) Destroy(ctx context.Context, id string, purge bool) error {
 		r.shutdown(ctx)
 		m.mu.Lock()
 		delete(m.rt, id)
+		delete(m.cpuPrev, id)
 		m.mu.Unlock()
 		if m.cg != nil {
 			m.cg.Remove(id)
@@ -453,8 +504,6 @@ func (m *Manager) Destroy(ctx context.Context, id string, purge bool) error {
 		}
 		os.RemoveAll(m.wsDir(id))
 		os.RemoveAll(filepath.Join(m.cfg.Home, "checkpoints", id))
-		m.Bus.CloseLog(id)
-		os.Remove(filepath.Join(m.cfg.Home, "events", id+".jsonl"))
 		m.mu.Lock()
 		delete(m.ws, id)
 		delete(m.usage, id)
@@ -467,6 +516,11 @@ func (m *Manager) Destroy(ctx context.Context, id string, purge bool) error {
 		m.mu.Unlock()
 	}
 	m.Bus.Publish("workspace.destroyed", id, "", map[string]any{"purged": purge})
+	if purge {
+		m.Bus.RemoveLog(id)
+	} else {
+		m.Bus.CloseLog(id)
+	}
 	return nil
 }
 
