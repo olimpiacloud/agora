@@ -73,6 +73,39 @@ func TestAgentCommandKeepsTokenOutOfArgs(t *testing.T) {
 	}
 }
 
+func TestAgentCommandPromptCannotBecomeAnOption(t *testing.T) {
+	m := &Manager{cfg: Config{Home: t.TempDir(), ListenURL: "http://127.0.0.1:7788", AgoraBinary: "/usr/local/bin/agora"}}
+	for _, adapter := range []string{"claude", "codex"} {
+		c := &Cursor{ID: "cur_" + adapter, Name: "n", Workspace: "ws", Goal: "--dangerously-skip-permissions", Permissions: []string{"browser"}, Launch: &LaunchSpec{Adapter: adapter}}
+		args, _, err := m.agentCommand(c, "tok")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range args {
+			if strings.HasPrefix(a, "--dangerously") {
+				t.Fatalf("%s: prompt parsed as an option: %q", adapter, args)
+			}
+		}
+		if !strings.Contains(strings.Join(args, " "), "Task: --dangerously-skip-permissions") {
+			t.Fatalf("%s: prompt missing: %q", adapter, args)
+		}
+	}
+	if got := positionalPrompt("open the docs"); got != "open the docs" {
+		t.Fatalf("plain prompt changed: %q", got)
+	}
+}
+
+func TestAgentEnvKeepsOnlyAllowedVariables(t *testing.T) {
+	in := []string{
+		"PATH=/usr/bin", "HOME=/root", "LC_ALL=C.UTF-8", "ANTHROPIC_API_KEY=k", "CLAUDE_CONFIG_DIR=/c", "OPENAI_API_KEY=o", "CODEX_HOME=/x", "https_proxy=http://p", "NODE_EXTRA_CA_CERTS=/ca.pem",
+		"AGORA_HOME=/var/lib/agora", "AWS_SECRET_ACCESS_KEY=s", "LD_PRELOAD=/tmp/x.so", "PATHX=1", "DATABASE_URL=postgres://", "NOTIFY_SOCKET=/run/systemd/notify",
+	}
+	want := []string{"PATH=/usr/bin", "HOME=/root", "LC_ALL=C.UTF-8", "ANTHROPIC_API_KEY=k", "CLAUDE_CONFIG_DIR=/c", "OPENAI_API_KEY=o", "CODEX_HOME=/x", "https_proxy=http://p", "NODE_EXTRA_CA_CERTS=/ca.pem"}
+	if got := agentEnv(in); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("agentEnv:\n got %q\nwant %q", got, want)
+	}
+}
+
 func TestObserveDiffSkipsUnchangedElements(t *testing.T) {
 	r := &Runtime{}
 	first := "url: u\n[e1] link \"A\"\n[e2] button \"B\"\n--- text ---\nhello"

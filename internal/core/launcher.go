@@ -116,9 +116,9 @@ func (m *Manager) agentCommand(c *Cursor, tok string) ([]string, []string, error
 		}
 		var args []string
 		if full {
-			args = []string{"claude", "-p", prompt, "--mcp-config", cfgPath, "--append-system-prompt", sys, "--allowedTools", "mcp__agora__*", "--output-format", "json"}
+			args = []string{"claude", "-p", positionalPrompt(prompt), "--mcp-config", cfgPath, "--append-system-prompt", sys, "--allowedTools", "mcp__agora__*", "--output-format", "json"}
 		} else {
-			args = []string{"claude", "-p", prompt, "--mcp-config", cfgPath, "--strict-mcp-config", "--disable-slash-commands", "--tools", "", "--setting-sources", "", "--system-prompt", lean, "--allowedTools", "mcp__agora__*", "--output-format", "json"}
+			args = []string{"claude", "-p", positionalPrompt(prompt), "--mcp-config", cfgPath, "--strict-mcp-config", "--disable-slash-commands", "--tools", "", "--setting-sources", "", "--system-prompt", lean, "--allowedTools", "mcp__agora__*", "--output-format", "json"}
 		}
 		model := l.Model
 		if model == "" && !full {
@@ -155,7 +155,7 @@ func (m *Manager) agentCommand(c *Cursor, tok string) ([]string, []string, error
 		if !full {
 			instr = lean
 		}
-		args = append(args, instr+"\n\nTask: "+prompt)
+		args = append(args, positionalPrompt(instr+"\n\nTask: "+prompt))
 		return args, env, nil
 	case "command", "":
 		if len(l.Command) == 0 {
@@ -164,6 +164,45 @@ func (m *Manager) agentCommand(c *Cursor, tok string) ([]string, []string, error
 		return l.Command, append(env, "AGORA_GOAL="+prompt), nil
 	}
 	return nil, nil, fmt.Errorf("unknown adapter %q", l.Adapter)
+}
+
+func positionalPrompt(p string) string {
+	if strings.HasPrefix(p, "-") {
+		return "Task: " + p
+	}
+	return p
+}
+
+var agentEnvKeys = map[string]bool{
+	"PATH": true, "HOME": true, "USER": true, "LOGNAME": true, "SHELL": true, "LANG": true, "TZ": true, "TMPDIR": true, "TERM": true,
+	"XDG_CONFIG_HOME": true, "XDG_DATA_HOME": true, "XDG_CACHE_HOME": true, "XDG_STATE_HOME": true,
+	"HTTP_PROXY": true, "HTTPS_PROXY": true, "NO_PROXY": true, "http_proxy": true, "https_proxy": true, "no_proxy": true,
+	"SSL_CERT_FILE": true, "SSL_CERT_DIR": true, "NODE_EXTRA_CA_CERTS": true,
+}
+
+var agentEnvPrefixes = []string{"LC_", "ANTHROPIC_", "CLAUDE_", "OPENAI_", "CODEX_"}
+
+func agentEnv(environ []string) []string {
+	out := []string{}
+	for _, kv := range environ {
+		k, _, _ := strings.Cut(kv, "=")
+		if agentEnvAllowed(k) {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+func agentEnvAllowed(k string) bool {
+	if agentEnvKeys[k] {
+		return true
+	}
+	for _, p := range agentEnvPrefixes {
+		if strings.HasPrefix(k, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) launchAgent(id, tok string) error {
@@ -176,7 +215,7 @@ func (m *Manager) launchAgent(id, tok string) error {
 		return err
 	}
 	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Env = append(os.Environ(), env...)
+	cmd.Env = append(agentEnv(os.Environ()), env...)
 	for k, v := range c.Launch.Env {
 		if !strings.HasPrefix(k, "AGORA_") {
 			cmd.Env = append(cmd.Env, k+"="+v)
@@ -211,11 +250,14 @@ func (m *Manager) launchAgent(id, tok string) error {
 	m.launches[id] = lp
 	if cc := m.cursors[id]; cc != nil {
 		cc.LaunchPid = cmd.Process.Pid
-		cc.Status = CursorRunning
 		m.saveCursor(cc)
 	}
 	m.mu.Unlock()
-	m.Bus.Publish("agent.launched", c.Workspace, id, map[string]any{"adapter": c.Launch.Adapter, "pid": cmd.Process.Pid})
+	if m.setCursorStatus(id, CursorRunning, "", false) != nil {
+		lp.kill()
+	} else {
+		m.Bus.Publish("agent.launched", c.Workspace, id, map[string]any{"adapter": c.Launch.Adapter, "pid": cmd.Process.Pid})
+	}
 	go func() {
 		err := cmd.Wait()
 		if logf != nil {

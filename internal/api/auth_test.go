@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -202,5 +203,187 @@ func TestWorkspaceCursorLimitHoldsUnderConcurrency(t *testing.T) {
 	wg.Wait()
 	if n := len(e.m.ListCursors(core.CursorQuery{Workspace: ws})); n != 3 {
 		t.Fatalf("workspace has %d cursors, limit is 3", n)
+	}
+}
+
+func (e *env) headlessWorkspace() string {
+	code, out := e.req(e.admin, "POST", "/v1/workspaces", map[string]any{"name": "h", "config": map[string]any{"headless": true}})
+	if code != 201 {
+		e.t.Fatalf("create workspace: %d %v", code, out)
+	}
+	return out["id"].(string)
+}
+
+func (e *env) queryStatus(path string) int {
+	e.t.Helper()
+	resp, err := http.Get(e.srv.URL + path)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+func (e *env) cursorIDs(tok string) map[string]bool {
+	e.t.Helper()
+	r, _ := http.NewRequest("GET", e.srv.URL+"/v1/cursors", nil)
+	r.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		e.t.Fatalf("list cursors: %d", resp.StatusCode)
+	}
+	var list []map[string]any
+	json.NewDecoder(resp.Body).Decode(&list)
+	out := map[string]bool{}
+	for _, c := range list {
+		out[c["id"].(string)] = true
+	}
+	return out
+}
+
+func TestChildPermissionsAreBoundedByParent(t *testing.T) {
+	e := newEnv(t)
+	ws := e.workspace()
+	_, tp := e.cursor(e.admin, map[string]any{"workspace": ws, "permissions": []string{"browser", "spawn"}})
+	if code, out := e.req(tp, "POST", "/v1/cursors", map[string]any{"permissions": []string{"desktop", "process"}}); code != 403 {
+		t.Fatalf("child asking only for unheld permissions: got %d %v, want 403", code, out)
+	}
+	code, out := e.req(tp, "POST", "/v1/cursors", map[string]any{"permissions": []string{"browser", "desktop"}})
+	if code != 201 {
+		t.Fatalf("child asking for a subset: %d %v", code, out)
+	}
+	if perms := out["cursor"].(map[string]any)["permissions"].([]any); len(perms) != 1 || perms[0] != "browser" {
+		t.Fatalf("child permissions: got %v, want [browser]", perms)
+	}
+	_, out = e.req(tp, "POST", "/v1/cursors", map[string]any{})
+	if perms := out["cursor"].(map[string]any)["permissions"].([]any); len(perms) != 2 {
+		t.Fatalf("child without request: got %v, want the parent's", perms)
+	}
+}
+
+func TestSubagentCannotUseFullProfile(t *testing.T) {
+	e := newEnv(t)
+	ws := e.workspace()
+	_, tok := e.cursor(e.admin, map[string]any{"workspace": ws})
+	if code, _ := e.req(tok, "POST", "/v1/cursors", map[string]any{"goal": "x", "launch": map[string]any{"adapter": "claude", "profile": "full"}}); code != 403 {
+		t.Fatalf("full profile by cursor: got %d, want 403", code)
+	}
+}
+
+func TestDesktopReadsNeedDesktopPermission(t *testing.T) {
+	e := newEnv(t)
+	ws := e.headlessWorkspace()
+	_, browserOnly := e.cursor(e.admin, map[string]any{"workspace": ws, "permissions": []string{"browser"}})
+	_, desk := e.cursor(e.admin, map[string]any{"workspace": ws, "permissions": []string{"desktop"}})
+	reads := []struct{ method, path string }{
+		{"GET", "/v1/workspaces/" + ws + "/clipboard"},
+		{"POST", "/v1/workspaces/" + ws + "/clipboard"},
+		{"GET", "/v1/workspaces/" + ws + "/screenshot"},
+		{"GET", "/v1/workspaces/" + ws + "/windows"},
+	}
+	for _, rd := range reads {
+		if code, _ := e.req(browserOnly, rd.method, rd.path, nil); code != 403 {
+			t.Fatalf("%s %s without desktop: got %d, want 403", rd.method, rd.path, code)
+		}
+		if code, _ := e.req(desk, rd.method, rd.path, nil); code == 403 || code == 401 {
+			t.Fatalf("%s %s with desktop: got %d", rd.method, rd.path, code)
+		}
+	}
+}
+
+func TestPrivilegedWorkspaceOpsNeedWorkspacePermission(t *testing.T) {
+	e := newEnv(t)
+	ws := e.headlessWorkspace()
+	_, plain := e.cursor(e.admin, map[string]any{"workspace": ws})
+	_, wsPerm := e.cursor(e.admin, map[string]any{"workspace": ws, "permissions": []string{"workspace"}})
+	for _, op := range []string{"thaw", "browser-restart"} {
+		if code, _ := e.req(plain, "POST", "/v1/workspaces/"+ws+"/"+op, nil); code != 403 {
+			t.Fatalf("%s without workspace permission: got %d, want 403", op, code)
+		}
+	}
+	if code, out := e.req(wsPerm, "POST", "/v1/workspaces/"+ws+"/thaw", nil); code != 200 {
+		t.Fatalf("thaw with workspace permission: %d %v", code, out)
+	}
+}
+
+func TestKillProcessNeedsPermissionAndOwnership(t *testing.T) {
+	e := newEnv(t)
+	ws := e.headlessWorkspace()
+	_, tp := e.cursor(e.admin, map[string]any{"workspace": ws, "permissions": []string{"process", "spawn"}})
+	_, tc := e.cursor(tp, map[string]any{"permissions": []string{"process"}})
+	_, stranger := e.cursor(e.admin, map[string]any{"workspace": ws, "permissions": []string{"process"}})
+	_, manager := e.cursor(e.admin, map[string]any{"workspace": ws, "permissions": []string{"process", "workspace"}})
+	_, browserOnly := e.cursor(e.admin, map[string]any{"workspace": ws, "permissions": []string{"browser"}})
+	launch := func(tok string) string {
+		t.Helper()
+		code, out := e.req(tok, "POST", "/v1/workspaces/"+ws+"/apps", map[string]any{"command": "sleep", "args": []string{"30"}})
+		if code != 201 {
+			t.Fatalf("launch: %d %v", code, out)
+		}
+		return "/v1/workspaces/" + ws + "/processes/" + strconv.Itoa(int(out["pid"].(float64)))
+	}
+	kill := func(tok, path string, want int) {
+		t.Helper()
+		if code, out := e.req(tok, "DELETE", path, nil); code != want {
+			t.Fatalf("kill %s: got %d %v, want %d", path, code, out, want)
+		}
+	}
+	child := launch(tc)
+	kill(browserOnly, child, 403)
+	kill(stranger, child, 403)
+	kill(tp, child, 200)
+	other := launch(tc)
+	kill(manager, other, 200)
+	admins := launch(e.admin)
+	kill(tc, admins, 403)
+	kill(e.admin, admins, 200)
+}
+
+func TestWorkspacelessCursorsDoNotSeeEachOther(t *testing.T) {
+	e := newEnv(t)
+	ws := e.workspace()
+	a, ta := e.cursor(e.admin, map[string]any{})
+	b, _ := e.cursor(e.admin, map[string]any{})
+	_, tw := e.cursor(e.admin, map[string]any{"workspace": ws})
+	sib, _ := e.cursor(e.admin, map[string]any{"workspace": ws})
+	if got := e.cursorIDs(ta); got[b] || !got[a] {
+		t.Fatalf("workspace-less cursor listing: %v", got)
+	}
+	if got := e.cursorIDs(tw); !got[sib] || got[a] {
+		t.Fatalf("workspace cursor listing: %v", got)
+	}
+}
+
+func TestSpawnWithWorktreeNeedsProcessPermission(t *testing.T) {
+	e := newEnv(t)
+	ws := e.workspace()
+	repo := t.TempDir()
+	_, spawnOnly := e.cursor(e.admin, map[string]any{"workspace": ws, "permissions": []string{"spawn"}})
+	_, withProcess := e.cursor(e.admin, map[string]any{"workspace": ws, "permissions": []string{"spawn", "process"}})
+	if code, _ := e.req(spawnOnly, "POST", "/v1/cursors", map[string]any{"worktree": map[string]any{"repo": repo}}); code != 403 {
+		t.Fatalf("worktree without process permission: got %d, want 403", code)
+	}
+	if code, _ := e.req(withProcess, "POST", "/v1/cursors", map[string]any{"worktree": map[string]any{"repo": repo}}); code == 403 {
+		t.Fatal("worktree with process permission: got 403")
+	}
+}
+
+func TestQueryTokenMustBeViewerToken(t *testing.T) {
+	e := newEnv(t)
+	ws := e.workspace()
+	_, tok := e.cursor(e.admin, map[string]any{"workspace": ws})
+	if code := e.queryStatus("/v1/events/stream?token=" + tok); code != 401 {
+		t.Fatalf("cursor token in query: got %d, want 401", code)
+	}
+	if code := e.queryStatus("/v1/events/stream?token=" + e.admin); code != 401 {
+		t.Fatalf("admin token in query: got %d, want 401", code)
+	}
+	_, out := e.req(e.admin, "POST", "/v1/viewer-tokens", map[string]any{"workspace": ws})
+	if code := e.queryStatus("/v1/events/stream?token=" + out["token"].(string)); code != 200 {
+		t.Fatalf("viewer token in query: got %d, want 200", code)
 	}
 }

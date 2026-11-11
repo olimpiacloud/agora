@@ -68,6 +68,10 @@ func (m *Manager) CreateCursor(ctx context.Context, req CreateCursorReq) (*Curso
 			req.Permissions = parent.Permissions
 		} else {
 			req.Permissions = intersect(req.Permissions, parent.Permissions)
+			if len(req.Permissions) == 0 {
+				m.mu.Unlock()
+				return nil, "", fmt.Errorf("%w: parent does not hold any of the requested permissions", ErrForbidden)
+			}
 		}
 		if parent.Budget.MaxDepth > 0 {
 			req.Budget.MaxDepth = parent.Budget.MaxDepth - 1
@@ -95,7 +99,7 @@ func (m *Manager) CreateCursor(ctx context.Context, req CreateCursorReq) (*Curso
 			}
 		}
 	}
-	if len(req.Permissions) == 0 {
+	if parent == nil && len(req.Permissions) == 0 {
 		req.Permissions = DefaultPermissions
 	}
 	id := NewID("cur")

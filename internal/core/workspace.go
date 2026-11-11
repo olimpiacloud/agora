@@ -607,6 +607,7 @@ func (r *Runtime) launch(spec AppSpec) (*Proc, error) {
 	r.procs[p.Pid] = p
 	r.mu.Unlock()
 	r.m.Bus.Publish("process.started", r.id, spec.Owner, map[string]any{"pid": p.Pid, "command": spec.Command, "app": spec.ID})
+	started := *p
 	go func() {
 		err := cmd.Wait()
 		if logf != nil {
@@ -620,14 +621,16 @@ func (r *Runtime) launch(spec AppSpec) (*Proc, error) {
 				code = -1
 			}
 		}
+		r.mu.Lock()
 		p.Exit = &code
+		r.mu.Unlock()
 		close(p.done)
 		r.mu.Lock()
 		delete(r.procs, p.Pid)
 		r.mu.Unlock()
 		r.m.Bus.Publish("process.exited", r.id, spec.Owner, map[string]any{"pid": p.Pid, "command": spec.Command, "code": code, "app": spec.ID})
 	}()
-	return p, nil
+	return &started, nil
 }
 
 func (m *Manager) Processes(id string) []Proc {
@@ -656,4 +659,18 @@ func (m *Manager) KillProcess(id string, pid int) error {
 		return ErrNotFound
 	}
 	return syscall.Kill(-pid, syscall.SIGTERM)
+}
+
+func (m *Manager) ProcessOwner(id string, pid int) (string, error) {
+	r := m.runtime(id)
+	if r == nil {
+		return "", ErrNotFound
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p := r.procs[pid]
+	if p == nil {
+		return "", ErrNotFound
+	}
+	return p.App.Owner, nil
 }

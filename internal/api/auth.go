@@ -105,6 +105,9 @@ func (a *Auth) Resolve(r *http.Request, allowQuery bool) (*Principal, error) {
 	}
 	if tok == "" && allowQuery {
 		tok = r.URL.Query().Get("token")
+		if tok != "" && !strings.HasPrefix(tok, "v1.") {
+			return nil, errors.New("only viewer tokens are accepted in the query string")
+		}
 	}
 	if tok == "" {
 		return nil, errors.New("missing token")
