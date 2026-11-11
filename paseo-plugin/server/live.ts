@@ -35,7 +35,7 @@ interface Hub {
 const TIERS = {
   card: { maxWidth: 720, fps: 4, control: false },
   tile: { maxWidth: 560, fps: 3, control: false },
-  full: { maxWidth: 1400, fps: 8, control: true },
+  full: { maxWidth: 1400, fps: 15, control: true },
 } as const;
 
 const hubs = new Map<string, Hub>();

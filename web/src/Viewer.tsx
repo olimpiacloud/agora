@@ -208,6 +208,10 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
           const p = toDesk(e)
           send({ t: 'up', x: p.x, y: p.y, b: e.button })
         }}
+        onPointerCancel={(e) => {
+          const p = toDesk(e)
+          send({ t: 'up', x: p.x, y: p.y, b: e.button < 0 ? 0 : e.button })
+        }}
         onWheel={(e) => {
           wheelAcc.current += e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY
           const p = toDesk(e)

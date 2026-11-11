@@ -1,7 +1,7 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin/client";
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { Image, type LayoutChangeEvent, Pressable, Text, View } from "react-native";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { type GestureResponderEvent, Image, type LayoutChangeEvent, Platform, Text, View } from "react-native";
 import type { z } from "zod";
 import { live, type liveCursor } from "../shared/agora";
 import { useSmoothPoint } from "./smooth";
@@ -175,6 +175,129 @@ function CursorMark({ theme, cursor: c, region, scale, width, height, dim, small
   );
 }
 
+export type DeskInput =
+  | { kind: "down" | "move" | "up"; x: number; y: number; button?: number }
+  | { kind: "scroll"; x: number; y: number; dy: number; dx: number }
+  | { kind: "type"; text: string }
+  | { kind: "key"; keys: string };
+
+const NAMED: Record<string, string> = {
+  Enter: "enter",
+  Tab: "tab",
+  Escape: "escape",
+  Backspace: "backspace",
+  Delete: "delete",
+  Insert: "insert",
+  Home: "home",
+  End: "end",
+  PageUp: "pageup",
+  PageDown: "pagedown",
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  ArrowUp: "up",
+  ArrowDown: "down",
+  " ": "space",
+};
+
+function keyInput(e: KeyboardEvent): DeskInput | null {
+  if (["Shift", "Control", "Alt", "Meta", "CapsLock", "Dead", "Process", "Unidentified"].includes(e.key)) return null;
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (e.key.length === 1 && !ctrl && !e.altKey) return { kind: "type", text: e.key };
+  let name = NAMED[e.key] || (/^F\d{1,2}$/.test(e.key) ? e.key.toLowerCase() : e.key.length === 1 ? e.key.toLowerCase() : "");
+  if (!name) return null;
+  const mods = [ctrl && "ctrl", e.altKey && "alt", e.shiftKey && e.key.length !== 1 && "shift"].filter(Boolean);
+  return { kind: "key", keys: [...mods, name].join("+") };
+}
+
+function useWebInput(node: { current: unknown }, toScreen: (lx: number, ly: number) => [number, number], onInput: ((i: DeskInput) => void) | undefined, active: boolean) {
+  const latest = useRef({ toScreen, onInput });
+  latest.current = { toScreen, onInput };
+  useEffect(() => {
+    const el = node.current as HTMLElement | null;
+    if (Platform.OS !== "web" || !active || !el || typeof el.addEventListener !== "function") return;
+    el.tabIndex = 0;
+    el.style.outline = "none";
+    el.style.cursor = "default";
+    el.style.userSelect = "none";
+    el.style.touchAction = "none";
+    const send = (i: DeskInput) => latest.current.onInput?.(i);
+    const at = (e: MouseEvent): [number, number] => {
+      const r = el.getBoundingClientRect();
+      return latest.current.toScreen(Math.min(Math.max(e.clientX - r.left, 0), r.width - 1), Math.min(Math.max(e.clientY - r.top, 0), r.height - 1));
+    };
+    const pressed = new Set<number>();
+    let lastMove = 0;
+    let wheel = 0;
+    const down = (e: PointerEvent) => {
+      e.preventDefault();
+      el.focus({ preventScroll: true });
+      el.setPointerCapture?.(e.pointerId);
+      const b = e.button + 1;
+      pressed.add(b);
+      send({ kind: "down", ...xy(at(e)), button: b });
+    };
+    const move = (e: PointerEvent) => {
+      const now = performance.now();
+      if (now - lastMove < 30) return;
+      lastMove = now;
+      send({ kind: "move", ...xy(at(e)) });
+    };
+    const up = (e: PointerEvent) => {
+      const b = e.button + 1;
+      if (!pressed.delete(b)) return;
+      send({ kind: "up", ...xy(at(e)), button: b });
+    };
+    const cancel = (e: PointerEvent) => {
+      for (const b of pressed) send({ kind: "up", ...xy(at(e)), button: b });
+      pressed.clear();
+    };
+    const wheelH = (e: WheelEvent) => {
+      e.preventDefault();
+      wheel += e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY;
+      const n = Math.trunc(wheel / 60);
+      const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? Math.sign(e.deltaX) : 0;
+      if (!n && !dx) return;
+      wheel -= n * 60;
+      send({ kind: "scroll", ...xy(at(e)), dy: n, dx });
+    };
+    const menu = (e: Event) => e.preventDefault();
+    const key = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") return;
+      const i = keyInput(e);
+      if (!i) return;
+      e.preventDefault();
+      send(i);
+    };
+    const paste = (e: ClipboardEvent) => {
+      const t = e.clipboardData?.getData("text/plain");
+      e.preventDefault();
+      if (t) send({ kind: "type", text: t });
+    };
+    el.addEventListener("pointerdown", down);
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", cancel);
+    el.addEventListener("wheel", wheelH, { passive: false });
+    el.addEventListener("contextmenu", menu);
+    el.addEventListener("keydown", key);
+    el.addEventListener("paste", paste);
+    return () => {
+      el.removeEventListener("pointerdown", down);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", cancel);
+      el.removeEventListener("wheel", wheelH);
+      el.removeEventListener("contextmenu", menu);
+      el.removeEventListener("keydown", key);
+      el.removeEventListener("paste", paste);
+    };
+  }, [node, active]);
+}
+
+function xy([x, y]: [number, number]) {
+  return { x, y };
+}
+
 export function DesktopView({
   theme,
   frame,
@@ -185,6 +308,9 @@ export function DesktopView({
   small,
   onTap,
   onLongTap,
+  onPointer,
+  onGesture,
+  onInput,
 }: {
   theme: PluginTheme;
   frame: Frame | null;
@@ -195,6 +321,9 @@ export function DesktopView({
   small?: boolean;
   onTap?: (x: number, y: number) => void;
   onLongTap?: (x: number, y: number) => void;
+  onPointer?: (kind: "down" | "move" | "up", x: number, y: number) => void;
+  onGesture?: (active: boolean) => void;
+  onInput?: (i: DeskInput) => void;
 }) {
   const [boxW, setBoxW] = useState(0);
   const onLayout = (e: LayoutChangeEvent) => setBoxW(e.nativeEvent.layout.width);
@@ -203,17 +332,79 @@ export function DesktopView({
   const scale = rw && boxW ? boxW / rw : 0;
   const toScreen = (lx: number, ly: number): [number, number] => [Math.round((region?.x || 0) + lx / scale), Math.round((region?.y || 0) + ly / scale)];
   const aspect = rw && rh ? rw / rh : frame ? frame.w / frame.h : 16 / 10;
+  const g = useRef<{ sx: number; sy: number; px: number; py: number; lx: number; ly: number; drag: boolean; long: boolean; moved: number; timer: ReturnType<typeof setTimeout> | null } | null>(null);
+  const web = Platform.OS === "web" && !!onInput;
+  const interactive = !web && !!onTap && !!frame && scale > 0;
+  const surface = useRef<View>(null);
+  useWebInput(surface, toScreen, onInput, web && !!frame);
+  const at = (e: GestureResponderEvent): [number, number] => {
+    const s = g.current!;
+    const lx = Math.min(Math.max(s.sx + e.nativeEvent.pageX - s.px, 0), boxW - 1);
+    const ly = Math.min(Math.max(s.sy + e.nativeEvent.pageY - s.py, 0), rh * scale - 1);
+    return [lx, ly];
+  };
+  const finish = (e: GestureResponderEvent | null) => {
+    const s = g.current;
+    g.current = null;
+    if (!s) return;
+    if (s.timer) clearTimeout(s.timer);
+    if (s.drag) {
+      onPointer?.("up", ...toScreen(s.lx, s.ly));
+    } else if (e && !s.long) {
+      onTap?.(...toScreen(s.sx, s.sy));
+    }
+    onGesture?.(false);
+  };
+  const responder = interactive
+    ? {
+        onStartShouldSetResponder: () => true,
+        onMoveShouldSetResponder: () => true,
+        onResponderTerminationRequest: () => false,
+        onResponderGrant: (e: GestureResponderEvent) => {
+          const { locationX, locationY, pageX, pageY } = e.nativeEvent;
+          const s = { sx: locationX, sy: locationY, px: pageX, py: pageY, lx: locationX, ly: locationY, drag: false, long: false, moved: 0, timer: null as ReturnType<typeof setTimeout> | null };
+          s.timer = setTimeout(() => {
+            if (g.current !== s || s.drag) return;
+            s.long = true;
+            onLongTap?.(...toScreen(s.sx, s.sy));
+          }, 500);
+          g.current = s;
+          onGesture?.(true);
+        },
+        onResponderMove: (e: GestureResponderEvent) => {
+          const s = g.current;
+          if (!s || s.long) return;
+          const [lx, ly] = at(e);
+          s.lx = lx;
+          s.ly = ly;
+          if (!s.drag) {
+            if (!onPointer || Math.hypot(lx - s.sx, ly - s.sy) < 8) return;
+            s.drag = true;
+            if (s.timer) clearTimeout(s.timer);
+            onPointer("down", ...toScreen(s.sx, s.sy));
+          }
+          const now = Date.now();
+          if (now - s.moved < 40) return;
+          s.moved = now;
+          onPointer?.("move", ...toScreen(lx, ly));
+        },
+        onResponderRelease: (e: GestureResponderEvent) => {
+          if (g.current?.drag) {
+            const [lx, ly] = at(e);
+            g.current.lx = lx;
+            g.current.ly = ly;
+          }
+          finish(e);
+        },
+        onResponderTerminate: () => finish(null),
+      }
+    : {};
   return (
     <View style={{ width: "100%", aspectRatio: aspect, backgroundColor: theme.colors.surface2, overflow: "hidden" }} onLayout={onLayout}>
       {frame && (
-        <Pressable
-          style={{ flex: 1 }}
-          disabled={!onTap}
-          onPress={(e) => scale && onTap?.(...toScreen(e.nativeEvent.locationX, e.nativeEvent.locationY))}
-          onLongPress={(e) => scale && onLongTap?.(...toScreen(e.nativeEvent.locationX, e.nativeEvent.locationY))}
-        >
+        <View ref={surface} style={{ flex: 1 }} {...responder}>
           <Image source={{ uri: frame.uri }} style={{ width: "100%", height: "100%" }} resizeMode="stretch" fadeDuration={0} />
-        </Pressable>
+        </View>
       )}
       {frame &&
         region &&

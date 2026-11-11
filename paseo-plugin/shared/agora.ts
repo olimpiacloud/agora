@@ -32,12 +32,14 @@ export const sendInput = defineRpc({
   name: "agora.input",
   input: z.object({
     workspace: z.string(),
-    action: z.enum(["click", "double_click", "right_click", "type", "key", "scroll", "move"]),
+    action: z.enum(["click", "double_click", "right_click", "type", "key", "scroll", "move", "down", "up"]),
     x: z.number().optional(),
     y: z.number().optional(),
     text: z.string().optional(),
     keys: z.string().optional(),
     dy: z.number().optional(),
+    dx: z.number().optional(),
+    button: z.number().optional(),
   }),
   output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
 });

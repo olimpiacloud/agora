@@ -1,10 +1,10 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import { type PluginWorkspacePanelProps, useRpc, useTabState, useWorkspace } from "@getpaseo/plugin/client";
-import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { z } from "zod";
 import { control, ensureWorkspace, listWorkspaces, sendInput } from "../shared/agora";
-import { type Cur, DesktopView, statusColor, useLive } from "./stream";
+import { type Cur, type DeskInput, DesktopView, statusColor, useLive } from "./stream";
 
 const tabSchema = z.object({ workspace: z.string(), view: z.enum(["desktop", "wall"]).optional() });
 
@@ -50,6 +50,9 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
   const [text, setText] = useState("");
   const [paused, setPaused] = useState(false);
   const [width, setWidth] = useState(0);
+  const [gesture, setGesture] = useState(false);
+  const chain = useRef<Promise<void>>(Promise.resolve());
+  const pendingMove = useRef<{ x: number; y: number } | null>(null);
   const ws = state.workspace;
   const view = state.view || "desktop";
   const lv = useLive({ workspace: ws || null, tier: "full", maxWidth: layout.compact ? 960 : 1440, metaOnly: view === "wall" || paused, enabled: !!ws });
@@ -91,6 +94,35 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
     const r = await input(a);
     setActErr(r.ok ? null : r.error);
   };
+  const queue = (f: () => Promise<void>) => {
+    chain.current = chain.current.then(f, f);
+  };
+  const pointer = (kind: "down" | "move" | "up", x: number, y: number) => {
+    if (kind === "move") {
+      const queued = pendingMove.current !== null;
+      pendingMove.current = { x, y };
+      if (!queued)
+        queue(async () => {
+          const p = pendingMove.current;
+          pendingMove.current = null;
+          if (p) await act({ workspace: ws, action: "move", x: p.x, y: p.y });
+        });
+      return;
+    }
+    if (kind === "up") pendingMove.current = null;
+    queue(() => act({ workspace: ws, action: kind, x, y }));
+  };
+  const deskInput = (i: DeskInput) => {
+    if (i.kind === "move") return pointer("move", i.x, i.y);
+    if (i.kind === "up") pendingMove.current = null;
+    if (i.kind === "down" || i.kind === "up") {
+      const { kind, x, y, button } = i;
+      return queue(() => act({ workspace: ws, action: kind, x, y, button }));
+    }
+    if (i.kind === "scroll") return queue(() => act({ workspace: ws, action: "scroll", x: i.x, y: i.y, dy: i.dy, dx: i.dx }));
+    if (i.kind === "type") return queue(() => act({ workspace: ws, action: "type", text: i.text }));
+    if (i.kind === "key") queue(() => act({ workspace: ws, action: "key", keys: i.keys }));
+  };
   const op = async (o: "control-take" | "control-return" | "resume") => {
     const r = await ctl({ workspace: ws, op: o });
     setActErr(r.ok ? null : r.error);
@@ -108,7 +140,7 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
   );
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={{ paddingBottom: 24 }} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+    <ScrollView scrollEnabled={Platform.OS === "web" || !gesture} style={styles.root} contentContainerStyle={{ paddingBottom: 24 }} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
       <View style={styles.bar}>
         {wss.map((w) => (
           <Chip key={w.id} label={`${w.name}${w.linked ? " ★" : ""} · ${w.state}`} on={w.id === ws} onPress={() => setState({ workspace: w.id, view })} />
@@ -143,7 +175,7 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
             {view === "desktop" && <Chip label={paused ? "▶ live" : "⏸ pause"} onPress={() => setPaused(!paused)} />}
             {lv.status === "suspended" && <Chip label="Resume" on onPress={() => void op("resume")} />}
             {iHold ? <Chip label="Return control to agents" on onPress={() => void op("control-return")} /> : <Chip label="Take control" onPress={() => void op("control-take")} />}
-            <Text style={styles.muted}>{status ? status : view === "desktop" && region ? `${region.sw}×${region.sh} · tap to click, long press to right click` : ""}</Text>
+            <Text style={styles.muted}>{status ? status : view === "desktop" && region ? (Platform.OS === "web" ? `${region.sw}×${region.sh} · click the desktop to use mouse, wheel and keyboard` : `${region.sw}×${region.sh} · tap to click, drag to drag, long press to right click`) : ""}</Text>
           </View>
           {view === "wall" ? (
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: pad, padding: pad }}>
@@ -162,6 +194,9 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
                 cursors={cursors}
                 onTap={(x, y) => void act({ workspace: ws, action: "click", x, y })}
                 onLongTap={(x, y) => void act({ workspace: ws, action: "right_click", x, y })}
+                onPointer={pointer}
+                onGesture={setGesture}
+                onInput={deskInput}
               />
               <View style={styles.bar}>
                 <TextInput
