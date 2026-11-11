@@ -160,7 +160,7 @@ func (m *Manager) reapApps(id string, r *Runtime) {
 	}
 	r.mu.Unlock()
 	for _, a := range apps {
-		if time.Since(a.started) < m.cfg.TabIdle || m.cursorLive(a.owner) {
+		if time.Since(a.started) < m.cfg.TabIdle || m.ownerActive(a.owner) {
 			continue
 		}
 		syscall.Kill(-a.pid, syscall.SIGTERM)
@@ -258,7 +258,7 @@ func (m *Manager) Asleep(ws string) bool {
 	return w != nil && (w.State == StateSuspended || w.State == StateCreated)
 }
 
-func (m *Manager) cursorLive(id string) bool {
+func (m *Manager) ownerActive(id string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	c := m.cursors[id]
