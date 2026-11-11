@@ -472,3 +472,38 @@ func TestUploadDownloadDialogDnD(t *testing.T) {
 	h.waitEval(c, ws, tab, "document.title", "dropped", 5*time.Second)
 	t.Log("PASS compat: upload, download, JS dialog, drag")
 }
+
+func TestDeletedCursorClosesItsTabsAndApps(t *testing.T) {
+	if _, err := exec.LookPath("xterm"); err != nil {
+		t.Skip("xterm missing")
+	}
+	h := newH(t)
+	ws := h.workspace("cleanup")
+	id, c := h.cursor(h.admin, map[string]any{"name": "paseo", "workspace": ws, "labels": map[string]string{"keep_tabs": "true"}})
+	target := h.tab(c, ws, "about:blank")
+	app := h.do(c, "POST", "/v1/workspaces/"+ws+"/apps", map[string]any{"command": "xterm"})
+	pid := int(app["pid"].(float64))
+	h.do(h.admin, "DELETE", "/v1/cursors/"+id, nil)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		tabOpen := false
+		for _, tb := range h.doList(h.admin, "GET", "/v1/workspaces/"+ws+"/tabs") {
+			if tb["target"] == target {
+				tabOpen = true
+			}
+		}
+		appAlive := false
+		for _, p := range h.doList(h.admin, "GET", "/v1/workspaces/"+ws+"/processes") {
+			if int(p["pid"].(float64)) == pid {
+				appAlive = true
+			}
+		}
+		if !tabOpen && !appAlive {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("deleted cursor left tab open=%v app alive=%v", tabOpen, appAlive)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}

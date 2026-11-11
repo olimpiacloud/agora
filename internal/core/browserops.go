@@ -114,6 +114,13 @@ func (m *Manager) ListTabs(ctx context.Context, ws string) ([]map[string]any, er
 	return out, nil
 }
 
+func (m *Manager) cursorLive(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := m.cursors[id]
+	return c != nil && !c.Status.Terminal()
+}
+
 func (m *Manager) tabFor(ctx context.Context, ws string, c *Cursor, target string) (*Runtime, *browser.Tab, error) {
 	r, b, err := m.browserFor(ctx, ws)
 	if err != nil {
@@ -122,6 +129,9 @@ func (m *Manager) tabFor(ctx context.Context, ws string, c *Cursor, target strin
 	r.mu.Lock()
 	owner := r.tabOwner[target]
 	r.mu.Unlock()
+	if owner != "" && !m.cursorLive(owner) {
+		owner = ""
+	}
 	if c != nil && owner != "" && owner != c.ID && !m.IsAncestor(c.ID, owner) {
 		return nil, nil, fmt.Errorf("%w: tab is owned by cursor %s", ErrForbidden, owner)
 	}
