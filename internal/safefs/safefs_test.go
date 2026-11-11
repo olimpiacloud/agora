@@ -181,3 +181,67 @@ func TestWalkFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestOpenat2Fallback(t *testing.T) {
+	base, _ := setup(t)
+	if err := os.WriteFile(filepath.Join(base, "f"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	orig := openat2
+	t.Cleanup(func() {
+		openat2 = orig
+		noOpenat2.Store(false)
+	})
+	for _, errno := range []unix.Errno{unix.ENOSYS, unix.EPERM, unix.EINVAL, unix.E2BIG} {
+		noOpenat2.Store(false)
+		calls := 0
+		openat2 = func(int, string, *unix.OpenHow) (int, error) {
+			calls++
+			return -1, errno
+		}
+		for i := 0; i < 3; i++ {
+			b, err := ReadFileBeneath(base, "f")
+			if err != nil || string(b) != "x" {
+				t.Fatalf("%v: read %q %v", errno, b, err)
+			}
+		}
+		if calls != 1 {
+			t.Fatalf("%v: openat2 called %d times", errno, calls)
+		}
+	}
+	noOpenat2.Store(false)
+	calls := 0
+	openat2 = func(int, string, *unix.OpenHow) (int, error) {
+		calls++
+		return -1, unix.ELOOP
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := ReadFileBeneath(base, "f"); !errors.Is(err, unix.ELOOP) {
+			t.Fatalf("ELOOP fell back: %v", err)
+		}
+	}
+	if calls != 2 || noOpenat2.Load() {
+		t.Fatalf("ELOOP disabled openat2: calls %d", calls)
+	}
+}
+
+func TestReadFileTooLarge(t *testing.T) {
+	base, _ := setup(t)
+	f, err := os.Create(filepath.Join(base, "big"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(MaxReadSize + 1); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if _, err := ReadFileBeneath(base, "big"); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("big read: %v", err)
+	}
+	if err := os.Truncate(filepath.Join(base, "big"), MaxReadSize); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := ReadFileBeneath(base, "big"); err != nil || len(b) != MaxReadSize {
+		t.Fatalf("max read: %d %v", len(b), err)
+	}
+}

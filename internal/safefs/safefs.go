@@ -7,12 +7,26 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 
 	"golang.org/x/sys/unix"
 )
 
 var ErrUnsafe = errors.New("unsafe path")
+
+var ErrTooLarge = errors.New("file too large")
+
+const MaxReadSize = 16 << 20
+
+var (
+	openat2   = unix.Openat2
+	noOpenat2 atomic.Bool
+)
+
+func openat2Unusable(err error) bool {
+	return err == unix.ENOSYS || err == unix.EPERM || err == unix.EINVAL || err == unix.E2BIG
+}
 
 func split(rel string) ([]string, error) {
 	rel = filepath.Clean(rel)
@@ -41,9 +55,15 @@ func OpenBeneath(base, rel string, flags int, mode os.FileMode) (*os.File, error
 	if flags&unix.O_CREAT != 0 {
 		how.Mode = uint64(mode.Perm())
 	}
-	fd, err := unix.Openat2(bfd, strings.Join(parts, "/"), how)
-	if err == unix.ENOSYS {
+	var fd int
+	if noOpenat2.Load() {
 		fd, err = walk(bfd, parts, flags, uint32(mode.Perm()))
+	} else {
+		fd, err = openat2(bfd, strings.Join(parts, "/"), how)
+		if openat2Unusable(err) {
+			noOpenat2.Store(true)
+			fd, err = walk(bfd, parts, flags, uint32(mode.Perm()))
+		}
 	}
 	if err != nil {
 		return nil, &os.PathError{Op: "open", Path: name, Err: err}
@@ -124,10 +144,21 @@ func ReadFileBeneath(base, rel string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	if _, err := regular(f); err != nil {
+	st, err := regular(f)
+	if err != nil {
 		return nil, err
 	}
-	return io.ReadAll(f)
+	if st.Size > MaxReadSize {
+		return nil, fmt.Errorf("%w: %s is %d bytes", ErrTooLarge, f.Name(), st.Size)
+	}
+	b, err := io.ReadAll(io.LimitReader(f, MaxReadSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > MaxReadSize {
+		return nil, fmt.Errorf("%w: %s", ErrTooLarge, f.Name())
+	}
+	return b, nil
 }
 
 func WriteFileBeneath(base, rel string, data []byte, mode os.FileMode, uid, gid int) error {
