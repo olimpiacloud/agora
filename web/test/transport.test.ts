@@ -105,4 +105,58 @@ describe('DesktopSession over WebSocket', () => {
     await sleep(700)
     expect(FakeSocket.all.length).toBe(1)
   })
+
+  test('an in-session bye closes the WebSocket and ends as suspended', async () => {
+    const { s, log } = makeSession()
+    await s.start()
+    const sock = FakeSocket.all[0]
+    sock.open()
+    sock.text({ type: 'hello', viewer: 'v1', width: 1280, height: 800 })
+    sock.text({ type: 'bye', reason: 'suspended' })
+    expect(sock.readyState).toBe(3)
+    expect(log.slice(0, -1)).toContain('msg:bye')
+    expect(log[log.length - 1]).toBe('status:suspended')
+    await sleep(700)
+    expect(FakeSocket.all.length).toBe(1)
+    s.close()
+  })
+
+  test('a frozen workspace is not reconnected automatically', async () => {
+    const { s, log } = makeSession()
+    await s.start()
+    const sock = FakeSocket.all[0]
+    sock.open()
+    sock.text({ type: 'hello', viewer: 'v1', width: 1280, height: 800 })
+    sock.text({ type: 'bye', reason: 'workspace frozen' })
+    expect(log[log.length - 1]).toBe('status:suspended')
+    await sleep(700)
+    expect(FakeSocket.all.length).toBe(1)
+    s.wake()
+    expect(FakeSocket.all.length).toBe(2)
+    expect(FakeSocket.all[1].url).not.toContain('wake=0')
+    s.close()
+  })
+
+  test('other bye reasons reconnect', async () => {
+    const { s, log } = makeSession()
+    await s.start()
+    const sock = FakeSocket.all[0]
+    sock.open()
+    sock.text({ type: 'hello', viewer: 'v1', width: 1280, height: 800 })
+    sock.text({ type: 'bye', reason: 'display crashed' })
+    expect(sock.readyState).toBe(3)
+    expect(log[log.length - 1]).toMatch(/^status:reconnecting in \d+s$/)
+    await sleep(700)
+    expect(FakeSocket.all.length).toBe(2)
+    s.close()
+  })
+
+  test('a bye over WebRTC is delivered before the suspended status', () => {
+    const { s, log } = makeSession('webrtc')
+    const x = s as unknown as { pc?: { close(): void }; handleText(d: string): void }
+    x.pc = { close() {} }
+    x.handleText(JSON.stringify({ type: 'bye', reason: 'suspended' }))
+    expect(log).toEqual(['msg:bye', 'status:suspended'])
+    s.close()
+  })
 })

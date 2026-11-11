@@ -112,6 +112,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Shutdown waits for launched agents to record their result before the final state flush.
 - Detailed usage of a suspending workspace, and the set of purged workspace logs, no longer grow without bound.
 - The Paseo plugin removes the Agora workspace of a Paseo workspace when it is archived, and its periodic reconcile removes workspaces whose Paseo workspace no longer exists (never-started ones are purged; ones that ran keep their profile on disk). Busy workspaces and workspaces without a Paseo label are left alone. Scheduled Paseo runs no longer pile up workspaces.
+- The web viewer shows Resume after the daemon ends a session (it showed "session ended" forever, on both WebRTC and WebSocket) and no longer thaws a frozen workspace by reconnecting on its own. Pointer positions follow a desktop resize over WebRTC, and keys and mouse buttons held when the viewer loses focus, is hidden or closes are released instead of staying pressed on the desktop.
 
 ## [0.1.0] - 2026-11-06
 
