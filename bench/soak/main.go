@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -79,13 +80,9 @@ func count(m *sync.Map, k string) {
 }
 
 func freePort() int {
-	for p := 7800 + rand.IntN(100); ; p = 7800 + rand.IntN(100) {
-		l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p))
-		if err == nil {
-			l.Close()
-			return p
-		}
-	}
+	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
 }
 
 func do(c *client.Client, op, method, path string, body any) map[string]any {
@@ -539,7 +536,7 @@ func main() {
 	failed := false
 	var md strings.Builder
 	host, _ := os.Hostname()
-	fmt.Fprintf(&md, "# Soak test %s\n\nHost %s, %d CPUs, binary `%s`, encoder preference %q. Duration %v, %d browsing cursors (real pages: %v), 1 desktop cursor (xclock/xterm/xeyes/xlogo, mouse, keyboard, window move/close, process kill), 1 viewer cycling WebSocket (interactive and observation) and JPEG streams, freeze/thaw and suspend/resume alternating every %v. Samples every %v; the first %v are warm-up and excluded from the leak check.\n\n", stamp, host, numCPU(), *bin, os.Getenv("AGORA_ENCODER"), *duration, *cursors, *real, *cycle/2, *every, *warmup)
+	fmt.Fprintf(&md, "# Soak test %s\n\nHost %s, %d CPUs, binary `%s`, encoder preference %q. Duration %v, %d browsing cursors (real pages: %v), 1 desktop cursor (xclock/xterm/xeyes/xlogo, mouse, keyboard, window move/close, process kill), 1 viewer cycling WebSocket (interactive and observation) and JPEG streams, freeze/thaw and suspend/resume alternating every %v. Samples every %v; the first %v are warm-up and excluded from the leak check.\n\n", stamp, host, runtime.NumCPU(), *bin, os.Getenv("AGORA_ENCODER"), *duration, *cursors, *real, *cycle/2, *every, *warmup)
 	fmt.Fprintf(&md, "A metric fails when the medians of the first, middle and last thirds of the steady-state samples increase monotonically and the total growth exceeds max(absolute, relative × first third).\n\n| Metric | First third | Middle | Last third | Min | Max | Growth | Tolerance | Verdict | Trend |\n|---|---:|---:|---:|---:|---:|---:|---:|---|---|\n")
 	for _, v := range verdicts {
 		st := "ok"
@@ -575,9 +572,4 @@ func main() {
 		daemon.Wait()
 		os.Exit(1)
 	}
-}
-
-func numCPU() int {
-	b, _ := os.ReadFile("/proc/cpuinfo")
-	return strings.Count(string(b), "processor\t:")
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -29,8 +30,6 @@ func New(m *core.Manager, auth *Auth, ui fs.FS) *Server {
 	s.routes()
 	return s
 }
-
-func (s *Server) Handler() http.Handler { return s }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -569,7 +568,7 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 	case "start":
 		err = s.m.Start(ctx, id)
 	case "suspend":
-		err = s.m.Suspend(ctx, id, defStr(body.Reason, "api"))
+		err = s.m.Suspend(ctx, id, cmp.Or(body.Reason, "api"))
 	case "resume":
 		err = s.m.Resume(ctx, id)
 	case "freeze":
@@ -577,7 +576,7 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 	case "thaw":
 		err = s.m.Thaw(ctx, id)
 	case "checkpoint":
-		res, err = s.m.Checkpoint(ctx, id, defStr(body.Reason, "api"), body.Snapshot)
+		res, err = s.m.Checkpoint(ctx, id, cmp.Or(body.Reason, "api"), body.Snapshot)
 	case "fork":
 		res, err = s.m.Fork(ctx, id, body.Name)
 	case "resize":
@@ -618,13 +617,6 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 		return
 	}
 	writeJSON(w, 200, res)
-}
-
-func defStr(s, d string) string {
-	if s == "" {
-		return d
-	}
-	return s
 }
 
 func (s *Server) createCursor(w http.ResponseWriter, r *http.Request, p *Principal) {
@@ -717,20 +709,20 @@ func (s *Server) cursorOp(w http.ResponseWriter, r *http.Request, p *Principal) 
 		}
 		err = s.m.Complete(id, body.Result)
 	case "fail":
-		err = s.m.Fail(id, defStr(body.Error, body.Message))
+		err = s.m.Fail(id, cmp.Or(body.Error, body.Message))
 	case "cancel":
 		cascade := body.Cascade == nil || *body.Cascade
 		if isSelf && !p.Admin {
-			err = s.m.CancelCursor(id, defStr(body.Reason, "self-cancel"), cascade)
+			err = s.m.CancelCursor(id, cmp.Or(body.Reason, "self-cancel"), cascade)
 		} else {
-			err = s.m.CancelCursor(id, defStr(body.Reason, "cancelled by "+defStr(p.CursorID(), "admin")), cascade)
+			err = s.m.CancelCursor(id, cmp.Or(body.Reason, "cancelled by "+cmp.Or(p.CursorID(), "admin")), cascade)
 		}
 	case "pause":
 		err = s.m.Pause(id)
 	case "resume":
 		err = s.m.ResumeCursor(id)
 	case "message":
-		from := defStr(p.CursorID(), "admin")
+		from := cmp.Or(p.CursorID(), "admin")
 		res, err = s.m.SendMessage(from, id, body.Body)
 	case "transfer":
 		if !p.Admin {

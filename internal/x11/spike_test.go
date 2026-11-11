@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jezek/xgb/xproto"
 )
 
 func TestMPXConcurrentTyping(t *testing.T) {
@@ -95,3 +97,5 @@ func requireXvfb(t *testing.T) {
 		t.Skip("Xvfb missing")
 	}
 }
+
+func xprotoWin(id uint32) xproto.Window { return xproto.Window(id) }

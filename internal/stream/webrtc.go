@@ -70,7 +70,6 @@ type RTCSession struct {
 	PC     *webrtc.PeerConnection
 	Track  *webrtc.TrackLocalStaticSample
 	Sink   *QueueSink
-	Events chan []byte
 	closed chan struct{}
 	once   sync.Once
 }

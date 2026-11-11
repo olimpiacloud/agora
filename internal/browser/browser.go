@@ -458,11 +458,6 @@ func (b *Browser) Kill() {
 	}
 }
 
-var challengeMarkers = []string{
-	"google.com/recaptcha", "recaptcha.net/recaptcha", "hcaptcha.com", "challenges.cloudflare.com",
-	"arkoselabs.com", "funcaptcha.com", "geo.captcha-delivery.com", "captcha",
-}
-
 func (b *Browser) checkChallenge(targetID string) {
 	t := b.Tab(targetID)
 	if t == nil {

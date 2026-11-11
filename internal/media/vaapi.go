@@ -655,8 +655,6 @@ func minQP(crf int) int {
 
 func (x *VAAPIEncoder) Name() string { return "vaapi" }
 
-func (x *VAAPIEncoder) Size() (int, int) { return x.w, x.h }
-
 func (x *VAAPIEncoder) Reconfigure(crf, maxKbps int) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()

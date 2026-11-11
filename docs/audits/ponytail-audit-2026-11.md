@@ -116,7 +116,7 @@ Status column: **fixed** means fixed on `main` with the commit listed. **open** 
 
 20. **Dead code.**
     - Removed: `xiWarpPointer`, `Display.Size`, `WM.Clients`, `WM.Layout`, `Clipboard.owned` (b0765d3, 383fe94), and the always-empty `start` slice in `Runtime.Browser` (3e829d5).
-    - Still there: `scripts/ui-audit.js` is a byte copy of `internal/browser/audit.js`. `scripts/audit-tab.sh` and `paseo-plugin/client/web.ts` are referenced nowhere. A `.pyc` file is committed under `scripts/__pycache__`.
+    - Still there: `scripts/ui-audit.js` is a byte copy of `internal/browser/audit.js`. `scripts/audit-tab.sh` and `paseo-plugin/client/web.ts` are deleted. A `.pyc` file is committed under `scripts/__pycache__`.
 
 Left out: 9 smaller findings. Among them: a data race on `Display.Width`/`Height` during resize, and fullscreen "toggle" requests that never leave fullscreen. Also, `Complete` and `Fail` overwrote the result of an already-finished cursor (fixed in e2e8ac5). Two more: CDP writes ignore the context when Chrome stops reading its pipe, and the event audit logs in `events/*.jsonl` are never rotated.
 

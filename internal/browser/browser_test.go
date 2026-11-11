@@ -2,6 +2,8 @@ package browser
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"os/user"
@@ -126,4 +128,17 @@ func requireXvfb(t *testing.T) {
 	if _, err := exec.LookPath("Xvfb"); err != nil {
 		t.Skip("Xvfb missing")
 	}
+}
+
+func (t *Tab) WindowTitleMarker(ctx context.Context, marker string) (func(), error) {
+	var prev string
+	if err := t.Eval(ctx, fmt.Sprintf("(()=>{const p=document.title;document.title=%q;return p})()", marker), &prev); err != nil {
+		return nil, err
+	}
+	return func() {
+		c, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		b, _ := json.Marshal(prev)
+		t.Eval(c, fmt.Sprintf("document.title=%s", b), nil)
+	}, nil
 }

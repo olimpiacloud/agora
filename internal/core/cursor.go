@@ -550,7 +550,3 @@ func (m *Manager) WaitCursors(ctx context.Context, ids []string, all bool, timeo
 		}
 	}
 }
-
-func (m *Manager) Tree(root string) []*Cursor {
-	return m.ListCursors(CursorQuery{Root: root})
-}

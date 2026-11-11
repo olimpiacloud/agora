@@ -1,6 +1,7 @@
 package core
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -241,11 +242,11 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 		}
 	case "screenshot":
 		var b []byte
-		b, err = tab.ScreenshotScaled(ctx, defStr(a.Format, "jpeg"), a.Quality, a.Full, a.MaxWidth)
+		b, err = tab.ScreenshotScaled(ctx, cmp.Or(a.Format, "jpeg"), a.Quality, a.Full, a.MaxWidth)
 		if err == nil {
 			res["image"] = base64.StdEncoding.EncodeToString(b)
-			res["mime"] = "image/" + defStr(a.Format, "jpeg")
-			res["shot"] = m.StoreShot(ws, cursorID, "image/"+defStr(a.Format, "jpeg"), b)
+			res["mime"] = "image/" + cmp.Or(a.Format, "jpeg")
+			res["shot"] = m.StoreShot(ws, cursorID, "image/"+cmp.Or(a.Format, "jpeg"), b)
 			var vp [2]float64
 			if e := tab.Eval(ctx, "[innerWidth, innerHeight]", &vp); e == nil {
 				res["viewport"] = vp
@@ -365,13 +366,6 @@ func (m *Manager) tabToScreen(ctx context.Context, r *Runtime, tab *browser.Tab,
 		return -1, -1
 	}
 	return sx, sy
-}
-
-func defStr(s, d string) string {
-	if s == "" {
-		return d
-	}
-	return s
 }
 
 func (m *Manager) BrowserRestart(ctx context.Context, ws string) error {

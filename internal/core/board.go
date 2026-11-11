@@ -1,6 +1,7 @@
 package core
 
 import (
+	"cmp"
 	"fmt"
 	"sort"
 	"strings"
@@ -69,7 +70,7 @@ func (m *Manager) BoardPost(ws, cursor, kind, topic, text string) (*BoardPost, e
 	if text == "" && topic == "" {
 		return nil, fmt.Errorf("empty post")
 	}
-	holder := defStr(cursor, "admin")
+	holder := cmp.Or(cursor, "admin")
 	m.mu.Lock()
 	if w := m.ws[ws]; w == nil || w.State == StateDestroyed {
 		m.mu.Unlock()

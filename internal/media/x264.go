@@ -124,8 +124,6 @@ func NewH264(o H264Options) (*H264Encoder, error) {
 
 func (x *H264Encoder) Name() string { return "x264" }
 
-func (x *H264Encoder) Size() (int, int) { return x.w, x.h }
-
 func (x *H264Encoder) Reconfigure(crf, maxKbps int) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()

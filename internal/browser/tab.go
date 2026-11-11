@@ -441,29 +441,6 @@ func (t *Tab) Close(ctx context.Context) error {
 	return err
 }
 
-func (t *Tab) SetViewport(ctx context.Context, w, h int) error {
-	var win struct {
-		WindowID int `json:"windowId"`
-	}
-	if err := t.b.cdp.Call(ctx, "", "Browser.getWindowForTarget", map[string]any{"targetId": t.TargetID}, &win); err != nil {
-		return err
-	}
-	return t.b.cdp.Call(ctx, "", "Browser.setWindowBounds", map[string]any{"windowId": win.WindowID, "bounds": map[string]any{"width": w, "height": h}}, nil)
-}
-
-func (t *Tab) WindowTitleMarker(ctx context.Context, marker string) (func(), error) {
-	var prev string
-	if err := t.Eval(ctx, fmt.Sprintf("(()=>{const p=document.title;document.title=%q;return p})()", marker), &prev); err != nil {
-		return nil, err
-	}
-	return func() {
-		c, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		b, _ := json.Marshal(prev)
-		t.Eval(c, fmt.Sprintf("document.title=%s", b), nil)
-	}, nil
-}
-
 func (t *Tab) Emulate(ctx context.Context, w, h int, scale float64, mobile bool) error {
 	if w == 0 || h == 0 {
 		t.mu.Lock()

@@ -152,8 +152,6 @@ func NewManager(cfg Config) (*Manager, error) {
 
 func (m *Manager) Config() Config { return m.cfg }
 
-func (m *Manager) AppsCred() (int, int) { return m.uid, m.gid }
-
 func (m *Manager) RTC() *stream.RTC { return m.rtc }
 
 func (m *Manager) Cgroups() bool { return m.cg != nil }

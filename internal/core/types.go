@@ -46,7 +46,6 @@ type WorkspaceConfig struct {
 	TTL           Duration `json:"ttl,omitempty"`
 	Budget        Budget   `json:"budget"`
 	BrowserArgs   []string `json:"browser_args,omitempty"`
-	Retention     string   `json:"retention,omitempty"`
 	AutostartURLs []string `json:"autostart_urls,omitempty"`
 	Sandbox       bool     `json:"sandbox,omitempty"`
 }
