@@ -20,8 +20,8 @@ sudo apt install build-essential pkg-config libx264-dev libva-dev xvfb
 ```
 make build                # bin/agora with version, commit and build date
 make vet
-make check              # quick check: gofmt, vet, Go unit tests and TypeScript typechecks; needs no X or Chrome (only the cgo build deps)
-go test ./internal/... -count=1
+make check              # quick check: gofmt, vet, Go unit tests with the race detector and TypeScript typechecks; needs no X or Chrome (only the cgo build deps)
+go test -race ./internal/... -count=1
 go test ./e2e/ -count=1   # starts real Xvfb and Chrome in-process
 make web                  # rebuilds web/dist, which the binary embeds
 cd paseo-plugin && bun install && bun run typecheck
@@ -34,7 +34,7 @@ bin/agora serve --listen 127.0.0.1:7799 --home /tmp/agora-dev
 AGORA_URL=http://127.0.0.1:7799 AGORA_TOKEN=$(cat /tmp/agora-dev/admin.token) bin/agora api GET /v1/system
 ```
 
-`gofmt -l cmd internal e2e web` must print nothing. CI runs vet, gofmt, the unit tests, the e2e suite, the dashboard build and the plugin typecheck.
+`gofmt -l cmd internal e2e web` must print nothing. CI runs vet, gofmt, the unit tests with the race detector, the e2e suite, the dashboard build and the plugin typecheck.
 
 `e2e/` covers the acceptance criteria: persistent sessions, five subagents, concurrent multi-cursor input, CAPTCHA and human takeover, freeze and suspend, streaming without viewers and reconnection, plus upload, download, dialogs and drag. If you change behavior, add or adjust a test there.
 
