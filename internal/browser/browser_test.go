@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"os"
+	"os/exec"
 	"os/user"
 	"strconv"
 	"strings"
@@ -26,6 +27,7 @@ func appUser(t *testing.T) (uint32, uint32) {
 }
 
 func TestBrowserSemantic(t *testing.T) {
+	requireXvfb(t)
 	uid, gid := appUser(t)
 	dir, _ := os.MkdirTemp("/tmp", "agora-bt-")
 	defer os.RemoveAll(dir)
@@ -116,5 +118,12 @@ func TestBrowserSemantic(t *testing.T) {
 	restore()
 	if !found {
 		t.Fatal("marker window not found")
+	}
+}
+
+func requireXvfb(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("Xvfb"); err != nil {
+		t.Skip("Xvfb missing")
 	}
 }

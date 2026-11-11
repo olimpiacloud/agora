@@ -2,16 +2,13 @@ package x11
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestClipboardLimits(t *testing.T) {
-	if _, err := exec.LookPath("Xvfb"); err != nil {
-		t.Skip("Xvfb missing")
-	}
+	requireXvfb(t)
 	d, err := StartDisplay(context.Background(), DisplayOptions{Width: 640, Height: 480, RunDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)

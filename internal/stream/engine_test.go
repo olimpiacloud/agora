@@ -2,6 +2,7 @@ package stream
 
 import (
 	"errors"
+	"os/exec"
 
 	"context"
 	"github.com/olimpiacloud/agora/internal/media"
@@ -20,6 +21,7 @@ func (s *countSink) Push(f *Frame) bool { s.n.Add(1); return true }
 func (s *countSink) Close()             {}
 
 func TestEngineStopsWhenDisplayExits(t *testing.T) {
+	requireXvfb(t)
 	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 640, Height: 480, RunDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -51,6 +53,7 @@ func (s *refuseSink) ID() string         { return "slow" }
 func (s *refuseSink) Push(f *Frame) bool { s.n.Add(1); return false }
 
 func TestSlowSinkKeyframesRateLimited(t *testing.T) {
+	requireXvfb(t)
 	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 640, Height: 480, RunDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +80,7 @@ func TestSlowSinkKeyframesRateLimited(t *testing.T) {
 }
 
 func TestEngineRestartsAfterEncoderError(t *testing.T) {
+	requireXvfb(t)
 	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 640, Height: 480, RunDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -104,5 +108,12 @@ func TestEngineRestartsAfterEncoderError(t *testing.T) {
 	}
 	if st := e.Stats(); st.Starts < 2 {
 		t.Fatalf("starts = %d", st.Starts)
+	}
+}
+
+func requireXvfb(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("Xvfb"); err != nil {
+		t.Skip("Xvfb missing")
 	}
 }

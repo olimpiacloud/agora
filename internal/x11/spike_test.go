@@ -15,6 +15,7 @@ func TestMPXConcurrentTyping(t *testing.T) {
 		t.Skip("xterm missing")
 	}
 	dir := t.TempDir()
+	requireXvfb(t)
 	d, err := StartDisplay(context.Background(), DisplayOptions{Width: 1280, Height: 800, RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -86,4 +87,11 @@ func TestMPXConcurrentTyping(t *testing.T) {
 	ax, ay := sa.Position()
 	bx, by := sb.Position()
 	t.Logf("pointers A=(%d,%d) B=(%d,%d)", ax, ay, bx, by)
+}
+
+func requireXvfb(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("Xvfb"); err != nil {
+		t.Skip("Xvfb missing")
+	}
 }

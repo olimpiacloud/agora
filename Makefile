@@ -4,7 +4,7 @@ DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 PKG := github.com/olimpiacloud/agora/internal/core
 LDFLAGS := -s -w -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PKG).Date=$(DATE)
 
-.PHONY: build web test vet fmt
+.PHONY: build web test vet fmt check
 
 build:
 	PKG_CONFIG=$(or $(PKG_CONFIG),pkg-config) go build -trimpath -ldflags "$(LDFLAGS)" -o bin/agora ./cmd/agora
@@ -20,3 +20,10 @@ vet:
 
 fmt:
 	gofmt -l -w cmd internal e2e web
+
+check:
+	@out=$$(gofmt -l cmd internal e2e web); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
+	go vet ./...
+	go test ./internal/... -count=1
+	cd web && bun install --frozen-lockfile && npx tsc --noEmit -p tsconfig.json
+	cd paseo-plugin && bun install --frozen-lockfile && bun run typecheck

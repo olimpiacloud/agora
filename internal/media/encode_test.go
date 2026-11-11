@@ -11,6 +11,7 @@ import (
 )
 
 func TestCaptureEncode(t *testing.T) {
+	requireXvfb(t)
 	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 1280, Height: 800, RunDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -60,5 +61,12 @@ func TestCaptureEncode(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("window grab %dx%d", wf.Width, wf.Height)
+	}
+}
+
+func requireXvfb(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("Xvfb"); err != nil {
+		t.Skip("Xvfb missing")
 	}
 }
