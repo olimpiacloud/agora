@@ -92,6 +92,7 @@ func serve(args []string) {
 	suspend := fs.Duration("suspend-after", 30*time.Minute, "suspend workspaces after this long without activity or viewers (0 = never)")
 	tabIdle := fs.Duration("tab-idle", 15*time.Minute, "close browser tabs and stop launched apps of ended cursors after this long unused (0 = never)")
 	cursorRetention := fs.Duration("cursor-retention", core.DefaultCursorRetention, "delete finished cursors after this long (0 = keep forever)")
+	worktreeRoots := fs.String("worktree-roots", "", "comma-separated absolute directories where cursors may create worktrees (empty = any repository owned by the daemon user)")
 	fs.Parse(args)
 	host, _, _ := net.SplitHostPort(*listen)
 	if host != "127.0.0.1" && host != "localhost" && host != "::1" && os.Getenv("AGORA_ALLOW_PUBLIC") != "1" {
@@ -107,6 +108,7 @@ func serve(args []string) {
 		IdleAfter: *idle, SuspendAfter: *suspend, TabIdle: *tabIdle, CursorRetention: *cursorRetention,
 		RTC:         stream.RTCOptions{UDPPort: *rtcPort, IncludeLoop: *rtcLoop, Interfaces: ifaces},
 		AgoraBinary: exe, ListenURL: "http://" + *listen,
+		WorktreeRoots: strings.FieldsFunc(*worktreeRoots, func(r rune) bool { return r == ',' }),
 	})
 	if err != nil {
 		log.Fatal(err)

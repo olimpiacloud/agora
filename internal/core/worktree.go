@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -18,6 +19,8 @@ type WorktreeReq struct {
 	Branch string `json:"branch,omitempty"`
 	Base   string `json:"base,omitempty"`
 	Ports  int    `json:"ports,omitempty"`
+
+	Trusted bool `json:"-"`
 }
 
 var branchRe = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
@@ -79,11 +82,21 @@ func (m *Manager) CreateWorktree(ctx context.Context, req WorktreeReq, cursor, w
 	if err != nil {
 		return nil, err
 	}
+	checked := ""
+	if !req.Trusted {
+		if checked, err = m.allowedRepo(repo); err != nil {
+			return nil, err
+		}
+		repo = checked
+	}
 	top, err := gitCmd(ctx, "-C", repo, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		return nil, fmt.Errorf("%s is not a git repository", repo)
 	}
 	repo = strings.TrimSpace(string(top))
+	if checked != "" && repo != checked {
+		return nil, fmt.Errorf("%w: %s resolves to a different repository than checked", ErrForbidden, req.Repo)
+	}
 	id := NewID("wt")
 	if req.Branch == "" {
 		req.Branch = "agora/" + strings.TrimPrefix(id, "wt_")
@@ -121,6 +134,61 @@ func (m *Manager) CreateWorktree(ctx context.Context, req WorktreeReq, cursor, w
 	m.mu.Unlock()
 	m.Bus.Publish("worktree.created", ws, cursor, map[string]any{"id": id, "branch": wt.Branch, "path": path, "port_base": wt.PortBase})
 	return wt, nil
+}
+
+func (m *Manager) allowedRepo(repo string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		return "", fmt.Errorf("%s is not a git repository", repo)
+	}
+	if len(m.cfg.WorktreeRoots) > 0 && !underRoots(resolved, m.cfg.WorktreeRoots) {
+		return "", fmt.Errorf("%w: %s is outside the allowed worktree roots (agora serve --worktree-roots)", ErrForbidden, resolved)
+	}
+	top := resolved
+	for {
+		if _, err := os.Lstat(filepath.Join(top, ".git")); err == nil {
+			break
+		}
+		parent := filepath.Dir(top)
+		if parent == top {
+			return "", fmt.Errorf("%s is not a git repository", resolved)
+		}
+		top = parent
+	}
+	if len(m.cfg.WorktreeRoots) > 0 && !underRoots(top, m.cfg.WorktreeRoots) {
+		return "", fmt.Errorf("%w: repository %s is outside the allowed worktree roots (agora serve --worktree-roots)", ErrForbidden, top)
+	}
+	uid := os.Geteuid()
+	gitDir := filepath.Join(top, ".git")
+	for _, p := range []string{top, gitDir, filepath.Join(gitDir, "config")} {
+		fi, err := os.Lstat(p)
+		if err != nil {
+			if p != top && p != gitDir && errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return "", err
+		}
+		if p == gitDir && !fi.IsDir() {
+			return "", fmt.Errorf("%w: %s must be a directory, not a link or a gitdir file", ErrForbidden, gitDir)
+		}
+		st, ok := fi.Sys().(*syscall.Stat_t)
+		if !ok || int(st.Uid) != uid {
+			return "", fmt.Errorf("%w: %s is not owned by uid %d (the user running agora); cursors only get worktrees of repositories it owns", ErrForbidden, p, uid)
+		}
+	}
+	return top, nil
+}
+
+func underRoots(path string, roots []string) bool {
+	for _, root := range roots {
+		if r, err := filepath.EvalSymlinks(root); err == nil {
+			root = r
+		}
+		if rel, err := filepath.Rel(root, path); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") && !filepath.IsAbs(rel) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) ListWorktrees() []*Worktree {

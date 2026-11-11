@@ -10,6 +10,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +32,7 @@ type Config struct {
 	RTC             stream.RTCOptions
 	AgoraBinary     string
 	ListenURL       string
+	WorktreeRoots   []string
 }
 
 const DefaultCursorRetention = 7 * 24 * time.Hour
@@ -64,6 +66,7 @@ type Manager struct {
 	usage     map[string]*WorkspaceUsage
 	profiles  map[string]*profileLease
 	portsHeld map[int]bool
+	shots     shotStore
 	started   time.Time
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -85,6 +88,15 @@ func NewManager(cfg Config) (*Manager, error) {
 	if cfg.IdleAfter == 0 {
 		cfg.IdleAfter = 5 * time.Minute
 	}
+	var roots []string
+	for _, root := range cfg.WorktreeRoots {
+		root = strings.TrimSpace(root)
+		if !filepath.IsAbs(root) {
+			return nil, fmt.Errorf("worktree root %q is not an absolute path", root)
+		}
+		roots = append(roots, filepath.Clean(root))
+	}
+	cfg.WorktreeRoots = roots
 	for _, d := range []string{"state", "profiles", "workspaces", "events", "run", "checkpoints", "worktrees"} {
 		if err := os.MkdirAll(filepath.Join(cfg.Home, d), 0700); err != nil {
 			return nil, err

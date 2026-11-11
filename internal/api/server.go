@@ -533,6 +533,7 @@ func (s *Server) routes() {
 			req.Cursor = p.Cursor.ID
 			req.Workspace = p.Cursor.Workspace
 		}
+		req.Trusted = p.Admin
 		wt, err := s.m.CreateWorktree(r.Context(), req.WorktreeReq, req.Cursor, req.Workspace)
 		if err != nil {
 			writeErr(w, err)
@@ -704,6 +705,9 @@ func (s *Server) createCursor(w http.ResponseWriter, r *http.Request, p *Princip
 			writeErr(w, fmt.Errorf("%w: a worktree needs process permission", core.ErrForbidden))
 			return
 		}
+	}
+	if req.Worktree != nil {
+		req.Worktree.Trusted = p.Admin
 	}
 	c, tok, err := s.m.CreateCursor(r.Context(), req)
 	if err != nil && c == nil {

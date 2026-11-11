@@ -336,6 +336,7 @@ func (m *Manager) suspendLocked(ctx context.Context, id, reason string) error {
 	if w.State == StateDestroyed {
 		return fmt.Errorf("%w: workspace is destroyed", ErrState)
 	}
+	m.shots.drop(id)
 	r := m.runtime(id)
 	if r == nil {
 		if w.State == StateCreated {
@@ -490,6 +491,7 @@ func (m *Manager) Destroy(ctx context.Context, id string, purge bool) error {
 	}
 	m.Arb.Clear(id)
 	m.dropBoard(id)
+	m.shots.drop(id)
 	if purge {
 		shared := false
 		m.mu.Lock()

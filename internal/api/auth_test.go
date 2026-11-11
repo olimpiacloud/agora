@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -24,9 +25,13 @@ type env struct {
 	admin string
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, opts ...func(*core.Config)) *env {
 	home := t.TempDir()
-	m, err := core.NewManager(core.Config{Home: home, RTC: stream.RTCOptions{IncludeLoop: true}})
+	cfg := core.Config{Home: home, RTC: stream.RTCOptions{IncludeLoop: true}}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	m, err := core.NewManager(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,5 +645,40 @@ func TestWorktreePortsAreBounded(t *testing.T) {
 		if code != 400 || !strings.Contains(out["error"].(string), "ports") {
 			t.Fatalf("ports=%d: got %d %v, want 400 about ports", n, code, out)
 		}
+	}
+}
+
+func TestCursorWorktreesStayInsideRoots(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	roots := t.TempDir()
+	e := newEnv(t, func(c *core.Config) { c.WorktreeRoots = []string{roots} })
+	ws := e.workspace()
+	repo := func(dir string) string {
+		t.Helper()
+		for _, args := range [][]string{{"init", "-q", dir}, {"-C", dir, "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "init"}} {
+			if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v %s", args, err, out)
+			}
+		}
+		return dir
+	}
+	inside := repo(filepath.Join(roots, "in"))
+	outside := repo(filepath.Join(t.TempDir(), "out"))
+	_, tok := e.cursor(e.admin, map[string]any{"workspace": ws, "permissions": []string{"process", "spawn"}})
+	for _, body := range []map[string]any{{"repo": outside}, {"repo": outside, "Trusted": true, "trusted": true}} {
+		if code, out := e.req(tok, "POST", "/v1/worktrees", body); code != 403 {
+			t.Fatalf("cursor worktree outside the roots %v: got %d %v, want 403", body, code, out)
+		}
+	}
+	if code, out := e.req(tok, "POST", "/v1/cursors", map[string]any{"goal": "x", "worktree": map[string]any{"repo": outside}}); code != 403 {
+		t.Fatalf("subagent worktree outside the roots: got %d %v, want 403", code, out)
+	}
+	if code, out := e.req(e.admin, "POST", "/v1/worktrees", map[string]any{"repo": outside}); code != 201 {
+		t.Fatalf("admin worktree outside the roots: got %d %v, want 201", code, out)
+	}
+	if code, out := e.req(tok, "POST", "/v1/worktrees", map[string]any{"repo": inside}); code != 201 {
+		t.Fatalf("cursor worktree inside the roots: got %d %v, want 201", code, out)
 	}
 }
