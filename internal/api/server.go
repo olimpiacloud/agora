@@ -224,6 +224,10 @@ func (s *Server) routes() {
 				writeErr(w, fmt.Errorf("%w: only the admin can set browser_args or profile", core.ErrForbidden))
 				return
 			}
+			if err := reservedLabels(req.Labels); err != nil {
+				writeErr(w, err)
+				return
+			}
 			ws, err = s.createCursorWorkspace(r.Context(), p.Cursor, req)
 		} else {
 			ws, err = s.m.CreateWorkspace(r.Context(), req)
@@ -723,6 +727,10 @@ func (s *Server) createCursor(w http.ResponseWriter, r *http.Request, p *Princip
 			writeErr(w, fmt.Errorf("%w: needs spawn permission", core.ErrForbidden))
 			return
 		}
+		if err := reservedLabels(req.Labels); err != nil {
+			writeErr(w, err)
+			return
+		}
 		if req.Parent == "" || !s.m.IsAncestor(p.Cursor.ID, req.Parent) {
 			req.Parent = p.Cursor.ID
 		}
@@ -867,6 +875,15 @@ func (s *Server) ownsWorkspace(p *Principal, ws string) bool {
 	}
 	w, err := s.m.GetWorkspace(ws)
 	return err == nil && w.Owner != "" && s.m.IsAncestor(p.Cursor.ID, w.Owner)
+}
+
+func reservedLabels(l map[string]string) error {
+	for k := range l {
+		if strings.HasPrefix(k, "paseo_") {
+			return fmt.Errorf("%w: labels starting with paseo_ are reserved for the admin", core.ErrForbidden)
+		}
+	}
+	return nil
 }
 
 func need(p *Principal, perm string) error {

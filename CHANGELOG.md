@@ -77,6 +77,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Cursor progress messages, status details, errors and human-request reasons are cut to 2000 characters; results over 256 KB, message bodies over 64 KB, goals and prompts over 64 KB, names over 200 bytes and more than 32 labels are refused; cursor, board and workspace-creation requests are limited to 512 KB. A cursor could previously make the daemon keep gigabytes in memory.
 - `agora serve --max-agents` (16 by default, `0` removes the limit): the daemon refuses to launch another agent while that many launched agents are alive, so one cursor can no longer fan out an unbounded number of agent processes. A subagent's `budget.max_cursors` can no longer exceed its parent's.
 - The limit of 5 live workspaces per cursor tree now counts forks and the workspaces of deleted cursors. A workspace forked by a cursor belongs to that cursor (it could not use its own fork before). Cursors cannot set `suspend_after` above the daemon default, negative `idle_after`, `suspend_after` and `ttl` are refused, and a cursor cannot add a profile snapshot to a workspace that already has 3.
+- Label keys starting with `paseo_` can only be set with the admin token. A cursor could mark its own cursors and workspaces with the labels the Paseo plugin uses to recognise its agents and workspaces.
 
 ### Fixed
 
@@ -115,6 +116,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Shutdown waits for launched agents to record their result before the final state flush.
 - Detailed usage of a suspending workspace, and the set of purged workspace logs, no longer grow without bound.
 - The Paseo plugin removes the Agora workspace of a Paseo workspace when it is archived, and its periodic reconcile removes workspaces whose Paseo workspace no longer exists (never-started ones are purged; ones that ran keep their profile on disk). Busy workspaces and workspaces without a Paseo label are left alone. Scheduled Paseo runs no longer pile up workspaces.
+- A viewer reconnecting with `wake=0` no longer thaws a frozen workspace; it gets `bye: suspended` like on a suspended one.
 
 ## [0.1.0] - 2026-11-06
 

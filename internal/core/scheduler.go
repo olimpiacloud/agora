@@ -336,7 +336,7 @@ func (m *Manager) Asleep(ws string) bool {
 	if r := m.runtime(ws); r != nil {
 		r.mu.Lock()
 		defer r.mu.Unlock()
-		return r.closing
+		return r.closing || r.frozen
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()

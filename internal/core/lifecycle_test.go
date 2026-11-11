@@ -515,3 +515,21 @@ func TestEndedCursorAppsWaitForReaper(t *testing.T) {
 		t.Fatal("deleting one cursor stopped the app of another")
 	}
 }
+
+func TestAsleepCoversFrozenRuntime(t *testing.T) {
+	m := newTestManager(t)
+	id, r := newTestRuntime(t, m)
+	if m.Asleep(id) {
+		t.Fatal("fresh runtime reported asleep")
+	}
+	r.mu.Lock()
+	r.frozen = true
+	r.mu.Unlock()
+	asleep := m.Asleep(id)
+	r.mu.Lock()
+	r.frozen = false
+	r.mu.Unlock()
+	if !asleep {
+		t.Fatal("frozen runtime not reported asleep")
+	}
+}
