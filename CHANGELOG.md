@@ -113,6 +113,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Detailed usage of a suspending workspace, and the set of purged workspace logs, no longer grow without bound.
 - The Paseo plugin removes the Agora workspace of a Paseo workspace when it is archived, and its periodic reconcile removes workspaces whose Paseo workspace no longer exists (never-started ones are purged; ones that ran keep their profile on disk). Busy workspaces and workspaces without a Paseo label are left alone. Scheduled Paseo runs no longer pile up workspaces.
 - Paseo chat cards and agent-wall tiles no longer resume a suspended workspace just by being shown; they connect with `wake=0` and fall back to the stored screenshot or a "suspended" note. A Paseo view that was told the workspace is suspended now checks again every 10 seconds and comes back when an agent resumed it, and a card no longer shows "Live" on a stale frame.
+- The Paseo plugin's cleanup could delete the cursor it had just created for an agent that was being resumed, retire workspaces after a truncated Paseo workspace listing, and retire a workspace that an agent had started using again. It now skips agents opened in the last minute, aborts on an incomplete listing and re-checks each workspace right before retiring it.
 
 ## [0.1.0] - 2026-11-06
 

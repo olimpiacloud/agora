@@ -77,31 +77,34 @@ export default function contribute(server: PluginServerContext) {
   };
 
   server.addHook("agent.open.before", async ({ request }, { paseo }) => {
-    reconcile(paseo);
-    if (request.purpose === "history") return;
-    if (!MCP_PROVIDERS.some((p) => request.provider === p || request.provider.startsWith(p + "/"))) return;
-    if (request.labels?.["agora/enabled"] === "false" || !request.workspaceId) return;
     try {
-      const ws = await linkedWorkspace(request.workspaceId, nameFromCwd(request.cwd), true);
-      if (!ws) return;
-      const cur = await agentCursor(request.agentId, request.title ?? null, ws);
-      const lean = request.provider === "codex" || request.provider.startsWith("codex/");
-      const env = mcpEnv(process.env.AGORA_URL || "http://127.0.0.1:7788", agentTokenFile(request.agentId, cur.token), ws, lean);
-      return {
-        ...request,
-        mcpServers: {
-          ...request.mcpServers,
-          agora: {
-            type: "stdio" as const,
-            command: AGORA_BIN,
-            args: ["mcp"],
-            env,
+      if (request.purpose === "history") return;
+      if (!MCP_PROVIDERS.some((p) => request.provider === p || request.provider.startsWith(p + "/"))) return;
+      if (request.labels?.["agora/enabled"] === "false" || !request.workspaceId) return;
+      try {
+        const ws = await linkedWorkspace(request.workspaceId, nameFromCwd(request.cwd), true);
+        if (!ws) return;
+        const cur = await agentCursor(request.agentId, request.title ?? null, ws);
+        const lean = request.provider === "codex" || request.provider.startsWith("codex/");
+        const env = mcpEnv(process.env.AGORA_URL || "http://127.0.0.1:7788", agentTokenFile(request.agentId, cur.token), ws, lean);
+        return {
+          ...request,
+          mcpServers: {
+            ...request.mcpServers,
+            agora: {
+              type: "stdio" as const,
+              command: AGORA_BIN,
+              args: ["mcp"],
+              env,
+            },
           },
-        },
-      };
-    } catch (e) {
-      console.error("agora: could not attach MCP server:", errText(e));
-      return;
+        };
+      } catch (e) {
+        console.error("agora: could not attach MCP server:", errText(e));
+        return;
+      }
+    } finally {
+      reconcile(paseo);
     }
   });
 

@@ -2,7 +2,7 @@ import type { PluginHookContext } from "@getpaseo/plugin/server";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { idleWorkspace, orphanWorkspaces, type AgoraWorkspace } from "./cleanup";
+import { allWorkspaceIds, goneAgentIds, idleWorkspace, orphanWorkspaces, stillOrphan, withinGrace, type AgoraWorkspace } from "./cleanup";
 import { removeTokenFile, writeTokenFile } from "./tokenfile";
 
 const URL_BASE = process.env.AGORA_URL || "http://127.0.0.1:7788";
@@ -131,7 +131,11 @@ async function linkWorkspace(paseoWorkspaceId: string, name: string, create: boo
 }
 
 export function agentCursor(agentId: string, title: string | null, workspace: string): Promise<{ cursor: string; token: string }> {
-  return serialize(`agent:${agentId}`, () => ensureAgentCursor(agentId, title, workspace));
+  return serialize(`agent:${agentId}`, async () => {
+    const rec = await ensureAgentCursor(agentId, title, workspace);
+    opened.set(agentId, Date.now());
+    return rec;
+  });
 }
 
 async function ensureAgentCursor(agentId: string, title: string | null, workspace: string): Promise<{ cursor: string; token: string }> {
@@ -208,15 +212,7 @@ export async function releasePaseoWorkspace(paseoWorkspaceId: string): Promise<n
 }
 
 async function livePaseoWorkspaces(paseo: PluginHookContext["paseo"]): Promise<Set<string>> {
-  const live = new Set<string>();
-  let cursor: string | undefined;
-  for (let i = 0; i < 50; i++) {
-    const r = await paseo.workspaces.list({ filter: { includeBackground: true, includeInternal: true }, page: { limit: 200, cursor } });
-    for (const w of r.entries) live.add(w.id);
-    if (!r.pageInfo?.hasMore || !r.pageInfo.nextCursor) return live;
-    cursor = r.pageInfo.nextCursor;
-  }
-  throw new Error("too many Paseo workspace pages");
+  return allWorkspaceIds((cursor) => paseo.workspaces.list({ filter: { includeBackground: true, includeInternal: true }, page: { limit: 200, cursor } }));
 }
 
 export async function reconcileWorkspaces(paseo: PluginHookContext["paseo"]): Promise<number> {
@@ -226,7 +222,9 @@ export async function reconcileWorkspaces(paseo: PluginHookContext["paseo"]): Pr
   for (const w of orphanWorkspaces(all, live)) {
     const p = w.labels!.paseo_workspace;
     await serialize(`workspace:${p}`, async () => {
-      await retireWorkspace(w);
+      const fresh: AgoraWorkspace = await call("GET", `/v1/workspaces/${encodeURIComponent(w.id)}`);
+      if (!stillOrphan(fresh, p)) throw new Error("workspace is in use again");
+      await retireWorkspace(fresh);
       forgetWorkspace(p);
     }).then(
       () => n++,
@@ -237,6 +235,8 @@ export async function reconcileWorkspaces(paseo: PluginHookContext["paseo"]): Pr
 }
 
 const RECONCILE_EVERY = 10 * 60 * 1000;
+const OPEN_GRACE_MS = 60_000;
+const opened = new Map<string, number>();
 let reconciledAt = 0;
 
 export async function reconcileAgentCursors(paseo: PluginHookContext["paseo"]): Promise<number | null> {
@@ -245,16 +245,19 @@ export async function reconcileAgentCursors(paseo: PluginHookContext["paseo"]): 
   const cursors: any[] = await call("GET", "/v1/cursors?active=1");
   const ids = new Set<string>(Object.keys(loadState().agents));
   for (const c of cursors) if (c.labels?.paseo_agent) ids.add(c.labels.paseo_agent);
-  let removed = 0;
-  for (const id of ids) {
-    let gone: boolean;
-    try {
+  const now = Date.now();
+  for (const [id, at] of opened) if (!withinGrace(at, now, OPEN_GRACE_MS)) opened.delete(id);
+  const gone = await goneAgentIds(
+    ids,
+    async (id) => {
       const r = await paseo.agents.ref(id).refresh();
-      gone = !r || r.agent.archivedAt != null || r.agent.status === "closed";
-    } catch {
-      continue;
-    }
-    if (!gone) continue;
+      return r ? { archivedAt: r.agent.archivedAt ?? null, status: r.agent.status } : null;
+    },
+    (id) => opened.has(id),
+  );
+  let removed = 0;
+  for (const id of gone) {
+    if (opened.has(id)) continue;
     for (const c of cursors) {
       if (c.labels?.paseo_agent !== id) continue;
       await call("DELETE", `/v1/cursors/${encodeURIComponent(c.id)}`).catch(() => {});
