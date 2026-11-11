@@ -9,7 +9,7 @@ PASEO=1
 SOURCE=
 HOME_DIR=/var/lib/agora
 APPS_HOME=/var/lib/agora-apps
-GO_VERSION=1.27.3
+GO_VERSION=1.27.4
 
 usage() {
 	cat <<EOF
