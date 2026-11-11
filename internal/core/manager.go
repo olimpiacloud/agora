@@ -96,6 +96,9 @@ func NewManager(cfg Config) (*Manager, error) {
 		return nil, err
 	}
 	m := &Manager{cfg: cfg, store: st, Bus: NewBus(filepath.Join(cfg.Home, "events"), 4096), ws: map[string]*Workspace{}, rt: map[string]*Runtime{}, wsLocks: map[string]*sync.Mutex{}, cursors: map[string]*Cursor{}, tokens: map[string]string{}, worktrees: map[string]*Worktree{}, mail: map[string][]Message{}, launches: map[string]*launchProc{}, cpuPrev: map[string]cpuSample{}, usage: map[string]*WorkspaceUsage{}, profiles: map[string]*profileLease{}, portsHeld: map[int]bool{}, started: time.Now()}
+	st.onError = func(kind, id string, err error) {
+		m.Bus.Publish("store.error", "", "", map[string]any{"kind": kind, "id": id, "error": err.Error()})
+	}
 	m.Arb = NewArbiter(func(ws string, l Lock, by string) {
 		m.Bus.Publish("control.lost", ws, l.Holder, map[string]any{"surface": l.Surface, "by": by})
 	})
@@ -174,6 +177,7 @@ func (m *Manager) Shutdown() {
 		l.kill()
 	}
 	m.mu.Unlock()
+	m.store.Flush()
 }
 
 func (m *Manager) wsLock(id string) *sync.Mutex {
