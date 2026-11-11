@@ -133,14 +133,15 @@ type Usage struct {
 }
 
 type LaunchSpec struct {
-	Profile string            `json:"profile,omitempty"`
-	Effort  string            `json:"effort,omitempty"`
-	Tools   []string          `json:"tools,omitempty"`
-	Adapter string            `json:"adapter"`
-	Prompt  string            `json:"prompt,omitempty"`
-	Command []string          `json:"command,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	Model   string            `json:"model,omitempty"`
+	Profile    string            `json:"profile,omitempty"`
+	Effort     string            `json:"effort,omitempty"`
+	Tools      []string          `json:"tools,omitempty"`
+	Adapter    string            `json:"adapter"`
+	Prompt     string            `json:"prompt,omitempty"`
+	Command    []string          `json:"command,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+	Model      string            `json:"model,omitempty"`
+	MaxRuntime Duration          `json:"max_runtime,omitempty"`
 }
 
 type Cursor struct {

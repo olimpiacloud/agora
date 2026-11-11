@@ -33,6 +33,7 @@ type Config struct {
 	TabIdle         time.Duration
 	CursorRetention time.Duration
 	MaxAgents       int
+	AgentMaxRuntime time.Duration
 	RTC             stream.RTCOptions
 	AgoraBinary     string
 	ListenURL       string

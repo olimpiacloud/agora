@@ -19,6 +19,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Deleting a cursor closes its tabs and stops its apps, and tabs owned by cursors that already ended can be used by others.
 - The Paseo live panel takes pointer, wheel and keyboard input.
 - `AGORA_TOKEN_FILE` for the CLI and MCP server.
+- Launched agents can have a maximum runtime: `launch.max_runtime` (for example `"10m"`) per launch and `agora serve --agent-max-runtime` for the daemon (off by default). When it passes, the cursor fails with "agent exceeded its maximum runtime" and the process is stopped. Cursors cannot ask for more than the daemon value.
 
 ### Changed
 

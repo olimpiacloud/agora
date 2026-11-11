@@ -703,6 +703,15 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 	writeJSON(w, 200, res)
 }
 
+func clampLaunchRuntime(l *core.LaunchSpec, daemon time.Duration) {
+	if l == nil || daemon <= 0 {
+		return
+	}
+	if l.MaxRuntime.Duration <= 0 || l.MaxRuntime.Duration > daemon {
+		l.MaxRuntime.Duration = daemon
+	}
+}
+
 func (s *Server) createCursor(w http.ResponseWriter, r *http.Request, p *Principal) {
 	var req core.CreateCursorReq
 	if err := decodeLimit(r, maxCursorBody, &req); err != nil {
@@ -737,6 +746,7 @@ func (s *Server) createCursor(w http.ResponseWriter, r *http.Request, p *Princip
 			writeErr(w, fmt.Errorf("%w: a worktree needs process permission", core.ErrForbidden))
 			return
 		}
+		clampLaunchRuntime(req.Launch, s.m.Config().AgentMaxRuntime)
 	}
 	if req.Worktree != nil {
 		req.Worktree.Trusted = p.Admin

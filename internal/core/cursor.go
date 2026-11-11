@@ -36,6 +36,9 @@ func (m *Manager) CreateCursor(ctx context.Context, req CreateCursorReq) (*Curso
 	if err := checkLabels(req.Labels); err != nil {
 		return nil, "", err
 	}
+	if req.Launch != nil && req.Launch.MaxRuntime.Duration < 0 {
+		return nil, "", fmt.Errorf("launch.max_runtime must not be negative")
+	}
 	if req.Kind == "" {
 		req.Kind = "agent"
 	}
