@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestControlViewerNoopTakesNoLock(t *testing.T) {
 	m := &Manager{Arb: NewArbiter(nil), ws: map[string]*Workspace{}}
@@ -44,5 +47,29 @@ func TestDetachedViewerTakeLeavesNoLock(t *testing.T) {
 	v.Input([]byte(`{"t":"take"}`))
 	if l := m.Arb.List("ws1"); len(l) != 0 {
 		t.Fatalf("take from a closed viewer left a lock: %+v", l)
+	}
+}
+
+func TestViewerHelloRedactsCursors(t *testing.T) {
+	m := &Manager{Arb: NewArbiter(nil), ws: map[string]*Workspace{}, cursors: map[string]*Cursor{}}
+	m.cursors["cur_1"] = &Cursor{ID: "cur_1", Name: "a", Workspace: "ws1", Status: CursorRunning, TokenHash: "deadbeef", Launch: &LaunchSpec{Adapter: "command", Env: map[string]string{"API_KEY": "hunter2"}}}
+	r := &Runtime{m: m, id: "ws1"}
+	var got []byte
+	v := &Viewer{ID: "v1", Workspace: "ws1", r: r, m: m, held: map[uint32]bool{}, buttons: map[int]bool{}, send: func(b []byte) error {
+		got = append([]byte(nil), b...)
+		return nil
+	}}
+	v.sendHello()
+	s := string(got)
+	if s == "" {
+		t.Fatal("no hello sent")
+	}
+	if !strings.Contains(s, `"cur_1"`) {
+		t.Fatalf("hello does not list the cursor: %s", s)
+	}
+	for _, leak := range []string{"token_hash", "deadbeef", "hunter2", "API_KEY"} {
+		if strings.Contains(s, leak) {
+			t.Fatalf("hello leaks %q: %s", leak, s)
+		}
 	}
 }
