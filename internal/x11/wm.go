@@ -23,6 +23,7 @@ type WM struct {
 	clients  []xproto.Window
 	trans    map[xproto.Window]xproto.Window
 	fixed    map[xproto.Window]bool
+	full     map[xproto.Window]bool
 	atoms    map[string]xproto.Atom
 	check    xproto.Window
 	OnChange func()
@@ -43,7 +44,7 @@ func (d *Display) StartWM(layout Layout) (*WM, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := &WM{d: d, c: c, layout: layout, trans: map[xproto.Window]xproto.Window{}, fixed: map[xproto.Window]bool{}, atoms: map[string]xproto.Atom{}}
+	w := &WM{d: d, c: c, layout: layout, trans: map[xproto.Window]xproto.Window{}, fixed: map[xproto.Window]bool{}, full: map[xproto.Window]bool{}, atoms: map[string]xproto.Atom{}}
 	for _, n := range wmAtomNames {
 		w.atoms[n] = atom(c, n)
 	}
@@ -161,6 +162,7 @@ func (w *WM) unmanage(win xproto.Window) {
 	w.mu.Lock()
 	delete(w.trans, win)
 	delete(w.fixed, win)
+	delete(w.full, win)
 	for i, c := range w.clients {
 		if c == win {
 			w.clients = append(w.clients[:i], w.clients[i+1:]...)
@@ -375,7 +377,15 @@ func (w *WM) loop() {
 				d := e.Data.Data32
 				fs := xproto.Atom(d[1]) == w.atoms["_NET_WM_STATE_FULLSCREEN"] || xproto.Atom(d[2]) == w.atoms["_NET_WM_STATE_FULLSCREEN"]
 				if fs {
-					on := d[0] == 1 || d[0] == 2
+					w.mu.Lock()
+					was := w.full[e.Window]
+					on := d[0] == 1 || (d[0] == 2 && !was)
+					if on {
+						w.full[e.Window] = true
+					} else {
+						delete(w.full, e.Window)
+					}
+					w.mu.Unlock()
 					if on {
 						w.setAtomProp(e.Window, "_NET_WM_STATE", []uint32{uint32(w.atoms["_NET_WM_STATE_FULLSCREEN"])})
 						sw, sh := w.d.Size()
@@ -383,7 +393,9 @@ func (w *WM) loop() {
 						w.Raise(uint32(e.Window))
 					} else {
 						w.setAtomProp(e.Window, "_NET_WM_STATE", []uint32{})
-						w.Release(uint32(e.Window))
+						if was {
+							w.Release(uint32(e.Window))
+						}
 					}
 				}
 			}
