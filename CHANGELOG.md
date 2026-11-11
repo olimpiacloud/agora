@@ -13,6 +13,11 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - `make check`: gofmt, vet, the unit tests and both TypeScript typechecks; tests that need Xvfb skip when it is missing.
 - Snapshots report ARIA state (`checked` and `disabled` from `aria-*`, plus `selected` and `expanded`).
 - `board_read` returns posts oldest first with `more: true` when there are more than `limit`, so posts are no longer skipped.
+- `agora serve --sandbox-default` (on by default): new workspaces are sandboxed unless the admin creates them with `"sandbox": false`; cursors cannot opt out. Existing workspaces keep their stored setting.
+- `agora serve --worktree-roots`: directories where cursors may create git worktrees.
+- Deleting a cursor closes its tabs and stops its apps, and tabs owned by cursors that already ended can be used by others.
+- The Paseo live panel takes pointer, wheel and keyboard input.
+- `AGORA_TOKEN_FILE` for the CLI and MCP server.
 
 ### Changed
 
@@ -36,6 +41,9 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Tab actions on a tab with an open JavaScript dialog fail at once with the dialog text instead of waiting for the timeout, and an action that opens a dialog returns it.
 - Encoder rate control keeps the VBV buffer at the real bitrate when the frame rate changes, failed grabs refresh the frame without forcing a keyframe, and a WebRTC viewer asks for a keyframe when it connects.
 - The Paseo plugin times out daemon requests after 10 s, and the web viewer reconnects after repeated decoder errors.
+- The Paseo panel sends input over its viewer socket (control is held as a human viewer, held buttons and keys are released when the panel goes away), the agent wall shares one cursor-metadata poll and only polls visible tiles, and toolbar chips no longer remount on every frame.
+- Screenshots are kept per workspace (64 shots or 24 MB each, 256 MB in total) and dropped when the workspace suspends or is destroyed.
+- MCP tool calls are cancelled on `notifications/cancelled` and when the client disconnects.
 
 ### Security
 
@@ -58,6 +66,12 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Password and one-time-code inputs no longer leak their value as the element name in snapshots.
 - Worktree git commands run without repository hooks or fsmonitor, and worktree port counts are limited to 20.
 - The agent environment allowlist also passes `AWS_`, `GOOGLE_`, `CLOUD_ML_`, `AZURE_` and `VERTEX_` variables, and logs the names of variables it drops.
+- Xvfb runs as the apps user instead of root; MIT-SHM segments are handed to that user with mode 0600.
+- Sandboxed workspaces get a minimal `/dev` (null, zero, full, random, urandom, tty, a private devpts and `/dev/shm`) and a `nodev` root.
+- Human control (`control-take`, `control-return`) is admin-only.
+- Cursors only get worktrees of repositories owned by the daemon user, inside `--worktree-roots` when set.
+- The installer writes the agents' token to a `0600` file and registers it as `AGORA_TOKEN_FILE` instead of passing it in argv and storing it in agent configs, and aborts instead of building `main` when no release is found.
+- Read-only tab actions no longer claim a tab, and claims are atomic, so a cursor that only looked at a tab cannot close it when it ends.
 
 ### Fixed
 
@@ -90,6 +104,11 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - A file or symlink planted at `home/Downloads` or `home/.xdg-run` stopped the workspace from starting.
 - File operations fall back to a no-follow walk when `openat2` is blocked by seccomp, and root caps how much of an apps-user file it reads.
 - The dashboard tab list now refreshes on tab actions and reclaimed tabs.
+- Share links can refresh the lock list (viewer tokens may read `GET /v1/workspaces/{id}/locks`).
+- A sandboxed app killed right after launch could ignore SIGTERM.
+- Opening or attaching to a page that shows a dialog on load no longer hangs.
+- Shutdown waits for launched agents to record their result before the final state flush.
+- Detailed usage of a suspending workspace, and the set of purged workspace logs, no longer grow without bound.
 
 ## [0.1.0] - 2026-11-06
 
