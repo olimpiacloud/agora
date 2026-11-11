@@ -71,7 +71,7 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, `agora — agent-native desktop runtime
 
-  agora serve [--listen 127.0.0.1:7788] [--home DIR] [--apps-user agora] [--rtc-port 0]
+  agora serve [--listen 127.0.0.1:7788] [--home DIR] [--apps-user agora] [--x-user agora-x] [--rtc-port 0]
   agora mcp                      MCP stdio server (AGORA_URL, AGORA_TOKEN)
   agora token                    print the admin token
   agora open <workspace> [--control] [--base URL]   print a viewer URL with a short-lived token
@@ -84,6 +84,7 @@ func serve(args []string) {
 	listen := fs.String("listen", "127.0.0.1:7788", "HTTP listen address")
 	home := fs.String("home", defaultHome(), "state directory")
 	appsUser := fs.String("apps-user", "agora", "unprivileged user for apps and browsers (when running as root)")
+	xUser := fs.String("x-user", "agora-x", "dedicated user for the Xvfb servers, separate from the apps user (when running as root; missing = Xvfb runs as root)")
 	chrome := fs.String("chrome", "", "Chrome/Chromium binary")
 	rtcPort := fs.Int("rtc-port", 0, "single UDP port for WebRTC (0 = ephemeral)")
 	rtcIfaces := fs.String("rtc-interfaces", "", "comma-separated interfaces for WebRTC candidates")
@@ -92,6 +93,8 @@ func serve(args []string) {
 	suspend := fs.Duration("suspend-after", 30*time.Minute, "suspend workspaces after this long without activity or viewers (0 = never)")
 	tabIdle := fs.Duration("tab-idle", 15*time.Minute, "close browser tabs and stop launched apps of ended cursors after this long unused (0 = never)")
 	cursorRetention := fs.Duration("cursor-retention", core.DefaultCursorRetention, "delete finished cursors after this long (0 = keep forever)")
+	worktreeRoots := fs.String("worktree-roots", "", "comma-separated absolute directories where cursors may create worktrees (empty = any repository owned by the daemon user)")
+	sandboxDefault := fs.Bool("sandbox-default", true, "sandbox new workspaces unless the admin sets \"sandbox\": false (needs root and an apps user)")
 	fs.Parse(args)
 	host, _, _ := net.SplitHostPort(*listen)
 	if host != "127.0.0.1" && host != "localhost" && host != "::1" && os.Getenv("AGORA_ALLOW_PUBLIC") != "1" {
@@ -103,10 +106,11 @@ func serve(args []string) {
 	}
 	exe, _ := os.Executable()
 	m, err := core.NewManager(core.Config{
-		Home: *home, AppsUser: *appsUser, ChromeBinary: *chrome,
+		Home: *home, AppsUser: *appsUser, XUser: *xUser, ChromeBinary: *chrome,
 		IdleAfter: *idle, SuspendAfter: *suspend, TabIdle: *tabIdle, CursorRetention: *cursorRetention,
 		RTC:         stream.RTCOptions{UDPPort: *rtcPort, IncludeLoop: *rtcLoop, Interfaces: ifaces},
-		AgoraBinary: exe, ListenURL: "http://" + *listen,
+		AgoraBinary: exe, ListenURL: "http://" + *listen, SandboxDefault: *sandboxDefault,
+		WorktreeRoots: strings.FieldsFunc(*worktreeRoots, func(r rune) bool { return r == ',' }),
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -121,7 +125,7 @@ func serve(args []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("agora %s listening on http://%s (home %s, cgroups %v)", core.Version, *listen, *home, m.Cgroups())
+	log.Printf("agora %s listening on http://%s (home %s, cgroups %v, sandbox by default %v)", core.Version, *listen, *home, m.Cgroups(), m.SandboxDefault())
 	go srv.Serve(ln)
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)

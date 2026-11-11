@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/jpeg"
@@ -17,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/olimpiacloud/agora/internal/client"
 )
@@ -81,6 +83,7 @@ type Server struct {
 	outMu  sync.Mutex
 	shotMu sync.Mutex
 	shots  map[string]shotMap
+	drain  time.Duration
 }
 
 type shotMap struct {
@@ -142,7 +145,7 @@ func shotScale(data []byte, srcW, srcH, ox, oy float64) *shotMap {
 }
 
 func New(c *client.Client) *Server {
-	s := &Server{c: c, out: os.Stdout}
+	s := &Server{c: c, out: os.Stdout, drain: 30 * time.Second}
 	s.tools = tools()
 	s.byName = map[string]*Tool{}
 	for i := range s.tools {
@@ -152,6 +155,7 @@ func New(c *client.Client) *Server {
 }
 
 func (s *Server) identity(ctx context.Context) {
+	ctx = context.WithoutCancel(ctx)
 	s.once.Do(func() {
 		var me struct {
 			Admin  bool `json:"admin"`
@@ -190,10 +194,28 @@ func (s *Server) write(v any) {
 	s.outMu.Unlock()
 }
 
+var errRequestCancelled = errors.New("request cancelled by the client")
+
+type inflight struct {
+	cancel context.CancelCauseFunc
+}
+
+func requestKey(id json.RawMessage) string {
+	var b bytes.Buffer
+	if json.Compact(&b, id) != nil {
+		return string(id)
+	}
+	return b.String()
+}
+
 func (s *Server) Serve(ctx context.Context, in io.Reader) error {
+	ctx, cancelAll := context.WithCancel(ctx)
+	defer cancelAll()
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 1<<20), 16<<20)
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+	running := map[string]*inflight{}
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
@@ -205,12 +227,39 @@ func (s *Server) Serve(ctx context.Context, in io.Reader) error {
 			continue
 		}
 		if len(req.ID) == 0 {
+			if req.Method == "notifications/cancelled" {
+				var p struct {
+					RequestID json.RawMessage `json:"requestId"`
+				}
+				if json.Unmarshal(req.Params, &p) == nil && len(p.RequestID) > 0 {
+					mu.Lock()
+					if f := running[requestKey(p.RequestID)]; f != nil {
+						f.cancel(errRequestCancelled)
+					}
+					mu.Unlock()
+				}
+			}
 			continue
 		}
+		rctx, cancel := context.WithCancelCause(ctx)
+		key := requestKey(req.ID)
+		f := &inflight{cancel: cancel}
+		mu.Lock()
+		running[key] = f
+		mu.Unlock()
 		wg.Add(1)
 		go func(req rpcReq) {
 			defer wg.Done()
-			res, rerr := s.handle(ctx, req)
+			defer cancel(nil)
+			res, rerr := s.handle(rctx, req)
+			mu.Lock()
+			if running[key] == f {
+				delete(running, key)
+			}
+			mu.Unlock()
+			if errors.Is(context.Cause(rctx), errRequestCancelled) {
+				return
+			}
 			msg := map[string]any{"jsonrpc": "2.0", "id": req.ID}
 			if rerr != nil {
 				msg["error"] = rerr
@@ -220,7 +269,20 @@ func (s *Server) Serve(ctx context.Context, in io.Reader) error {
 			s.write(msg)
 		}(req)
 	}
-	wg.Wait()
+	idle := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(idle)
+	}()
+	bound := time.NewTimer(s.drain)
+	select {
+	case <-idle:
+	case <-bound.C:
+	case <-ctx.Done():
+	}
+	bound.Stop()
+	cancelAll()
+	<-idle
 	return sc.Err()
 }
 

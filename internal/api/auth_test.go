@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -20,13 +21,18 @@ import (
 type env struct {
 	t     *testing.T
 	m     *core.Manager
+	api   *Server
 	srv   *httptest.Server
 	admin string
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, opts ...func(*core.Config)) *env {
 	home := t.TempDir()
-	m, err := core.NewManager(core.Config{Home: home, RTC: stream.RTCOptions{IncludeLoop: true}})
+	cfg := core.Config{Home: home, RTC: stream.RTCOptions{IncludeLoop: true}}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	m, err := core.NewManager(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,13 +40,14 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(New(m, auth, nil))
+	api := New(m, auth, nil)
+	srv := httptest.NewServer(api)
 	t.Cleanup(func() {
 		srv.Close()
 		m.Shutdown()
 	})
 	tok, _ := os.ReadFile(filepath.Join(home, "admin.token"))
-	return &env{t: t, m: m, srv: srv, admin: strings.TrimSpace(string(tok))}
+	return &env{t: t, m: m, api: api, srv: srv, admin: strings.TrimSpace(string(tok))}
 }
 
 func (e *env) req(tok, method, path string, body any) (int, map[string]any) {
@@ -72,6 +79,20 @@ func (e *env) reqAs(cursor, method, path string, body any) (int, map[string]any)
 	}
 	defer resp.Body.Close()
 	var out map[string]any
+	json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
+func (e *env) reqList(tok, path string) (int, []map[string]any) {
+	e.t.Helper()
+	r, _ := http.NewRequest("GET", e.srv.URL+path, nil)
+	r.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out []map[string]any
 	json.NewDecoder(resp.Body).Decode(&out)
 	return resp.StatusCode, out
 }
@@ -195,6 +216,29 @@ func TestViewerTokenScope(t *testing.T) {
 	vt := out["token"].(string)
 	if code, _ := e.req(vt, "GET", "/v1/workspaces/"+wa, nil); code != 403 {
 		t.Fatalf("viewer token on REST: got %d, want 403", code)
+	}
+	for _, rd := range []struct{ method, path string }{
+		{"GET", "/v1/workspaces"},
+		{"GET", "/v1/workspaces/" + wa + "/windows"},
+		{"GET", "/v1/workspaces/" + wa + "/tabs"},
+		{"POST", "/v1/workspaces/" + wa + "/acquire"},
+		{"POST", "/v1/workspaces/" + wa + "/control-take"},
+		{"GET", "/v1/cursors"},
+	} {
+		if code, _ := e.req(vt, rd.method, rd.path, nil); code != 403 {
+			t.Fatalf("viewer token on %s %s: got %d, want 403", rd.method, rd.path, code)
+		}
+	}
+	e.req(e.admin, "POST", "/v1/workspaces/"+wa+"/acquire", map[string]any{"surface": "win:7"})
+	code, raw := e.reqList(vt, "/v1/workspaces/"+wa+"/locks")
+	if code != 200 || len(raw) != 1 || raw[0]["surface"] != "win:7" {
+		t.Fatalf("viewer token on its workspace locks: %d %v", code, raw)
+	}
+	if code, _ := e.reqList(vt, "/v1/workspaces/"+wb+"/locks"); code != 403 {
+		t.Fatalf("viewer token on foreign locks: got %d, want 403", code)
+	}
+	if code := e.queryStatus("/v1/workspaces/" + wa + "/locks?token=" + vt); code != 401 {
+		t.Fatalf("viewer token in locks query string: got %d, want 401", code)
 	}
 	if code, _ := e.req(vt, "GET", "/v1/events/stream?workspace="+wb, nil); code != 403 {
 		t.Fatalf("viewer token on foreign events: got %d, want 403", code)
@@ -327,6 +371,26 @@ func TestPrivilegedWorkspaceOpsNeedWorkspacePermission(t *testing.T) {
 	}
 	if code, out := e.req(plain, "POST", "/v1/workspaces/"+ws+"/thaw", nil); code != 200 {
 		t.Fatalf("thaw without workspace permission: %d %v, want 200", code, out)
+	}
+}
+
+func TestHumanControlIsAdminOnly(t *testing.T) {
+	e := newEnv(t)
+	ws := e.headlessWorkspace()
+	_, wsPerm := e.cursor(e.admin, map[string]any{"workspace": ws, "permissions": []string{"workspace", "desktop", "browser"}})
+	for _, op := range []string{"control-take", "control-return"} {
+		if code, _ := e.req(wsPerm, "POST", "/v1/workspaces/"+ws+"/"+op, nil); code != 403 {
+			t.Fatalf("%s by cursor with workspace permission: got %d, want 403", op, code)
+		}
+	}
+	if locks := e.m.Arb.List(ws); len(locks) != 0 {
+		t.Fatalf("cursor left locks: %v", locks)
+	}
+	if code, out := e.req(e.admin, "POST", "/v1/workspaces/"+ws+"/control-take", nil); code != 200 || out["holder"] != "human:api" {
+		t.Fatalf("admin control-take: %d %v", code, out)
+	}
+	if code, out := e.req(e.admin, "POST", "/v1/workspaces/"+ws+"/control-return", nil); code != 200 || out["released"] != true {
+		t.Fatalf("admin control-return: %d %v", code, out)
 	}
 }
 
@@ -533,6 +597,73 @@ func TestSurfaceLocksFollowPermissions(t *testing.T) {
 	}
 }
 
+func TestSandboxedDecision(t *testing.T) {
+	yes, no := true, false
+	cases := []struct {
+		name     string
+		explicit *bool
+		admin    bool
+		def      bool
+		want     bool
+	}{
+		{"admin false, default on", &no, true, true, false},
+		{"cursor false, default on", &no, false, true, true},
+		{"admin absent, default on", nil, true, true, true},
+		{"cursor absent, default on", nil, false, true, true},
+		{"admin absent, default off", nil, true, false, false},
+		{"cursor absent, default off", nil, false, false, false},
+		{"cursor true, default off", &yes, false, false, true},
+		{"cursor false, default off", &no, false, false, false},
+	}
+	for _, c := range cases {
+		if got := sandboxed(c.explicit, c.admin, c.def); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestWorkspaceSandboxDefault(t *testing.T) {
+	for _, def := range []bool{true, false} {
+		e := newEnv(t)
+		e.api.sandboxDefault = func() bool { return def }
+		create := func(tok string, cfg map[string]any) bool {
+			t.Helper()
+			body := map[string]any{}
+			if cfg != nil {
+				body["config"] = cfg
+			}
+			code, out := e.req(tok, "POST", "/v1/workspaces", body)
+			if code != 201 {
+				t.Fatalf("create: %d %v", code, out)
+			}
+			return out["config"].(map[string]any)["sandbox"] == true
+		}
+		_, out := e.req(e.admin, "POST", "/v1/workspaces", map[string]any{"config": map[string]any{"sandbox": false}})
+		if out["config"].(map[string]any)["sandbox"] == true {
+			t.Fatalf("default %v: admin could not opt out", def)
+		}
+		_, tok := e.cursor(e.admin, map[string]any{"workspace": out["id"], "permissions": []string{"workspace"}})
+		checks := []struct {
+			name string
+			tok  string
+			cfg  map[string]any
+			want bool
+		}{
+			{"admin absent", e.admin, nil, def},
+			{"admin true", e.admin, map[string]any{"sandbox": true}, true},
+			{"admin false", e.admin, map[string]any{"sandbox": false}, false},
+			{"cursor absent", tok, map[string]any{}, def},
+			{"cursor false", tok, map[string]any{"sandbox": false}, def},
+			{"cursor true", tok, map[string]any{"sandbox": true}, true},
+		}
+		for _, c := range checks {
+			if got := create(c.tok, c.cfg); got != c.want {
+				t.Errorf("default %v, %s: sandbox %v, want %v", def, c.name, got, c.want)
+			}
+		}
+	}
+}
+
 func TestCursorWorkspacesInheritLimits(t *testing.T) {
 	e := newEnv(t)
 	_, out := e.req(e.admin, "POST", "/v1/workspaces", map[string]any{"config": map[string]any{"sandbox": true, "budget": map[string]any{"memory_mb": 512, "max_tabs": 4, "max_cursors": 3}}})
@@ -583,5 +714,40 @@ func TestWorktreePortsAreBounded(t *testing.T) {
 		if code != 400 || !strings.Contains(out["error"].(string), "ports") {
 			t.Fatalf("ports=%d: got %d %v, want 400 about ports", n, code, out)
 		}
+	}
+}
+
+func TestCursorWorktreesStayInsideRoots(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	roots := t.TempDir()
+	e := newEnv(t, func(c *core.Config) { c.WorktreeRoots = []string{roots} })
+	ws := e.workspace()
+	repo := func(dir string) string {
+		t.Helper()
+		for _, args := range [][]string{{"init", "-q", dir}, {"-C", dir, "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "init"}} {
+			if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v %s", args, err, out)
+			}
+		}
+		return dir
+	}
+	inside := repo(filepath.Join(roots, "in"))
+	outside := repo(filepath.Join(t.TempDir(), "out"))
+	_, tok := e.cursor(e.admin, map[string]any{"workspace": ws, "permissions": []string{"process", "spawn"}})
+	for _, body := range []map[string]any{{"repo": outside}, {"repo": outside, "Trusted": true, "trusted": true}} {
+		if code, out := e.req(tok, "POST", "/v1/worktrees", body); code != 403 {
+			t.Fatalf("cursor worktree outside the roots %v: got %d %v, want 403", body, code, out)
+		}
+	}
+	if code, out := e.req(tok, "POST", "/v1/cursors", map[string]any{"goal": "x", "worktree": map[string]any{"repo": outside}}); code != 403 {
+		t.Fatalf("subagent worktree outside the roots: got %d %v, want 403", code, out)
+	}
+	if code, out := e.req(e.admin, "POST", "/v1/worktrees", map[string]any{"repo": outside}); code != 201 {
+		t.Fatalf("admin worktree outside the roots: got %d %v, want 201", code, out)
+	}
+	if code, out := e.req(tok, "POST", "/v1/worktrees", map[string]any{"repo": inside}); code != 201 {
+		t.Fatalf("cursor worktree inside the roots: got %d %v, want 201", code, out)
 	}
 }

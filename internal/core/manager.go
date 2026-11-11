@@ -6,19 +6,23 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/olimpiacloud/agora/internal/sandbox"
 	"github.com/olimpiacloud/agora/internal/stream"
 )
 
 type Config struct {
 	Home            string
 	AppsUser        string
+	XUser           string
 	ChromeBinary    string
 	Width           int
 	Height          int
@@ -31,6 +35,8 @@ type Config struct {
 	RTC             stream.RTCOptions
 	AgoraBinary     string
 	ListenURL       string
+	WorktreeRoots   []string
+	SandboxDefault  bool
 }
 
 const DefaultCursorRetention = 7 * 24 * time.Hour
@@ -49,6 +55,9 @@ type Manager struct {
 	cg        *Cgroups
 	rtc       *stream.RTC
 	uid, gid  int
+	xuid      int
+	xgid      int
+	sandboxed bool
 	mu        sync.Mutex
 	ws        map[string]*Workspace
 	rt        map[string]*Runtime
@@ -60,10 +69,12 @@ type Manager struct {
 	boards    map[string]*board
 	mailSeq   int64
 	launches  map[string]*launchProc
+	agents    sync.WaitGroup
 	cpuPrev   map[string]cpuSample
 	usage     map[string]*WorkspaceUsage
 	profiles  map[string]*profileLease
 	portsHeld map[int]bool
+	shots     shotStore
 	started   time.Time
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -85,6 +96,15 @@ func NewManager(cfg Config) (*Manager, error) {
 	if cfg.IdleAfter == 0 {
 		cfg.IdleAfter = 5 * time.Minute
 	}
+	var roots []string
+	for _, root := range cfg.WorktreeRoots {
+		root = strings.TrimSpace(root)
+		if !filepath.IsAbs(root) {
+			return nil, fmt.Errorf("worktree root %q is not an absolute path", root)
+		}
+		roots = append(roots, filepath.Clean(root))
+	}
+	cfg.WorktreeRoots = roots
 	for _, d := range []string{"state", "profiles", "workspaces", "events", "run", "checkpoints", "worktrees"} {
 		if err := os.MkdirAll(filepath.Join(cfg.Home, d), 0700); err != nil {
 			return nil, err
@@ -112,6 +132,17 @@ func NewManager(cfg Config) (*Manager, error) {
 		}
 		m.uid, _ = strconv.Atoi(u.Uid)
 		m.gid, _ = strconv.Atoi(u.Gid)
+		m.xuid, m.xgid, err = lookupXUser(cfg.XUser, m.uid)
+		if err != nil {
+			log.Printf("Xvfb runs as root: %v", err)
+		}
+	}
+	if cfg.SandboxDefault {
+		if err := m.probeSandbox(); err != nil {
+			log.Printf("new workspaces are not sandboxed by default: %v", err)
+		} else {
+			m.sandboxed = true
+		}
 	}
 	m.cg = DetectCgroups()
 	rtc, err := stream.NewRTC(cfg.RTC)
@@ -150,11 +181,40 @@ func NewManager(cfg Config) (*Manager, error) {
 	return m, nil
 }
 
+func lookupXUser(name string, appsUid int) (int, int, error) {
+	if name == "" {
+		return 0, 0, errors.New("no X user configured")
+	}
+	u, err := user.Lookup(name)
+	if err != nil {
+		return 0, 0, fmt.Errorf("X user %q: %w (create it with: useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin %s)", name, err, name)
+	}
+	uid, _ := strconv.Atoi(u.Uid)
+	gid, _ := strconv.Atoi(u.Gid)
+	if uid == appsUid {
+		return 0, 0, fmt.Errorf("X user %q is the apps user; it must be a separate user", name)
+	}
+	return uid, gid, nil
+}
+
 func (m *Manager) Config() Config { return m.cfg }
 
 func (m *Manager) RTC() *stream.RTC { return m.rtc }
 
 func (m *Manager) Cgroups() bool { return m.cg != nil }
+
+func (m *Manager) SandboxDefault() bool { return m.sandboxed }
+
+func (m *Manager) probeSandbox() error {
+	if m.uid == 0 {
+		return errors.New("the sandbox needs the daemon to run as root with an apps user")
+	}
+	self := m.cfg.AgoraBinary
+	if self == "" {
+		self, _ = os.Executable()
+	}
+	return sandbox.Probe(self, m.uid, m.gid)
+}
 
 func (m *Manager) Shutdown() {
 	m.cancel()
@@ -173,44 +233,28 @@ func (m *Manager) Shutdown() {
 		}(id)
 	}
 	wg.Wait()
-	exited, unsub := m.Bus.Subscribe(Filter{Types: []string{"agent.exited"}}, 64)
-	defer unsub()
 	m.mu.Lock()
-	waiting := map[string]bool{}
-	for id, l := range m.launches {
+	for _, l := range m.launches {
 		l.kill()
-		waiting[id] = false
 	}
 	m.mu.Unlock()
-	m.waitLaunches(waiting, exited, 7*time.Second)
+	waitGroup(&m.agents, 7*time.Second)
 	m.store.Flush()
 }
 
-func (m *Manager) waitLaunches(waiting map[string]bool, exited <-chan *Event, timeout time.Duration) {
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		m.mu.Lock()
-		for id, done := range waiting {
-			if c := m.cursors[id]; done && (c == nil || c.Status.Terminal()) {
-				delete(waiting, id)
-			}
-		}
-		m.mu.Unlock()
-		if len(waiting) == 0 {
-			return
-		}
-		select {
-		case e := <-exited:
-			if _, ok := waiting[e.Cursor]; ok {
-				waiting[e.Cursor] = true
-			}
-		case <-tick.C:
-		case <-deadline.C:
-			return
-		}
+func waitGroup(wg *sync.WaitGroup, timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case <-done:
+		return true
+	case <-t.C:
+		return false
 	}
 }
 

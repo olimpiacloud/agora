@@ -26,6 +26,7 @@ import (
 	"github.com/jezek/xgb/xproto"
 	"github.com/jezek/xgb/xtest"
 	"github.com/olimpiacloud/agora/internal/safefs"
+	"golang.org/x/sys/unix"
 )
 
 type DisplayOptions struct {
@@ -39,6 +40,8 @@ type DisplayOptions struct {
 	Xvfb      string
 	AuthUid   int
 	AuthGid   int
+	XUid      int
+	XGid      int
 	CgroupFD  int
 }
 
@@ -48,6 +51,9 @@ type Display struct {
 	Height   int
 	AuthFile string
 	cookie   string
+	xuid     int
+	xgid     int
+	owner    int
 	proc     *exec.Cmd
 	conn     *xgb.Conn
 	root     xproto.Window
@@ -80,7 +86,18 @@ func freeDisplay(min int) (int, *os.File, error) {
 	return 0, nil, errors.New("no free X display")
 }
 
-func writeXauth(path string, num int, cookie []byte, uid, gid int) error {
+func socketDir() error {
+	const dir = "/tmp/.X11-unix"
+	if err := os.Mkdir(dir, 0700); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil
+		}
+		return err
+	}
+	return os.Chmod(dir, 0777|os.ModeSticky)
+}
+
+func writeXauth(path string, num int, cookie []byte, uid, gid int, shared bool) error {
 	var b bytes.Buffer
 	put := func(v []byte) {
 		binary.Write(&b, binary.BigEndian, uint16(len(v)))
@@ -100,8 +117,11 @@ func writeXauth(path string, num int, cookie []byte, uid, gid int) error {
 	if _, err := f.Write(b.Bytes()); err != nil {
 		return err
 	}
-	if uid != 0 {
+	if shared {
 		if err := f.Chown(uid, gid); err != nil {
+			return err
+		}
+		if err := f.Chmod(0640); err != nil {
 			return err
 		}
 	}
@@ -153,7 +173,7 @@ func StartDisplay(ctx context.Context, o DisplayOptions) (*Display, error) {
 	raw := make([]byte, 16)
 	rand.Read(raw)
 	auth := filepath.Join(o.RunDir, fmt.Sprintf("xauth-%d", num))
-	if err := writeXauth(auth, num, raw, o.AuthUid, o.AuthGid); err != nil {
+	if err := writeXauth(auth, num, raw, o.XUid, o.AuthGid, o.AuthUid != 0 || o.XUid != 0); err != nil {
 		return nil, err
 	}
 	maxW, maxH := o.MaxWidth, o.MaxHeight
@@ -177,17 +197,25 @@ func StartDisplay(ctx context.Context, o DisplayOptions) (*Display, error) {
 	}
 	cmd := exec.Command(o.Xvfb, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
+	owner := os.Geteuid()
+	if o.XUid != 0 {
+		if err := socketDir(); err != nil {
+			return nil, err
+		}
+		cmd.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(o.XUid), Gid: uint32(o.XGid)}
+		owner = o.XUid
+	}
 	if o.CgroupFD > 0 {
 		cmd.SysProcAttr.UseCgroupFD = true
 		cmd.SysProcAttr.CgroupFD = o.CgroupFD
 	}
-	logf, _ := os.OpenFile(filepath.Join(o.RunDir, fmt.Sprintf("xvfb-%d.log", num)), os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0666)
+	logf, _ := os.OpenFile(filepath.Join(o.RunDir, fmt.Sprintf("xvfb-%d.log", num)), os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0600)
 	cmd.Stdout = logf
 	cmd.Stderr = logf
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	d := &Display{Num: num, Width: o.Width, Height: o.Height, AuthFile: auth, cookie: hex.EncodeToString(raw), proc: cmd, exited: make(chan struct{})}
+	d := &Display{Num: num, Width: o.Width, Height: o.Height, AuthFile: auth, cookie: hex.EncodeToString(raw), xuid: o.XUid, xgid: o.XGid, owner: owner, proc: cmd, exited: make(chan struct{})}
 	go func() {
 		d.exitErr = cmd.Wait()
 		if logf != nil {
@@ -243,9 +271,21 @@ func (d *Display) Dial() (*xgb.Conn, error) {
 }
 
 func (d *Display) dial() (*xgb.Conn, error) {
-	nc, err := net.DialTimeout("unix", socketPath(d.Num), time.Second)
+	path := socketPath(d.Num)
+	var st unix.Stat_t
+	if err := unix.Lstat(path, &st); err != nil {
+		return nil, &os.PathError{Op: "lstat", Path: path, Err: err}
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFSOCK || int(st.Uid) != d.owner {
+		return nil, fmt.Errorf("refusing X socket %s: owned by uid %d, want a socket owned by uid %d", path, st.Uid, d.owner)
+	}
+	nc, err := net.DialTimeout("unix", path, time.Second)
 	if err != nil {
 		return nil, err
+	}
+	if err := checkPeer(nc, d.owner); err != nil {
+		nc.Close()
+		return nil, fmt.Errorf("refusing X socket %s: %w", path, err)
 	}
 	c, err := xgb.NewConnNetWithCookieHex(nc, d.cookie)
 	if err != nil {
@@ -253,6 +293,31 @@ func (d *Display) dial() (*xgb.Conn, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+func checkPeer(nc net.Conn, uid int) error {
+	uc, ok := nc.(*net.UnixConn)
+	if !ok {
+		return errors.New("not a unix socket")
+	}
+	raw, err := uc.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var cred *unix.Ucred
+	var cerr error
+	if err := raw.Control(func(fd uintptr) {
+		cred, cerr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
+	}); err != nil {
+		return err
+	}
+	if cerr != nil {
+		return cerr
+	}
+	if int(cred.Uid) != uid {
+		return fmt.Errorf("server runs as uid %d, want uid %d", cred.Uid, uid)
+	}
+	return nil
 }
 
 func (d *Display) Name() string { return fmt.Sprintf(":%d", d.Num) }

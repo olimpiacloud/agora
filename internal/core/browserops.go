@@ -70,7 +70,7 @@ func (m *Manager) OpenTab(ctx context.Context, ws, cursorID string, req OpenTabR
 	owner := ""
 	if c != nil {
 		owner = c.ID
-		tab.Owner = owner
+		tab.SetOwner(owner)
 		r.mu.Lock()
 		r.tabOwner[tab.TargetID] = owner
 		r.mu.Unlock()
@@ -84,9 +84,18 @@ func (m *Manager) OpenTab(ctx context.Context, ws, cursorID string, req OpenTabR
 	m.Bus.Publish("browser.tab.opened", ws, owner, map[string]any{"target": tab.TargetID, "url": req.URL, "isolated": req.Isolated})
 	res := map[string]any{"target": tab.TargetID, "url": req.URL, "context": tab.ContextID}
 	if req.Observe {
-		tab.Settle(ctx)
-		if s, e := tab.Observe(ctx, 900); e == nil {
-			res["observation"] = r.observeDiff(tab.TargetID, s.Compact(false))
+		octx, cancel := tab.DialogContext(ctx)
+		if tab.Dialog() == nil {
+			tab.Settle(octx)
+			if s, e := tab.Observe(octx, 900); e == nil {
+				res["observation"] = r.observeDiff(tab.TargetID, s.Compact(false))
+			}
+		}
+		cancel()
+		if d := tab.Dialog(); d != nil {
+			delete(res, "observation")
+			res["dialog"] = d
+			res["note"] = dialogNote
 		}
 	}
 	return res, nil
@@ -114,16 +123,23 @@ func (m *Manager) ListTabs(ctx context.Context, ws string) ([]map[string]any, er
 	return out, nil
 }
 
-func (m *Manager) tabFor(ctx context.Context, ws string, c *Cursor, target string) (*Runtime, *browser.Tab, error) {
+func (m *Manager) cursorLive(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := m.cursors[id]
+	return c != nil && !c.Status.Terminal()
+}
+
+func (m *Manager) tabFor(ctx context.Context, ws string, c *Cursor, target string, readOnly bool) (*Runtime, *browser.Tab, error) {
 	r, b, err := m.browserFor(ctx, ws)
 	if err != nil {
 		return nil, nil, err
 	}
-	r.mu.Lock()
-	owner := r.tabOwner[target]
-	r.mu.Unlock()
-	if c != nil && owner != "" && owner != c.ID && !m.IsAncestor(c.ID, owner) {
-		return nil, nil, fmt.Errorf("%w: tab is owned by cursor %s", ErrForbidden, owner)
+	claim := false
+	if c != nil {
+		if claim, err = m.claimTabFor(r, c.ID, target, readOnly); err != nil {
+			return nil, nil, err
+		}
 	}
 	tab := b.Tab(target)
 	if tab == nil {
@@ -134,20 +150,70 @@ func (m *Manager) tabFor(ctx context.Context, ws string, c *Cursor, target strin
 			}
 		}
 		if !found {
+			r.releaseTab(target, c, claim)
 			return nil, nil, fmt.Errorf("tab %s: %w", target, ErrNotFound)
 		}
 		tab, err = b.Attach(ctx, target)
 		if err != nil {
+			r.releaseTab(target, c, claim)
 			return nil, nil, err
 		}
 	}
-	if c != nil && owner == "" {
-		r.mu.Lock()
-		r.tabOwner[target] = c.ID
-		r.mu.Unlock()
-		tab.Owner = c.ID
+	if claim {
+		tab.SetOwner(c.ID)
 	}
 	return r, tab, nil
+}
+
+func (r *Runtime) releaseTab(target string, c *Cursor, claimed bool) {
+	if !claimed {
+		return
+	}
+	r.mu.Lock()
+	if r.tabOwner[target] == c.ID {
+		delete(r.tabOwner, target)
+	}
+	r.mu.Unlock()
+}
+
+func (m *Manager) claimTabFor(r *Runtime, caller, target string, readOnly bool) (bool, error) {
+	for {
+		r.mu.Lock()
+		owner := r.tabOwner[target]
+		r.mu.Unlock()
+		live, ancestor := false, false
+		if owner != "" && owner != caller {
+			live = m.cursorLive(owner)
+			ancestor = live && m.IsAncestor(caller, owner)
+		}
+		claim, err := claimTab(owner, caller, readOnly, live || owner == caller, ancestor)
+		if err != nil {
+			return false, err
+		}
+		r.mu.Lock()
+		if r.tabOwner[target] != owner {
+			r.mu.Unlock()
+			continue
+		}
+		if claim {
+			r.tabOwner[target] = caller
+		}
+		r.mu.Unlock()
+		return claim, nil
+	}
+}
+
+func claimTab(owner, caller string, readOnly, live, ancestor bool) (bool, error) {
+	if owner != "" && !live {
+		owner = ""
+	}
+	if caller == "" {
+		return false, nil
+	}
+	if owner != "" && owner != caller && !ancestor {
+		return false, fmt.Errorf("%w: tab is owned by cursor %s", ErrForbidden, owner)
+	}
+	return owner == "" && !readOnly, nil
 }
 
 type TabAction struct {
@@ -186,6 +252,8 @@ type TabAction struct {
 	Boxes     bool     `json:"boxes,omitempty"`
 }
 
+const dialogNote = "a JavaScript dialog is open; use browser_action dialog to accept or dismiss it"
+
 var dialogSafe = map[string]bool{"dialog": true, "info": true, "close": true}
 
 var readOnlyTab = map[string]bool{"snapshot": true, "screenshot": true, "info": true, "challenge": true, "wait": true, "audit": true}
@@ -207,7 +275,7 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 			return nil, err
 		}
 	}
-	r, tab, err := m.tabFor(ctx, ws, c, target)
+	r, tab, err := m.tabFor(ctx, ws, c, target, readOnlyTab[a.Action])
 	if err != nil {
 		return nil, err
 	}
@@ -359,7 +427,7 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 	if d := tab.Dialog(); d != nil && a.Action != "info" {
 		delete(res, "observation")
 		res["dialog"] = d
-		res["note"] = "a JavaScript dialog is open; use browser_action dialog to accept or dismiss it"
+		res["note"] = dialogNote
 	}
 	if !readOnlyTab[a.Action] && c != nil {
 		sx, sy := -1, -1

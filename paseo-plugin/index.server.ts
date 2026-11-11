@@ -1,7 +1,7 @@
 import type { PluginHookContext, PluginServerContext } from "@getpaseo/plugin/server";
 import { agentCursor, bytes, call, AGORA_BIN, linkedWorkspace, nameFromCwd, reconcileAgentCursors, releaseAgentCursor } from "./server/agora";
-import { control, ensureWorkspace, getShot, listWorkspaces, live, resolveWorkspace, sendInput } from "./shared/agora";
-import { closeAll, pollLive, wakeHubs } from "./server/live";
+import { control, ensureWorkspace, getShot, listWorkspaces, live, liveInput, resolveWorkspace } from "./shared/agora";
+import { closeAll, pollLive, sendLiveInput, wakeHubs } from "./server/live";
 
 const MCP_PROVIDERS = ["claude", "codex"];
 
@@ -36,16 +36,6 @@ export default function contribute(server: PluginServerContext) {
     return { mime: r.mime, base64: r.data.toString("base64") };
   });
 
-  server.handle(sendInput, async (input) => {
-    try {
-      const { workspace, ...rest } = input;
-      await call("POST", `/v1/workspaces/${workspace}/input`, rest);
-      return { ok: true, error: null };
-    } catch (e) {
-      return { ok: false, error: errText(e) };
-    }
-  });
-
   server.handle(control, async ({ workspace, op }) => {
     try {
       await call("POST", `/v1/workspaces/${workspace}/${op}`, {});
@@ -57,6 +47,14 @@ export default function contribute(server: PluginServerContext) {
   });
 
   server.handle(live, pollLive);
+
+  server.handle(liveInput, async (input) => {
+    try {
+      return await sendLiveInput(input);
+    } catch (e) {
+      return { ok: false, error: errText(e) };
+    }
+  });
 
   server.handle(resolveWorkspace, async ({ paseoWorkspaceId }) => {
     try {

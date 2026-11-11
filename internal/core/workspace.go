@@ -336,6 +336,7 @@ func (m *Manager) suspendLocked(ctx context.Context, id, reason string) error {
 	if w.State == StateDestroyed {
 		return fmt.Errorf("%w: workspace is destroyed", ErrState)
 	}
+	m.shots.drop(id)
 	r := m.runtime(id)
 	if r == nil {
 		if w.State == StateCreated {
@@ -490,6 +491,7 @@ func (m *Manager) Destroy(ctx context.Context, id string, purge bool) error {
 	}
 	m.Arb.Clear(id)
 	m.dropBoard(id)
+	m.shots.drop(id)
 	if purge {
 		shared := false
 		m.mu.Lock()
@@ -645,6 +647,9 @@ func (r *Runtime) launch(spec AppSpec) (*Proc, error) {
 			logf.Close()
 		}
 		return nil, err
+	}
+	if sandboxed {
+		sandbox.WaitSignals(cmd.Process.Pid, 2*time.Second)
 	}
 	p := &Proc{Pid: cmd.Process.Pid, App: spec, Started: time.Now(), cmd: cmd, done: make(chan struct{})}
 	r.mu.Lock()

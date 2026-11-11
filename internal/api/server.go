@@ -18,17 +18,18 @@ import (
 )
 
 type Server struct {
-	m    *core.Manager
-	auth *Auth
-	mux  *http.ServeMux
-	ui   fs.FS
-	wsMu sync.Mutex
+	m              *core.Manager
+	auth           *Auth
+	mux            *http.ServeMux
+	ui             fs.FS
+	wsMu           sync.Mutex
+	sandboxDefault func() bool
 }
 
 type ctxKey struct{}
 
 func New(m *core.Manager, auth *Auth, ui fs.FS) *Server {
-	s := &Server{m: m, auth: auth, mux: http.NewServeMux(), ui: ui}
+	s := &Server{m: m, auth: auth, mux: http.NewServeMux(), ui: ui, sandboxDefault: m.SandboxDefault}
 	s.routes()
 	return s
 }
@@ -66,7 +67,7 @@ func writeErr(w http.ResponseWriter, err error) {
 	writeJSON(w, code, map[string]any{"error": err.Error()})
 }
 
-func decode(r *http.Request, v any) error {
+func decode(r *http.Request, vs ...any) error {
 	if r.Body == nil {
 		return nil
 	}
@@ -77,7 +78,12 @@ func decode(r *http.Request, v any) error {
 	if len(strings.TrimSpace(string(b))) == 0 {
 		return nil
 	}
-	return json.Unmarshal(b, v)
+	for _, v := range vs {
+		if err := json.Unmarshal(b, v); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func principal(r *http.Request) *Principal {
@@ -88,13 +94,17 @@ func principal(r *http.Request) *Principal {
 type handler func(w http.ResponseWriter, r *http.Request, p *Principal)
 
 func (s *Server) h(f handler, query bool) http.HandlerFunc {
+	return s.handle(f, query, query)
+}
+
+func (s *Server) handle(f handler, query, viewer bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, err := s.auth.Resolve(r, query)
 		if err != nil {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": err.Error()})
 			return
 		}
-		if p.Viewer != nil && !query {
+		if p.Viewer != nil && !viewer {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "viewer token only valid for streaming"})
 			return
 		}
@@ -182,10 +192,16 @@ func (s *Server) routes() {
 			return
 		}
 		var req core.CreateWorkspaceReq
-		if err := decode(r, &req); err != nil {
+		var opt struct {
+			Config struct {
+				Sandbox *bool `json:"sandbox"`
+			} `json:"config"`
+		}
+		if err := decode(r, &req, &opt); err != nil {
 			writeErr(w, err)
 			return
 		}
+		req.Config.Sandbox = sandboxed(opt.Config.Sandbox, !p.limited(), s.sandboxDefault())
 		if p.Cursor != nil {
 			req.Owner = p.Cursor.ID
 		}
@@ -441,9 +457,14 @@ func (s *Server) routes() {
 		}
 		writeJSON(w, 201, post)
 	}, false))
-	m.HandleFunc("GET /v1/workspaces/{id}/locks", s.ws(func(w http.ResponseWriter, r *http.Request, p *Principal, id string) {
+	m.HandleFunc("GET /v1/workspaces/{id}/locks", s.handle(func(w http.ResponseWriter, r *http.Request, p *Principal) {
+		id := r.PathValue("id")
+		if !p.CanWorkspace(id) {
+			writeErr(w, fmt.Errorf("%w: no access to workspace %s", core.ErrForbidden, id))
+			return
+		}
 		writeJSON(w, 200, s.m.Arb.List(id))
-	}))
+	}, false, true))
 	m.HandleFunc("GET /v1/workspaces/{id}/stream/ws", s.h(s.streamWS, true))
 	m.HandleFunc("POST /v1/workspaces/{id}/stream/webrtc", s.h(s.streamRTC, true))
 	m.HandleFunc("GET /v1/workspaces/{id}/stream/jpeg", s.h(s.streamJPEG, true))
@@ -524,6 +545,7 @@ func (s *Server) routes() {
 			req.Cursor = p.Cursor.ID
 			req.Workspace = p.Cursor.Workspace
 		}
+		req.Trusted = p.Admin
 		wt, err := s.m.CreateWorktree(r.Context(), req.WorktreeReq, req.Cursor, req.Workspace)
 		if err != nil {
 			writeErr(w, err)
@@ -581,7 +603,11 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 		writeErr(w, err)
 		return
 	}
-	privileged := map[string]bool{"suspend": true, "freeze": true, "checkpoint": true, "fork": true, "resize": true, "layout": true, "browser-restart": true, "control-take": true, "control-return": true}
+	privileged := map[string]bool{"suspend": true, "freeze": true, "checkpoint": true, "fork": true, "resize": true, "layout": true, "browser-restart": true}
+	if (op == "control-take" || op == "control-return") && !p.Admin {
+		writeErr(w, fmt.Errorf("%w: only a human (the admin) can take or return control; call human_request instead", core.ErrForbidden))
+		return
+	}
 	if privileged[op] {
 		if err := need(p, "workspace"); err != nil {
 			writeErr(w, err)
@@ -691,6 +717,9 @@ func (s *Server) createCursor(w http.ResponseWriter, r *http.Request, p *Princip
 			writeErr(w, fmt.Errorf("%w: a worktree needs process permission", core.ErrForbidden))
 			return
 		}
+	}
+	if req.Worktree != nil {
+		req.Worktree.Trusted = p.Admin
 	}
 	c, tok, err := s.m.CreateCursor(r.Context(), req)
 	if err != nil && c == nil {
@@ -863,6 +892,13 @@ func (s *Server) createCursorWorkspace(ctx context.Context, c *core.Cursor, req 
 		return ws, err
 	}
 	return s.m.GetWorkspace(ws.ID)
+}
+
+func sandboxed(explicit *bool, admin, def bool) bool {
+	if explicit != nil && (admin || !def) {
+		return *explicit
+	}
+	return def
 }
 
 func inheritLimits(cfg *core.WorkspaceConfig, parent core.WorkspaceConfig) {

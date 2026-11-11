@@ -320,17 +320,16 @@ func TestShutdownWaitsForLaunchExitWrites(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	m.mu.Lock()
-	m.launches[id] = &launchProc{cmd: cmd}
-	m.mu.Unlock()
+	if !m.registerLaunch(id, &launchProc{cmd: cmd}) {
+		t.Fatal("launch not tracked before shutdown")
+	}
 	go func() {
+		defer m.agents.Done()
 		cmd.Wait()
 		m.mu.Lock()
 		delete(m.launches, id)
 		m.mu.Unlock()
-		time.Sleep(200 * time.Millisecond)
-		m.Bus.Publish("agent.exited", "", id, nil)
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(400 * time.Millisecond)
 		m.Fail(id, "agent exited")
 	}()
 	m.Shutdown()
@@ -439,5 +438,80 @@ func TestFrozenRuntimeWithBrowserSkipsCDP(t *testing.T) {
 	r.currentTabs()
 	if calls.Load() != 1 {
 		t.Fatal("live tab refresh not used for a running runtime")
+	}
+}
+
+func TestEndedCursorAppsWaitForReaper(t *testing.T) {
+	m := newTestManager(t)
+	ctx := context.Background()
+	id, r := newTestRuntime(t, m)
+	start := func(owner string) *exec.Cmd {
+		cmd := exec.Command("sleep", "30")
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan struct{})
+		go func() {
+			cmd.Wait()
+			close(done)
+		}()
+		pid := cmd.Process.Pid
+		r.mu.Lock()
+		r.procs[pid] = &Proc{Pid: pid, App: AppSpec{Owner: owner}, Started: time.Now(), cmd: cmd, done: done}
+		r.mu.Unlock()
+		t.Cleanup(func() {
+			r.mu.Lock()
+			delete(r.procs, pid)
+			r.mu.Unlock()
+			cmd.Process.Kill()
+			<-done
+		})
+		return cmd
+	}
+	exited := func(cmd *exec.Cmd, wait time.Duration) bool {
+		deadline := time.Now().Add(wait)
+		for {
+			if b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", cmd.Process.Pid)); err != nil || bytes.Contains(b, []byte(") Z ")) {
+				return true
+			}
+			if time.Now().After(deadline) {
+				return false
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	cursor := func(name string) string {
+		c, _, err := m.CreateCursor(ctx, CreateCursorReq{Name: name, Workspace: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.ID
+	}
+	done, failed, cancelled := cursor("done"), cursor("failed"), cursor("cancelled")
+	doneApp, failedApp, cancelledApp := start(done), start(failed), start(cancelled)
+	if err := m.Complete(done, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Fail(failed, "boom"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.CancelCursor(cancelled, "stop", false); err != nil {
+		t.Fatal(err)
+	}
+	if !exited(cancelledApp, 3*time.Second) {
+		t.Fatal("app of a cancelled cursor is still running")
+	}
+	if exited(doneApp, 300*time.Millisecond) || exited(failedApp, 0) {
+		t.Fatal("app of a completed or failed cursor was stopped before the idle reaper")
+	}
+	if err := m.DeleteCursor(done); err != nil {
+		t.Fatal(err)
+	}
+	if !exited(doneApp, 3*time.Second) {
+		t.Fatal("app of a deleted cursor is still running")
+	}
+	if exited(failedApp, 0) {
+		t.Fatal("deleting one cursor stopped the app of another")
 	}
 }

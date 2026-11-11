@@ -78,7 +78,7 @@ Los agentes tienen que pedir el traspaso en vez de saltearse el obstáculo: nunc
 
 ## Workspaces aislados [#sandboxed-workspaces]
 
-Para páginas o programas no confiables, creá el workspace con `"sandbox": true` en su `config`:
+Los workspaces nuevos tienen sandbox por defecto y los cursores no pueden desactivarlo; solo el admin puede crear uno con `"sandbox": false`. Los workspaces anteriores conservan su configuración. Para pedirlo explícitamente:
 
 ```bash
 agora api POST /v1/workspaces '{"name":"untrusted","start":true,"config":{"sandbox":true}}'

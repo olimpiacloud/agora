@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -48,11 +49,14 @@ func newHWith(t *testing.T, tune func(*core.Config)) *H {
 		t.Fatal(err)
 	}
 	os.Chmod(home, 0711)
-	appsUser := ""
+	appsUser, xUser := "", ""
 	if os.Getuid() == 0 {
 		appsUser = "agora"
+		if _, err := user.Lookup("agora-x"); err == nil {
+			xUser = "agora-x"
+		}
 	}
-	cfg := core.Config{Home: home, AppsUser: appsUser, IdleAfter: time.Hour, RTC: stream.RTCOptions{IncludeLoop: true}}
+	cfg := core.Config{Home: home, AppsUser: appsUser, XUser: xUser, IdleAfter: time.Hour, RTC: stream.RTCOptions{IncludeLoop: true}, SandboxDefault: true}
 	if tune != nil {
 		tune(&cfg)
 	}
@@ -228,6 +232,9 @@ rq.onsuccess = () => { const db = rq.result; const tx = db.transaction('kv', 're
 	})
 	mux.HandleFunc("/dialog", func(w http.ResponseWriter, r *http.Request) {
 		page(w, "Dialog", `<button id=b onclick="document.title='confirm:'+confirm('sure?')">ask</button>`)
+	})
+	mux.HandleFunc("/alert", func(w http.ResponseWriter, r *http.Request) {
+		page(w, "Alert", `<script>alert('loaded')</script>`)
 	})
 	return mux
 }

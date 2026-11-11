@@ -14,7 +14,7 @@ Uninstall Agora.
 Usage: uninstall.sh [options]
 
   --prefix DIR   install prefix used by install.sh (default: /usr/local)
-  --purge        also delete $HOME_DIR, $APPS_HOME and the agora user
+  --purge        also delete $HOME_DIR, $APPS_HOME and the agora and agora-x users
   -y, --yes      do not ask for confirmation
   -h, --help     show this help
 EOF
@@ -38,7 +38,7 @@ done
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo)"
 
 if [ "$PURGE" -eq 1 ]; then
-	printf '\033[31mWARNING:\033[0m --purge permanently deletes %s (every workspace, browser profile, cookie, login and checkpoint), %s and the agora user.\n' "$HOME_DIR" "$APPS_HOME" >&2
+	printf '\033[31mWARNING:\033[0m --purge permanently deletes %s (every workspace, browser profile, cookie, login and checkpoint), %s and the agora and agora-x users.\n' "$HOME_DIR" "$APPS_HOME" >&2
 	if [ "$YES" -eq 0 ]; then
 		[ -r /dev/tty ] || die "no terminal to confirm: rerun with --yes to purge"
 		printf 'Type "purge" to continue: ' >&2
@@ -75,6 +75,17 @@ if user_has codex && as_user "codex mcp get agora" >/dev/null 2>&1; then
 	say "Removing the agora MCP server from Codex ($AGENT_USER)"
 	as_user "codex mcp remove agora" >/dev/null 2>&1 || warn "codex mcp remove failed"
 fi
+user_home=$(getent passwd "$AGENT_USER" | cut -d: -f6 || true)
+if [ -n "$user_home" ] && [ -f "$user_home/.config/agora/token" ]; then
+	say "Removing the saved admin token ($user_home/.config/agora/token)"
+	if [ "$AGENT_USER" = root ]; then
+		rm -f "$user_home/.config/agora/token"
+		rmdir "$user_home/.config/agora" 2>/dev/null || true
+	else
+		runuser -u "$AGENT_USER" -- rm -f "$user_home/.config/agora/token" || warn "could not remove $user_home/.config/agora/token"
+		runuser -u "$AGENT_USER" -- rmdir "$user_home/.config/agora" 2>/dev/null || true
+	fi
+fi
 if user_has bunx; then
 	runner="bunx skills"
 elif user_has npx; then
@@ -96,13 +107,16 @@ rm -f "$PREFIX/bin/agora"
 rm -rf "$PREFIX/share/agora"
 
 if [ "$PURGE" -eq 1 ]; then
-	say "Deleting $HOME_DIR, $APPS_HOME and the agora user"
+	say "Deleting $HOME_DIR, $APPS_HOME and the agora and agora-x users"
 	pkill -KILL -u agora 2>/dev/null || true
+	pkill -KILL -u agora-x 2>/dev/null || true
 	rm -rf "$HOME_DIR" "$APPS_HOME"
-	if id agora >/dev/null 2>&1; then
-		userdel agora 2>/dev/null || warn "could not delete the agora user"
-	fi
+	for u in agora agora-x; do
+		if id "$u" >/dev/null 2>&1; then
+			userdel "$u" 2>/dev/null || warn "could not delete the $u user"
+		fi
+	done
 else
-	echo "  kept: $HOME_DIR (workspaces and the admin token) and the agora user; run with --purge to delete them"
+	echo "  kept: $HOME_DIR (workspaces and the admin token) and the agora and agora-x users; run with --purge to delete them"
 fi
 say "Agora uninstalled"

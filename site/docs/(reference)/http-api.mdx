@@ -52,8 +52,8 @@ The daemon serves a JSON API under `/v1` on `127.0.0.1:7788`, plus the dashboard
 | `clipboard` | `text` | Set the clipboard; returns `{text}`. |
 | `browser-restart` | | Restart Chromium. |
 | `request-human` | `reason` | Mark the calling cursor `needs_human` and emit `human.requested`. |
-| `control-take` | | Human-priority lock on the whole workspace. Needs `workspace`. |
-| `control-return` | | Release it; emits `control.returned`. Needs `workspace`. |
+| `control-take` | | Human-priority lock on the whole workspace. Admin only; cursors call `request-human` instead. |
+| `control-return` | | Release it; emits `control.returned`. Admin only. |
 | `acquire` | `surface`, `ttl_ms`, `reason` | Lock `win:<id>` or `tab:<target>` for the calling cursor. |
 | `release` | `surface` | Release a lock. |
 | `usage` | | Detailed memory and CPU per process. |
@@ -71,7 +71,7 @@ The daemon serves a JSON API under `/v1` on `127.0.0.1:7788`, plus the dashboard
 | `GET /v1/workspaces/{id}/processes` | Processes started in the workspace. |
 | `DELETE /v1/workspaces/{id}/processes/{pid}` | Kill one. |
 | `GET /v1/workspaces/{id}/clipboard` | `{text}`. |
-| `GET /v1/workspaces/{id}/locks` | Current surface locks. |
+| `GET /v1/workspaces/{id}/locks` | Current surface locks. Also accepts a viewer token for its own workspace (header only). |
 | `GET /v1/workspaces/{id}/board` | Shared board: claims and posts after `?since=<seq>` (`limit`). |
 | `POST /v1/workspaces/{id}/board` | `{kind, topic, text}` → `201` post. `kind` is `claim`, `done`, `release`, `finding` or `note`. A claim fails while another live cursor holds the topic or once it is done. |
 

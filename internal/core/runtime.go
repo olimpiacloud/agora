@@ -250,7 +250,7 @@ func (r *Runtime) startDisplay(ctx context.Context, cfg WorkspaceConfig) error {
 		w, h = m.cfg.Width, m.cfg.Height
 	}
 	cgfd, release := r.cgroupFD()
-	d, err := x11.StartDisplay(ctx, x11.DisplayOptions{Width: w, Height: h, RunDir: filepath.Join(m.wsDir(r.id), "run"), AuthUid: m.uid, AuthGid: m.gid, CgroupFD: cgfd})
+	d, err := x11.StartDisplay(ctx, x11.DisplayOptions{Width: w, Height: h, RunDir: filepath.Join(m.wsDir(r.id), "run"), AuthUid: m.uid, AuthGid: m.gid, XUid: m.xuid, XGid: m.xgid, CgroupFD: cgfd})
 	release()
 	if err != nil {
 		return fmt.Errorf("display: %w", err)
@@ -482,7 +482,7 @@ func (r *Runtime) restoreTabs(b *browser.Browser, tabs []TabRecord) {
 				r.mu.Lock()
 				r.tabOwner[tab.TargetID] = t.Owner
 				r.mu.Unlock()
-				tab.Owner = t.Owner
+				tab.SetOwner(t.Owner)
 				r.m.mu.Lock()
 				if c := r.m.cursors[t.Owner]; c != nil && !c.Status.Terminal() {
 					c.Surface = "tab:" + tab.TargetID

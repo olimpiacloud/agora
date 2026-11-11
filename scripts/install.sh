@@ -103,11 +103,15 @@ install_deps() {
 }
 
 create_user() {
-	if id agora >/dev/null 2>&1; then
-		return
+	if ! id agora >/dev/null 2>&1; then
+		say "Creating the unprivileged agora user"
+		useradd --system --create-home --home-dir "$APPS_HOME" --shell /usr/sbin/nologin agora
 	fi
-	say "Creating the unprivileged agora user"
-	useradd --system --create-home --home-dir "$APPS_HOME" --shell /usr/sbin/nologin agora
+	if ! id agora-x >/dev/null 2>&1; then
+		say "Creating the agora-x user for the X servers"
+		useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin agora-x
+		CHANGED=1
+	fi
 }
 
 latest_version() {
@@ -117,11 +121,11 @@ latest_version() {
 
 download_release() {
 	[ -n "$VERSION" ] || VERSION=$(latest_version)
-	[ -n "$VERSION" ] || return 1
+	[ -n "$VERSION" ] || die "could not look up the latest Agora release on GitHub (network or API rate limit?): retry later, pass --version vX.Y.Z, or build a local checkout with --source DIR"
 	name="agora-$VERSION-linux-$ARCH"
 	base=${AGORA_DOWNLOAD_BASE:-https://github.com/$REPO/releases/download/$VERSION}
 	say "Downloading Agora $VERSION ($ARCH)"
-	curl -fsSL -o "$TMP/$name.tar.gz" "$base/$name.tar.gz" || return 1
+	curl -fsSL -o "$TMP/$name.tar.gz" "$base/$name.tar.gz" || die "could not download $name.tar.gz from $base: check --version, or build a local checkout with --source DIR"
 	curl -fsSL -o "$TMP/SHA256SUMS" "$base/SHA256SUMS" || die "SHA256SUMS missing from release $VERSION"
 	(cd "$TMP" && grep " $name.tar.gz\$" SHA256SUMS | sha256sum -c --status) || die "checksum mismatch for $name.tar.gz"
 	tar -C "$TMP" -xzf "$TMP/$name.tar.gz"
@@ -134,11 +138,6 @@ download_release() {
 build_from_source() {
 	say "Building Agora from source"
 	apt_install build-essential pkg-config libx264-dev libva-dev git
-	if [ -z "$SOURCE" ]; then
-		SOURCE="$TMP/agora"
-		ref=${VERSION:-main}
-		git clone -q --depth 1 --branch "$ref" "https://github.com/$REPO.git" "$SOURCE" || die "could not clone $REPO at $ref"
-	fi
 	[ -f "$SOURCE/go.mod" ] || die "$SOURCE is not an Agora checkout"
 	gobin=$(command -v go || true)
 	if [ -z "$gobin" ] || ! "$gobin" version | grep -q "go$GO_VERSION"; then
@@ -212,31 +211,85 @@ as_user() {
 
 user_has() { as_user "command -v $1" >/dev/null 2>&1; }
 
+save_token() {
+	user_home=$(getent passwd "$AGENT_USER" | cut -d: -f6)
+	case "$user_home" in
+	/*) ;;
+	*) warn "no home directory for $AGENT_USER: the MCP server will need AGORA_TOKEN or AGORA_TOKEN_FILE"; return ;;
+	esac
+	dir="$user_home/.config/agora"
+	say "Saving the admin token for $AGENT_USER in $dir/token"
+	if runuser -u "$AGENT_USER" -- sh -c 'umask 077 && mkdir -p "$1" && chmod 700 "$1" && cat >"$1/token.new" && chmod 600 "$1/token.new" && mv -f "$1/token.new" "$1/token"' sh "$dir" <"$HOME_DIR/admin.token"; then
+		envflag="AGORA_TOKEN_FILE=$dir/token"
+	else
+		warn "could not write $dir/token"
+	fi
+}
+
+inline_token() {
+	printf '%s\n' "$1" | grep -Eq 'AGORA_TOKEN([^_]|$)'
+}
+
+migrate_mcp() {
+	if [ -z "$envflag" ] && [ "$AGENT_USER" != root ]; then
+		warn "the agora MCP server in $1 ($AGENT_USER) has an inline AGORA_TOKEN and no token file could be saved: leaving it as is"
+		return 1
+	fi
+	say "Moving the inline AGORA_TOKEN of the agora MCP server in $1 ($AGENT_USER) to ${envflag:-the admin token file}"
+	if ! as_user "$2" >/dev/null 2>&1; then
+		warn "could not remove the agora MCP server from $1 ($2)"
+		return 1
+	fi
+	MIGRATED=1
+}
+
 configure_agents() {
 	AGENT_USER=${SUDO_USER:-root}
 	id "$AGENT_USER" >/dev/null 2>&1 || AGENT_USER=root
 	envflag=
-	if [ "$AGENT_USER" != root ] && [ -s "$HOME_DIR/admin.token" ]; then
-		envflag="AGORA_TOKEN=$(cat "$HOME_DIR/admin.token")"
+	MIGRATED=0
+	if [ "$AGENT_USER" != root ] && [ -s "$HOME_DIR/admin.token" ] && { user_has claude || user_has codex; }; then
+		save_token
 	fi
 	configured=0
 	if user_has claude; then
-		if as_user "claude mcp get agora" >/dev/null 2>&1; then
-			say "Claude Code already has the agora MCP server"
-		else
+		add=1
+		if cfg=$(as_user "claude mcp get agora" 2>/dev/null); then
+			add=0
+			if inline_token "$cfg"; then
+				if migrate_mcp "Claude Code" "claude mcp remove agora -s user"; then
+					add=1
+				fi
+			else
+				say "Claude Code already has the agora MCP server"
+			fi
+		fi
+		if [ "$add" -eq 1 ]; then
 			say "Adding the agora MCP server to Claude Code ($AGENT_USER)"
-			as_user "claude mcp add agora -s user ${envflag:+-e $envflag} -- $PREFIX/bin/agora mcp" >/dev/null || warn "claude mcp add failed"
+			as_user "claude mcp add agora -s user ${envflag:+-e '$envflag'} -- $PREFIX/bin/agora mcp" >/dev/null || warn "claude mcp add failed"
 		fi
 		configured=1
 	fi
 	if user_has codex; then
-		if as_user "codex mcp get agora" >/dev/null 2>&1; then
-			say "Codex already has the agora MCP server"
-		else
+		add=1
+		if cfg=$(as_user "codex mcp get agora" 2>/dev/null); then
+			add=0
+			if inline_token "$cfg"; then
+				if migrate_mcp "Codex" "codex mcp remove agora"; then
+					add=1
+				fi
+			else
+				say "Codex already has the agora MCP server"
+			fi
+		fi
+		if [ "$add" -eq 1 ]; then
 			say "Adding the agora MCP server to Codex ($AGENT_USER)"
-			as_user "codex mcp add agora ${envflag:+--env $envflag} -- $PREFIX/bin/agora mcp" >/dev/null || warn "codex mcp add failed"
+			as_user "codex mcp add agora ${envflag:+--env '$envflag'} -- $PREFIX/bin/agora mcp" >/dev/null || warn "codex mcp add failed"
 		fi
 		configured=1
+	fi
+	if [ "$MIGRATED" -eq 1 ]; then
+		warn "the admin token was stored in plain text in the agent configuration: rotate it with 'sudo rm $HOME_DIR/admin.token && sudo systemctl restart agora', then run this installer again to save the new token"
 	fi
 	if [ "$configured" -eq 1 ]; then
 		if user_has bunx; then
@@ -263,9 +316,10 @@ configure_agents() {
 
 install_deps
 create_user
-if [ -n "$SOURCE" ] || ! download_release; then
-	[ -n "$SOURCE" ] || warn "no release found${VERSION:+ for $VERSION}; building from source"
+if [ -n "$SOURCE" ]; then
 	build_from_source
+else
+	download_release
 fi
 install_files
 start_service

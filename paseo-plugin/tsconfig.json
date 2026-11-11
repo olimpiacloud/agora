@@ -4,7 +4,8 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": [
-      "ES2023"
+      "ES2023",
+      "DOM"
     ],
     "types": [
       "react"
@@ -23,6 +24,7 @@
   "exclude": [
     "node_modules",
     "server/**",
+    "test/**",
     "index.server.ts"
   ]
 }

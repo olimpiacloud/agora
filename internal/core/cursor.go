@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"syscall"
 	"time"
 )
 
@@ -342,6 +343,8 @@ func (m *Manager) DeleteCursor(id string) error {
 	}
 	if !c.Status.Terminal() {
 		m.CancelCursor(id, "deleted", true)
+	} else {
+		m.closeOwned(c.Workspace, id, true)
 	}
 	m.mu.Lock()
 	delete(m.cursors, id)
@@ -438,36 +441,60 @@ func (m *Manager) cleanupCursor(id string) {
 		}()
 	}
 	if r := m.runtime(c.Workspace); r != nil {
-		var close []string
 		r.mu.Lock()
 		if s := r.seats[id]; s != nil {
 			delete(r.seats, id)
 			go s.seat.Close()
 		}
-		for t, o := range r.tabOwner {
-			if o == id {
-				close = append(close, t)
-				delete(r.tabOwner, t)
-			}
-		}
 		r.mu.Unlock()
-		if c.Labels["keep_tabs"] != "true" && len(close) > 0 {
-			r.brMu.Lock()
-			b := r.browser
-			r.brMu.Unlock()
-			if b != nil {
-				go func() {
-					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					defer cancel()
-					for _, t := range close {
-						if tab := b.Tab(t); tab != nil {
-							tab.Close(ctx)
-						}
-					}
-				}()
-			}
+	}
+	if c.Labels["keep_tabs"] == "true" && c.Status != CursorCancelled {
+		return
+	}
+	m.closeOwned(c.Workspace, id, c.Status == CursorCancelled)
+}
+
+func (m *Manager) closeOwned(ws, id string, apps bool) {
+	r := m.runtime(ws)
+	if r == nil {
+		return
+	}
+	var close []string
+	var pids []int
+	r.mu.Lock()
+	for t, o := range r.tabOwner {
+		if o == id {
+			close = append(close, t)
+			delete(r.tabOwner, t)
 		}
 	}
+	for pid, p := range r.procs {
+		if apps && p.App.Owner == id {
+			pids = append(pids, pid)
+		}
+	}
+	r.mu.Unlock()
+	for _, pid := range pids {
+		syscall.Kill(-pid, syscall.SIGTERM)
+	}
+	if len(close) == 0 {
+		return
+	}
+	r.brMu.Lock()
+	b := r.browser
+	r.brMu.Unlock()
+	if b == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		for _, t := range close {
+			if tab := b.Tab(t); tab != nil {
+				tab.Close(ctx)
+			}
+		}
+	}()
 }
 
 func (m *Manager) SendMessage(from, to string, body json.RawMessage) (*Message, error) {

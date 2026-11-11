@@ -1,6 +1,6 @@
 import type { RpcInput } from "@getpaseo/plugin";
 import { call, wsURL } from "./agora";
-import type { live } from "../shared/agora";
+import type { live, liveInput } from "../shared/agora";
 
 type Cur = { id: string; name: string; status: string; detail: string; color: string; x: number; y: number; goal: string; parent: string; agent: string };
 type Region = { x: number; y: number; w: number; h: number; sw: number; sh: number };
@@ -25,6 +25,9 @@ interface Hub {
   region: Region;
   gotRegion: boolean;
   status: string | null;
+  viewer: string | null;
+  inputs: Promise<unknown>;
+  opening: Promise<void>;
   lastPoll: number;
   openedAt: number;
   connected: boolean;
@@ -35,7 +38,7 @@ interface Hub {
 const TIERS = {
   card: { maxWidth: 720, fps: 4, control: false },
   tile: { maxWidth: 560, fps: 3, control: false },
-  full: { maxWidth: 1400, fps: 8, control: true },
+  full: { maxWidth: 1400, fps: 15, control: true },
 } as const;
 
 const hubs = new Map<string, Hub>();
@@ -69,7 +72,6 @@ function bumpMeta(workspace: string) {
       metaWake.delete(workspace);
       const cur = metas.get(workspace);
       if (!cur) return;
-      for (const h of cur.hubs) wake(h);
       for (const w of cur.waiters) w();
       cur.waiters.clear();
     }, 100),
@@ -130,6 +132,7 @@ function open(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidth: number
   h.openedAt = Date.now() + 60000;
   const run = openChain.then(() => openNow(h, cursor, tier, maxWidth));
   openChain = run.catch(() => {});
+  h.opening = openChain;
   return run;
 }
 
@@ -152,6 +155,8 @@ async function openNow(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidt
         const m = JSON.parse(ev.data);
         if (m.type === "event" && m.event && m.event.type !== "cursor.action") {
           onEvent(h.workspace, m.event);
+        } else if (m.type === "hello") {
+          h.viewer = typeof m.viewer === "string" ? m.viewer : null;
         } else if (m.type === "region") {
           h.region = { x: m.x, y: m.y, w: m.w, h: m.h, sw: m.screen_w, sh: m.screen_h };
           h.gotRegion = true;
@@ -180,7 +185,10 @@ async function openNow(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidt
     h.status = "connection to Agora failed";
   };
   sock.onclose = () => {
-    if (h.sock === sock) h.sock = null;
+    if (h.sock === sock) {
+      h.sock = null;
+      h.viewer = null;
+    }
     wake(h);
   };
   await new Promise<void>((resolve) => {
@@ -231,8 +239,9 @@ export function closeAll() {
   metas.clear();
 }
 
-export async function pollLive(input: RpcInput<typeof live>) {
-  if (input.metaOnly) return pollMeta(input);
+type HubInput = { workspace: string; cursor?: string; tier: keyof typeof TIERS; maxWidth?: number };
+
+function hubFor(input: HubInput) {
   const tier = input.tier;
   const maxWidth = tier === "full" ? Math.min(1920, Math.max(480, Math.round((input.maxWidth || 1400) / 240) * 240)) : TIERS[tier].maxWidth;
   const cursor = input.cursor || "";
@@ -241,29 +250,41 @@ export async function pollLive(input: RpcInput<typeof live>) {
   m.lastUse = Date.now();
   let h = hubs.get(key);
   if (!h) {
-    h = { key, workspace: input.workspace, sock: null, seq: 0, frame: null, region: { x: 0, y: 0, w: 0, h: 0, sw: 0, sh: 0 }, gotRegion: false, status: "connecting", lastPoll: Date.now(), openedAt: 0, connected: false, asleep: false, waiters: new Set() };
+    h = { key, workspace: input.workspace, sock: null, seq: 0, frame: null, region: { x: 0, y: 0, w: 0, h: 0, sw: 0, sh: 0 }, gotRegion: false, status: "connecting", viewer: null, inputs: Promise.resolve(), opening: Promise.resolve(), lastPoll: Date.now(), openedAt: 0, connected: false, asleep: false, waiters: new Set() };
     hubs.set(key, h);
   }
   m.hubs.add(h);
   h.lastPoll = Date.now();
-  if (!h.sock && !h.asleep && Date.now() - h.openedAt > 2000) {
-    try {
-      await open(h, cursor, tier, maxWidth);
-    } catch (e) {
-      h.status = e instanceof Error ? e.message : String(e);
-    }
+  return { h, m, cursor, tier, maxWidth };
+}
+
+async function ensureOpen(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidth: number) {
+  if (h.sock || h.asleep || Date.now() - h.openedAt <= 2000) return;
+  try {
+    await open(h, cursor, tier, maxWidth);
+  } catch (e) {
+    h.status = e instanceof Error ? e.message : String(e);
   }
-  const hub = h;
-  const fresh = () => hub.seq > input.after || m.seq > input.metaAfter;
+}
+
+export async function pollLive(input: RpcInput<typeof live>) {
+  if (input.metaOnly) return pollMeta(input);
+  const { h: hub, m, cursor, tier, maxWidth } = hubFor(input);
+  await ensureOpen(hub, cursor, tier, maxWidth);
+  const metaAfter = input.metaAfter;
+  const withMeta = metaAfter !== undefined;
+  const fresh = () => hub.seq > input.after || (withMeta && m.seq > metaAfter);
   if (!fresh()) {
     await new Promise<void>((resolve) => {
       const done = () => {
         clearTimeout(t);
         hub.waiters.delete(done);
+        m.waiters.delete(done);
         resolve();
       };
       const t = setTimeout(done, 8000);
       hub.waiters.add(done);
+      if (withMeta) m.waiters.add(done);
     });
   }
   hub.lastPoll = Date.now();
@@ -273,16 +294,48 @@ export async function pollLive(input: RpcInput<typeof live>) {
     frame: f && hub.seq > input.after ? f : null,
     region: hub.region,
     status: hub.status,
+    viewer: hub.viewer,
     metaSeq: m.seq,
-    cursors: m.seq > input.metaAfter ? m.cursors : null,
-    locked: m.locked,
+    cursors: withMeta && m.seq > metaAfter ? m.cursors : null,
+    locked: withMeta ? m.locked : null,
   };
+}
+
+async function deliver(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidth: number, msgs: RpcInput<typeof liveInput>["msgs"]) {
+  if (h.asleep) return { ok: false, error: "suspended" };
+  await ensureOpen(h, cursor, tier, maxWidth);
+  if (!h.sock) await h.opening;
+  const sock = h.sock;
+  if (sock && sock.readyState === WebSocket.CONNECTING) {
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, 3000);
+      const done = () => {
+        clearTimeout(t);
+        resolve();
+      };
+      sock.addEventListener("open", done, { once: true });
+      sock.addEventListener("close", done, { once: true });
+    });
+  }
+  if (!sock || h.sock !== sock || sock.readyState !== WebSocket.OPEN) return { ok: false, error: h.status || "not connected to Agora" };
+  for (const msg of msgs) sock.send(JSON.stringify(msg));
+  h.lastPoll = Date.now();
+  return { ok: true, error: null };
+}
+
+export function sendLiveInput(input: RpcInput<typeof liveInput>): Promise<{ ok: boolean; error: string | null }> {
+  if (!TIERS[input.tier].control) return Promise.resolve({ ok: false, error: `the ${input.tier} view cannot send input` });
+  const { h, cursor, tier, maxWidth } = hubFor(input);
+  const run = h.inputs.then(() => deliver(h, cursor, tier, maxWidth, input.msgs));
+  h.inputs = run.catch(() => {});
+  return run;
 }
 
 async function pollMeta(input: RpcInput<typeof live>) {
   const m = meta(input.workspace);
   m.lastUse = Date.now();
-  if (m.seq <= input.metaAfter) {
+  const metaAfter = input.metaAfter ?? 0;
+  if (m.seq <= metaAfter) {
     await new Promise<void>((resolve) => {
       const done = () => {
         clearTimeout(t);
@@ -299,8 +352,9 @@ async function pollMeta(input: RpcInput<typeof live>) {
     frame: null,
     region: { x: 0, y: 0, w: 0, h: 0, sw: 0, sh: 0 },
     status: null,
+    viewer: null,
     metaSeq: m.seq,
-    cursors: m.seq > input.metaAfter ? m.cursors : null,
+    cursors: m.seq > metaAfter ? m.cursors : null,
     locked: m.locked,
   };
 }

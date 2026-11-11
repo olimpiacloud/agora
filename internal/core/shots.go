@@ -18,46 +18,96 @@ type Shot struct {
 	Mime      string    `json:"mime"`
 	Time      time.Time `json:"time"`
 	Data      []byte    `json:"-"`
+	seq       uint64
 }
 
-type shotRing struct {
-	mu    sync.Mutex
-	list  []*Shot
-	bytes int
+const (
+	shotsPerWorkspace     = 64
+	shotBytesPerWorkspace = 24 << 20
+	shotBytesTotal        = 256 << 20
+)
+
+type shotStore struct {
+	mu      sync.Mutex
+	ws      map[string][]*Shot
+	wsBytes map[string]int
+	bytes   int
+	seq     uint64
 }
 
-func (s *shotRing) put(sh *Shot) {
+func (s *shotStore) put(sh *Shot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.list = append(s.list, sh)
+	if s.ws == nil {
+		s.ws = map[string][]*Shot{}
+		s.wsBytes = map[string]int{}
+	}
+	s.seq++
+	sh.seq = s.seq
+	s.ws[sh.Workspace] = append(s.ws[sh.Workspace], sh)
+	s.wsBytes[sh.Workspace] += len(sh.Data)
 	s.bytes += len(sh.Data)
-	for len(s.list) > 1 && (len(s.list) > 128 || s.bytes > 48<<20) {
-		s.bytes -= len(s.list[0].Data)
-		s.list = s.list[1:]
+	w := sh.Workspace
+	for len(s.ws[w]) > 1 && (len(s.ws[w]) > shotsPerWorkspace || s.wsBytes[w] > shotBytesPerWorkspace) {
+		s.evict(w)
+	}
+	for s.bytes > shotBytesTotal {
+		oldest := ""
+		var seq uint64
+		for ws, list := range s.ws {
+			if list[0] != sh && (oldest == "" || list[0].seq < seq) {
+				oldest, seq = ws, list[0].seq
+			}
+		}
+		if oldest == "" {
+			break
+		}
+		s.evict(oldest)
 	}
 }
 
-func (s *shotRing) get(id string) *Shot {
+func (s *shotStore) evict(ws string) {
+	list := s.ws[ws]
+	s.wsBytes[ws] -= len(list[0].Data)
+	s.bytes -= len(list[0].Data)
+	list[0] = nil
+	if len(list) == 1 {
+		delete(s.ws, ws)
+		delete(s.wsBytes, ws)
+		return
+	}
+	s.ws[ws] = list[1:]
+}
+
+func (s *shotStore) get(id string) *Shot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for i := len(s.list) - 1; i >= 0; i-- {
-		if s.list[i].ID == id {
-			return s.list[i]
+	for _, list := range s.ws {
+		for i := len(list) - 1; i >= 0; i-- {
+			if list[i].ID == id {
+				return list[i]
+			}
 		}
 	}
 	return nil
 }
 
-var shots shotRing
+func (s *shotStore) drop(ws string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bytes -= s.wsBytes[ws]
+	delete(s.ws, ws)
+	delete(s.wsBytes, ws)
+}
 
 func (m *Manager) StoreShot(ws, cursor, mime string, data []byte) string {
 	id := NewID("shot")
-	shots.put(&Shot{ID: id, Workspace: ws, Cursor: cursor, Mime: mime, Time: time.Now().UTC(), Data: data})
+	m.shots.put(&Shot{ID: id, Workspace: ws, Cursor: cursor, Mime: mime, Time: time.Now().UTC(), Data: data})
 	m.Bus.Publish("desktop.screenshot", ws, cursor, map[string]any{"shot": id, "bytes": len(data)})
 	return id
 }
 
-func (m *Manager) GetShot(id string) *Shot { return shots.get(id) }
+func (m *Manager) GetShot(id string) *Shot { return m.shots.get(id) }
 
 func (m *Manager) LiveDisplay(ctx context.Context, ws string) (*x11.Display, error) {
 	r, err := m.ensureRuntime(ctx, ws, true)

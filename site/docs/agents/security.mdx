@@ -76,7 +76,7 @@ Agents should hand off instead of bypassing: never brute-force a CAPTCHA or send
 
 ## Sandboxed workspaces
 
-For untrusted pages or programs, create the workspace with `"sandbox": true` in its `config`:
+New workspaces are sandboxed by default, and cursors cannot opt out; only the admin can create one with `"sandbox": false`. Older workspaces keep their stored setting. To request it explicitly:
 
 ```bash
 agora api POST /v1/workspaces '{"name":"untrusted","start":true,"config":{"sandbox":true}}'

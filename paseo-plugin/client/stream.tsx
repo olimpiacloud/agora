@@ -1,23 +1,24 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin/client";
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { Image, type LayoutChangeEvent, Pressable, Text, View } from "react-native";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { type GestureResponderEvent, Image, type LayoutChangeEvent, Platform, Text, View } from "react-native";
 import type { z } from "zod";
-import { live, type liveCursor } from "../shared/agora";
+import { live, type liveCursor, type ViewerMsg } from "../shared/agora";
+import { click, createSeat, createWheel, isPasteKey, PASTE_KEYS, throttle } from "./input";
 import { useSmoothPoint } from "./smooth";
 
 export type Cur = z.output<typeof liveCursor>;
 export type Region = { x: number; y: number; w: number; h: number; sw: number; sh: number };
 export type Frame = { w: number; h: number; uri: string };
 
-type LiveState = { frame: Frame | null; region: Region | null; cursors: Cur[]; locked: string | null; status: string | null };
+type LiveState = { frame: Frame | null; region: Region | null; cursors: Cur[]; locked: string | null; status: string | null; viewer: string | null };
 
-const EMPTY: LiveState = { frame: null, region: null, cursors: [], locked: null, status: "connecting" };
+const EMPTY: LiveState = { frame: null, region: null, cursors: [], locked: null, status: "connecting", viewer: null };
 
-export function useLive(opts: { workspace: string | null; cursor?: string; tier: "card" | "tile" | "full"; maxWidth?: number; metaOnly?: boolean; enabled: boolean }) {
+export function useLive(opts: { workspace: string | null; cursor?: string; tier: "card" | "tile" | "full"; maxWidth?: number; meta?: boolean; enabled: boolean }) {
   const poll = useRpc(live);
   const [s, setS] = useState<LiveState>(EMPTY);
-  const { workspace, cursor, tier, maxWidth, metaOnly, enabled } = opts;
+  const { workspace, cursor, tier, maxWidth, meta, enabled } = opts;
   useEffect(() => {
     if (!workspace || !enabled) return;
     let stop = false;
@@ -27,7 +28,7 @@ export function useLive(opts: { workspace: string | null; cursor?: string; tier:
     const loop = async () => {
       while (!stop) {
         try {
-          const r = await poll({ workspace, cursor, tier, maxWidth, metaOnly, after, metaAfter });
+          const r = await poll({ workspace, cursor, tier, maxWidth, after, metaAfter: meta ? metaAfter : undefined });
           if (stop) return;
           fails = 0;
           after = r.seq;
@@ -36,8 +37,9 @@ export function useLive(opts: { workspace: string | null; cursor?: string; tier:
             frame: r.frame ? { w: r.frame.w, h: r.frame.h, uri: `data:image/jpeg;base64,${r.frame.b64}` } : p.frame,
             region: r.region.w ? r.region : p.region,
             cursors: r.cursors ?? p.cursors,
-            locked: r.locked,
+            locked: meta ? r.locked : p.locked,
             status: r.status,
+            viewer: r.viewer,
           }));
         } catch (e) {
           if (stop) return;
@@ -51,7 +53,44 @@ export function useLive(opts: { workspace: string | null; cursor?: string; tier:
     return () => {
       stop = true;
     };
-  }, [workspace, cursor, tier, maxWidth, metaOnly, enabled]);
+  }, [workspace, cursor, tier, maxWidth, meta, enabled]);
+  return s;
+}
+
+type MetaState = { cursors: Cur[]; locked: string | null; status: string | null };
+
+const NO_META: MetaState = { cursors: [], locked: null, status: null };
+
+export function useCursors(workspace: string | null, enabled: boolean) {
+  const poll = useRpc(live);
+  const [s, setS] = useState<MetaState>(NO_META);
+  useEffect(() => {
+    setS(NO_META);
+    if (!workspace || !enabled) return;
+    let stop = false;
+    let metaAfter = 0;
+    let fails = 0;
+    const loop = async () => {
+      while (!stop) {
+        try {
+          const r = await poll({ workspace, tier: "full", metaOnly: true, after: 0, metaAfter });
+          if (stop) return;
+          fails = 0;
+          metaAfter = r.metaSeq;
+          setS((p) => (r.cursors || r.locked !== p.locked || p.status ? { cursors: r.cursors ?? p.cursors, locked: r.locked, status: null } : p));
+        } catch (e) {
+          if (stop) return;
+          fails++;
+          setS((p) => ({ ...p, status: e instanceof Error ? e.message : String(e) }));
+          await new Promise<void>((res) => setTimeout(res, Math.min(10000, 1000 * fails)));
+        }
+      }
+    };
+    void loop();
+    return () => {
+      stop = true;
+    };
+  }, [workspace, enabled]);
   return s;
 }
 
@@ -175,6 +214,99 @@ function CursorMark({ theme, cursor: c, region, scale, width, height, dim, small
   );
 }
 
+function useWebInput(node: { current: unknown }, toScreen: (lx: number, ly: number) => [number, number], onInput: ((msgs: ViewerMsg[]) => void) | undefined, active: boolean) {
+  const latest = useRef(toScreen);
+  latest.current = toScreen;
+  useEffect(() => {
+    const el = node.current as HTMLElement | null;
+    if (Platform.OS !== "web" || !active || !onInput || !el || typeof el.addEventListener !== "function") return;
+    el.tabIndex = 0;
+    el.style.outline = "none";
+    el.style.cursor = "default";
+    el.style.userSelect = "none";
+    el.style.touchAction = "none";
+    const send = (msgs: ViewerMsg[]) => {
+      if (msgs.length) onInput(msgs);
+    };
+    const at = (e: MouseEvent): [number, number] => {
+      const r = el.getBoundingClientRect();
+      return latest.current(Math.min(Math.max(e.clientX - r.left, 0), r.width - 1), Math.min(Math.max(e.clientY - r.top, 0), r.height - 1));
+    };
+    const seat = createSeat();
+    const wheel = createWheel();
+    const moves = throttle(30, ([x, y]: [number, number]) => send(seat.move(x, y)));
+    const down = (e: PointerEvent) => {
+      e.preventDefault();
+      el.focus({ preventScroll: true });
+      el.setPointerCapture?.(e.pointerId);
+      moves.flush();
+      send(seat.down(...at(e), e.button));
+    };
+    const move = (e: PointerEvent) => moves.push(at(e));
+    const up = (e: PointerEvent) => {
+      moves.flush();
+      send(seat.up(...at(e), e.button));
+    };
+    const lost = () => {
+      moves.flush();
+      send(seat.releaseButtons());
+    };
+    const wheelH = (e: WheelEvent) => {
+      e.preventDefault();
+      moves.flush();
+      send(wheel(...at(e), e.deltaX, e.deltaY, e.deltaMode));
+    };
+    const menu = (e: Event) => e.preventDefault();
+    const keyDown = (e: KeyboardEvent) => {
+      if (isPasteKey(e)) return;
+      e.preventDefault();
+      send(seat.key(e, true));
+    };
+    const keyUp = (e: KeyboardEvent) => {
+      e.preventDefault();
+      send(seat.key(e, false));
+    };
+    const paste = (e: ClipboardEvent) => {
+      const t = e.clipboardData?.getData("text/plain");
+      e.preventDefault();
+      if (!t) return;
+      send([{ t: "clip", s: t }]);
+      setTimeout(() => send(PASTE_KEYS), 60);
+    };
+    const blur = () => send(seat.releaseAll());
+    el.addEventListener("pointerdown", down);
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", lost);
+    el.addEventListener("lostpointercapture", lost);
+    el.addEventListener("wheel", wheelH, { passive: false });
+    el.addEventListener("contextmenu", menu);
+    el.addEventListener("keydown", keyDown);
+    el.addEventListener("keyup", keyUp);
+    el.addEventListener("paste", paste);
+    el.addEventListener("blur", blur);
+    return () => {
+      el.removeEventListener("pointerdown", down);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", lost);
+      el.removeEventListener("lostpointercapture", lost);
+      el.removeEventListener("wheel", wheelH);
+      el.removeEventListener("contextmenu", menu);
+      el.removeEventListener("keydown", keyDown);
+      el.removeEventListener("keyup", keyUp);
+      el.removeEventListener("paste", paste);
+      el.removeEventListener("blur", blur);
+      moves.flush();
+      send(seat.releaseAll());
+    };
+  }, [node, active, onInput]);
+}
+
+function pt([x, y]: [number, number]) {
+  return { x, y };
+}
+
 export function DesktopView({
   theme,
   frame,
@@ -183,8 +315,8 @@ export function DesktopView({
   highlight,
   showOthers = true,
   small,
-  onTap,
-  onLongTap,
+  onGesture,
+  onInput,
 }: {
   theme: PluginTheme;
   frame: Frame | null;
@@ -193,8 +325,8 @@ export function DesktopView({
   highlight?: string | null;
   showOthers?: boolean;
   small?: boolean;
-  onTap?: (x: number, y: number) => void;
-  onLongTap?: (x: number, y: number) => void;
+  onGesture?: (active: boolean) => void;
+  onInput?: (msgs: ViewerMsg[]) => void;
 }) {
   const [boxW, setBoxW] = useState(0);
   const onLayout = (e: LayoutChangeEvent) => setBoxW(e.nativeEvent.layout.width);
@@ -203,17 +335,88 @@ export function DesktopView({
   const scale = rw && boxW ? boxW / rw : 0;
   const toScreen = (lx: number, ly: number): [number, number] => [Math.round((region?.x || 0) + lx / scale), Math.round((region?.y || 0) + ly / scale)];
   const aspect = rw && rh ? rw / rh : frame ? frame.w / frame.h : 16 / 10;
+  const g = useRef<{ sx: number; sy: number; px: number; py: number; lx: number; ly: number; drag: boolean; long: boolean; moved: number; timer: ReturnType<typeof setTimeout> | null } | null>(null);
+  const web = Platform.OS === "web";
+  const interactive = !web && !!onInput && !!frame && scale > 0;
+  const surface = useRef<View>(null);
+  useWebInput(surface, toScreen, onInput, web && !!frame && scale > 0);
+  const drop = useRef<() => void>(() => {});
+  drop.current = () => {
+    const s = g.current;
+    g.current = null;
+    if (!s) return;
+    if (s.timer) clearTimeout(s.timer);
+    if (s.drag) onInput?.([{ t: "up", ...pt(toScreen(s.lx, s.ly)), b: 0 }]);
+  };
+  useEffect(() => () => drop.current(), []);
+  const at = (e: GestureResponderEvent): [number, number] => {
+    const s = g.current!;
+    const lx = Math.min(Math.max(s.sx + e.nativeEvent.pageX - s.px, 0), boxW - 1);
+    const ly = Math.min(Math.max(s.sy + e.nativeEvent.pageY - s.py, 0), rh * scale - 1);
+    return [lx, ly];
+  };
+  const finish = (e: GestureResponderEvent | null) => {
+    const s = g.current;
+    g.current = null;
+    if (!s) return;
+    if (s.timer) clearTimeout(s.timer);
+    if (s.drag) {
+      onInput?.([{ t: "up", ...pt(toScreen(s.lx, s.ly)), b: 0 }]);
+    } else if (e && !s.long) {
+      onInput?.(click(...toScreen(s.sx, s.sy)));
+    }
+    onGesture?.(false);
+  };
+  const responder = interactive
+    ? {
+        onStartShouldSetResponder: () => true,
+        onMoveShouldSetResponder: () => true,
+        onResponderTerminationRequest: () => false,
+        onResponderGrant: (e: GestureResponderEvent) => {
+          const { locationX, locationY, pageX, pageY } = e.nativeEvent;
+          const s = { sx: locationX, sy: locationY, px: pageX, py: pageY, lx: locationX, ly: locationY, drag: false, long: false, moved: 0, timer: null as ReturnType<typeof setTimeout> | null };
+          s.timer = setTimeout(() => {
+            if (g.current !== s || s.drag) return;
+            s.long = true;
+            onInput?.(click(...toScreen(s.sx, s.sy), 2));
+          }, 500);
+          g.current = s;
+          onGesture?.(true);
+        },
+        onResponderMove: (e: GestureResponderEvent) => {
+          const s = g.current;
+          if (!s || s.long) return;
+          const [lx, ly] = at(e);
+          s.lx = lx;
+          s.ly = ly;
+          if (!s.drag) {
+            if (Math.hypot(lx - s.sx, ly - s.sy) < 8) return;
+            s.drag = true;
+            if (s.timer) clearTimeout(s.timer);
+            onInput?.([{ t: "down", ...pt(toScreen(s.sx, s.sy)), b: 0 }]);
+          }
+          const now = Date.now();
+          if (now - s.moved < 40) return;
+          s.moved = now;
+          onInput?.([{ t: "move", ...pt(toScreen(lx, ly)) }]);
+        },
+        onResponderRelease: (e: GestureResponderEvent) => {
+          if (g.current?.drag) {
+            const [lx, ly] = at(e);
+            g.current.lx = lx;
+            g.current.ly = ly;
+          }
+          finish(e);
+        },
+        onResponderTerminate: () => finish(null),
+      }
+    : {};
   return (
     <View style={{ width: "100%", aspectRatio: aspect, backgroundColor: theme.colors.surface2, overflow: "hidden" }} onLayout={onLayout}>
       {frame && (
-        <Pressable
-          style={{ flex: 1 }}
-          disabled={!onTap}
-          onPress={(e) => scale && onTap?.(...toScreen(e.nativeEvent.locationX, e.nativeEvent.locationY))}
-          onLongPress={(e) => scale && onLongTap?.(...toScreen(e.nativeEvent.locationX, e.nativeEvent.locationY))}
-        >
+        <View ref={surface} style={{ flex: 1 }} {...responder}>
           <Image source={{ uri: frame.uri }} style={{ width: "100%", height: "100%" }} resizeMode="stretch" fadeDuration={0} />
-        </Pressable>
+        </View>
       )}
       {frame &&
         region &&

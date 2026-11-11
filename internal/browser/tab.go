@@ -45,6 +45,12 @@ func (t *Tab) LastUsed() time.Time {
 	return t.lastUsed
 }
 
+func (t *Tab) SetOwner(owner string) {
+	t.mu.Lock()
+	t.Owner = owner
+	t.mu.Unlock()
+}
+
 func (t *Tab) Info() map[string]any {
 	t.mu.Lock()
 	defer t.mu.Unlock()

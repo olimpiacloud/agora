@@ -77,6 +77,7 @@ Reiniciá la sesión del agente después de agregar el servidor para que se carg
 | --- | --- | --- |
 | `AGORA_URL` | `http://127.0.0.1:7788` | El daemon. |
 | `AGORA_TOKEN` | el token de admin de `AGORA_HOME`, `/var/lib/agora` o `~/.agora`, si se puede leer | Un token de cursor (recomendado) o el token de admin. |
+| `AGORA_TOKEN_FILE` | ninguno | Archivo con el token, que se lee cuando `AGORA_TOKEN` está vacío. Deja el token fuera de la configuración del agente; el instalador usa `~/.config/agora/token`. |
 | `AGORA_WORKSPACE` | ninguno | Workspace por defecto cuando el token no está atado a uno. |
 | `AGORA_TOOLS` | todos los grupos | Grupos de herramientas a exponer, separados por comas: `browser`, `browserx`, `desktop`, `spawn`, `workspace`, `process`. El grupo `self` siempre está activo. |
 | `AGORA_LEAN` | desactivado | `1` acorta las descripciones de las herramientas a una sola oración. |

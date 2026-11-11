@@ -1,14 +1,19 @@
 package sandbox
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -18,6 +23,18 @@ const Cmd = "sandbox-exec"
 var keepTop = map[string]bool{"usr": true, "etc": true, "opt": true, "bin": true, "sbin": true, "lib": true, "lib32": true, "lib64": true, "libx32": true, "sys": true, "dev": true, "proc": true, "var": true, "snap": true}
 
 var hideVar = []string{"/var/lib", "/var/log", "/var/tmp", "/var/backups", "/var/mail", "/var/spool", "/var/www", "/var/opt"}
+
+var rootAttr uint64 = unix.MOUNT_ATTR_RDONLY | unix.MOUNT_ATTR_NOSUID | unix.MOUNT_ATTR_NODEV
+
+var devNodes = []string{"null", "zero", "full", "random", "urandom", "tty"}
+
+var devLinks = [][2]string{{"ptmx", "pts/ptmx"}, {"fd", "/proc/self/fd"}, {"stdin", "/proc/self/fd/0"}, {"stdout", "/proc/self/fd/1"}, {"stderr", "/proc/self/fd/2"}}
+
+type mnt struct {
+	src, dst, fstype string
+	flags            uintptr
+	data             string
+}
 
 type Spec struct {
 	Uid, Gid int
@@ -38,6 +55,43 @@ func Wrap(self string, s Spec) []string {
 
 func Attr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL, Cloneflags: syscall.CLONE_NEWNS | syscall.CLONE_NEWPID | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS}
+}
+
+func Probe(self string, uid, gid int) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	argv := append(Wrap(self, Spec{Uid: uid, Gid: gid}), "true")
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.SysProcAttr = Attr()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("sandbox probe: %w: %s", err, bytes.TrimSpace(out))
+	}
+	return nil
+}
+
+func WaitSignals(pid int, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for !catchesTerm(pid) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func catchesTerm(pid int) bool {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		return true
+	}
+	for _, l := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(l, "State:"); ok && strings.HasPrefix(strings.TrimSpace(v), "Z") {
+			return true
+		}
+		if v, ok := strings.CutPrefix(l, "SigCgt:"); ok {
+			m, err := strconv.ParseUint(strings.TrimSpace(v), 16, 64)
+			return err != nil || m&(1<<(uint(syscall.SIGTERM)-1)) != 0
+		}
+	}
+	return true
 }
 
 type list []string
@@ -114,7 +168,7 @@ func setupRoot(s Spec) error {
 	if err := unix.Mount("/", r, "", unix.MS_BIND|unix.MS_REC, ""); err != nil {
 		return fmt.Errorf("bind /: %w", err)
 	}
-	if err := unix.MountSetattr(-1, r, unix.AT_RECURSIVE, &unix.MountAttr{Attr_set: unix.MOUNT_ATTR_RDONLY | unix.MOUNT_ATTR_NOSUID}); err != nil {
+	if err := unix.MountSetattr(-1, r, unix.AT_RECURSIVE, &unix.MountAttr{Attr_set: rootAttr}); err != nil {
 		return fmt.Errorf("read-only root: %w", err)
 	}
 	ents, err := os.ReadDir("/")
@@ -137,8 +191,8 @@ func setupRoot(s Spec) error {
 			return fmt.Errorf("hide %s: %w", h, err)
 		}
 	}
-	if err := unix.Mount("tmpfs", r+"/dev/shm", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV, "mode=1777"); err != nil {
-		return fmt.Errorf("/dev/shm: %w", err)
+	if err := setupDev(r + "/dev"); err != nil {
+		return err
 	}
 	if err := unix.Mount("proc", r+"/proc", "proc", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, ""); err != nil {
 		return fmt.Errorf("/proc: %w", err)
@@ -161,6 +215,57 @@ func setupRoot(s Spec) error {
 	return os.Chdir("/")
 }
 
+func devMounts(dev string) []mnt {
+	ms := []mnt{{"tmpfs", dev, "tmpfs", unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC, "mode=0755,size=64k"}}
+	for _, n := range devNodes {
+		ms = append(ms, mnt{"/dev/" + n, dev + "/" + n, "", unix.MS_BIND, ""})
+	}
+	return append(ms,
+		mnt{"devpts", dev + "/pts", "devpts", unix.MS_NOSUID | unix.MS_NOEXEC, "newinstance,ptmxmode=0666,mode=0620,gid=5"},
+		mnt{"tmpfs", dev + "/shm", "tmpfs", unix.MS_NOSUID | unix.MS_NODEV, "mode=1777"},
+	)
+}
+
+func setupDev(dev string) error {
+	if err := unix.Unmount(dev, unix.MNT_DETACH); err != nil && err != unix.EINVAL {
+		return fmt.Errorf("detach host /dev: %w", err)
+	}
+	for i, m := range devMounts(dev) {
+		if i > 0 {
+			if err := mountpoint(m); err != nil {
+				return fmt.Errorf("%s: %w", m.dst, err)
+			}
+		}
+		if err := unix.Mount(m.src, m.dst, m.fstype, m.flags, m.data); err != nil {
+			return fmt.Errorf("mount %s: %w", m.dst, err)
+		}
+	}
+	for _, l := range devLinks {
+		if err := os.Symlink(l[1], filepath.Join(dev, l[0])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func mountpoint(m mnt) error {
+	if m.fstype != "" {
+		return os.Mkdir(m.dst, 0755)
+	}
+	st, err := os.Stat(m.src)
+	if err != nil {
+		return err
+	}
+	if st.Mode()&os.ModeCharDevice == 0 {
+		return fmt.Errorf("%s is not a character device", m.src)
+	}
+	f, err := os.OpenFile(m.dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
 func bind(f *os.File, dst string) error {
 	st, err := f.Stat()
 	if err != nil {
@@ -181,7 +286,10 @@ func bind(f *os.File, dst string) error {
 		}
 		f.Close()
 	}
-	return unix.Mount(src, dst, "", unix.MS_BIND|unix.MS_REC, "")
+	if err := unix.Mount(src, dst, "", unix.MS_BIND|unix.MS_REC, ""); err != nil {
+		return err
+	}
+	return unix.MountSetattr(-1, dst, unix.AT_RECURSIVE, &unix.MountAttr{Attr_set: unix.MOUNT_ATTR_NOSUID | unix.MOUNT_ATTR_NODEV})
 }
 
 func mkdirAll(p string) error {
