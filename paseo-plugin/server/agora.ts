@@ -34,6 +34,8 @@ function updateState(f: (s: State) => void) {
   saveState(s);
 }
 
+const REQUEST_TIMEOUT_MS = 10_000;
+
 const chains = new Map<string, Promise<unknown>>();
 
 function serialize<T>(key: string, f: () => Promise<T>): Promise<T> {
@@ -58,9 +60,21 @@ export class AgoraError extends Error {
   }
 }
 
+async function timed(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (e) {
+    if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) {
+      throw new AgoraError(504, `agora daemon did not respond within ${REQUEST_TIMEOUT_MS / 1000}s`);
+    }
+    throw e;
+  }
+}
+
 export async function call<T = any>(method: string, path: string, body?: unknown, token = adminToken()): Promise<T> {
-  const r = await fetch(URL_BASE + path, {
+  const r = await timed(URL_BASE + path, {
     method,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     headers: { Authorization: `Bearer ${token}`, ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -76,7 +90,7 @@ export async function call<T = any>(method: string, path: string, body?: unknown
 }
 
 export async function bytes(path: string): Promise<{ mime: string; data: Buffer }> {
-  const r = await fetch(URL_BASE + path, { headers: { Authorization: `Bearer ${adminToken()}` } });
+  const r = await timed(URL_BASE + path, { headers: { Authorization: `Bearer ${adminToken()}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   if (!r.ok) throw new AgoraError(r.status, await r.text());
   return { mime: r.headers.get("content-type") || "image/jpeg", data: Buffer.from(await r.arrayBuffer()) };
 }
