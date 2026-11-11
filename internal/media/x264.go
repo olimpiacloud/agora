@@ -43,10 +43,10 @@ static cenc *cenc_open(int w, int h, int fps, int crf, int maxkbps, int threads)
 	return e;
 }
 
-static int cenc_reconfig(cenc *e, int crf, int maxkbps) {
+static int cenc_reconfig(cenc *e, int crf, int maxkbps, int bufkbps) {
 	e->param.rc.f_rf_constant = crf;
 	e->param.rc.i_vbv_max_bitrate = maxkbps;
-	e->param.rc.i_vbv_buffer_size = maxkbps / 2;
+	e->param.rc.i_vbv_buffer_size = bufkbps / 2;
 	return x264_encoder_reconfig(e->enc, &e->param);
 }
 
@@ -124,10 +124,13 @@ func NewH264(o H264Options) (*H264Encoder, error) {
 
 func (x *H264Encoder) Name() string { return "x264" }
 
-func (x *H264Encoder) Reconfigure(crf, maxKbps int) error {
+func (x *H264Encoder) Reconfigure(crf, maxKbps, bufKbps int) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	if C.cenc_reconfig(x.e, C.int(crf), C.int(maxKbps)) < 0 {
+	if x.e == nil {
+		return errors.New("closed")
+	}
+	if C.cenc_reconfig(x.e, C.int(crf), C.int(maxKbps), C.int(bufKbps)) < 0 {
 		return errors.New("reconfig failed")
 	}
 	return nil

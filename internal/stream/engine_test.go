@@ -260,3 +260,81 @@ func requireXvfb(t *testing.T) {
 		t.Skip("Xvfb missing")
 	}
 }
+
+func TestSlowSinkGetsKeyframeOnStillScreen(t *testing.T) {
+	requireXvfb(t)
+	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 640, Height: 480, RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	e := NewEngine(d)
+	defer e.Close()
+	release := make(chan struct{})
+	keys := make(chan time.Time, 64)
+	q := NewQueueSink("slow", Interactive, 1, func(f *Frame) error {
+		<-release
+		if f.Key {
+			keys <- time.Now()
+		}
+		return nil
+	})
+	e.AddSink(q)
+	paint := painter(t, d)
+	deadline := time.Now().Add(5 * time.Second)
+	for e.Stats().Keyframes < 2 && time.Now().Before(deadline) {
+		paint()
+		time.Sleep(15 * time.Millisecond)
+	}
+	if e.Stats().Keyframes < 2 {
+		t.Fatal("the overflowing sink never got a keyframe answer")
+	}
+	time.Sleep(100 * time.Millisecond)
+	if q.Dropped.Load() == 0 {
+		t.Fatal("no frame dropped")
+	}
+	released := time.Now()
+	close(release)
+	for {
+		select {
+		case at := <-keys:
+			if at.After(released) && !q.needKey.Load() {
+				return
+			}
+		case <-time.After(time.Until(released.Add(3 * time.Second))):
+			t.Fatal("slow sink never got a keyframe after the screen went still")
+		}
+	}
+}
+
+type countDeadSink struct {
+	countSink
+	checks atomic.Int64
+}
+
+func (s *countDeadSink) ID() string { return "dead" }
+func (s *countDeadSink) Dead() bool { s.checks.Add(1); return true }
+
+func TestEngineIdlesWithOnlyDeadSinks(t *testing.T) {
+	requireXvfb(t)
+	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 640, Height: 480, RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	e := NewEngine(d)
+	defer e.Close()
+	s := &countDeadSink{}
+	e.AddSink(s)
+	time.Sleep(200 * time.Millisecond)
+	e.RequestKeyframe()
+	time.Sleep(50 * time.Millisecond)
+	base := s.checks.Load()
+	time.Sleep(200 * time.Millisecond)
+	if n := s.checks.Load() - base; n > 5 {
+		t.Fatalf("engine loop ran %d times in 200ms with only dead sinks", n)
+	}
+	if s.n.Load() != 0 {
+		t.Fatalf("dead sink got %d frames", s.n.Load())
+	}
+}

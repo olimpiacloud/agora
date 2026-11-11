@@ -169,6 +169,10 @@ func (r *RTC) Answer(ctx context.Context, id string, mode Mode, offer string, h 
 }
 
 func (s *RTCSession) stateChanged(st webrtc.PeerConnectionState, onClose func()) {
+	if st == webrtc.PeerConnectionStateConnected && s.Sink != nil {
+		s.Sink.RequestKey()
+		return
+	}
 	if st != webrtc.PeerConnectionStateFailed && st != webrtc.PeerConnectionStateClosed {
 		return
 	}

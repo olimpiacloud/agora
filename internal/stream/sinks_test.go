@@ -148,3 +148,70 @@ func TestScaledKbpsKeepsTheCapAtTheCurrentFrameRate(t *testing.T) {
 		}
 	}
 }
+
+func TestQueueSinkRetriesDeclinedKeyframe(t *testing.T) {
+	release := make(chan struct{})
+	s := NewQueueSink("q", Interactive, 1, func(*Frame) error { <-release; return nil })
+	defer s.Close()
+	asked := make(chan time.Time, 16)
+	s.SetKeyRequest(func() { asked <- time.Now() })
+	key := &Frame{Key: true}
+	delta := &Frame{}
+	s.Push(key)
+	for i := 0; i < 100 && len(s.ch) > 0; i++ {
+		time.Sleep(time.Millisecond)
+	}
+	s.Push(delta)
+	if s.Push(delta) {
+		t.Fatal("overflow must ask for a keyframe")
+	}
+	start := time.Now()
+	if !s.Push(key) {
+		t.Fatal("a keyframe overflowing inside the backoff must not ask right away")
+	}
+	for i := 0; i < 5; i++ {
+		if !s.Push(delta) {
+			t.Fatal("delta inside the backoff must not ask right away")
+		}
+	}
+	close(release)
+	select {
+	case at := <-asked:
+		if d := at.Sub(start); d < 800*time.Millisecond || d > 1500*time.Millisecond {
+			t.Fatalf("deferred keyframe request after %v, want about 1s", d)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("declined keyframe request never retried")
+	}
+	if !s.Push(key) {
+		t.Fatal("keyframe refused after the queue drained")
+	}
+	select {
+	case <-asked:
+		t.Fatal("more than one deferred keyframe request")
+	case <-time.After(1500 * time.Millisecond):
+	}
+}
+
+func TestQueueSinkClosedCancelsDeferredKeyframe(t *testing.T) {
+	block := make(chan struct{})
+	defer close(block)
+	s := NewQueueSink("q", Interactive, 1, func(*Frame) error { <-block; return nil })
+	asked := make(chan struct{}, 4)
+	s.SetKeyRequest(func() { asked <- struct{}{} })
+	s.Push(&Frame{Key: true})
+	for i := 0; i < 100 && len(s.ch) > 0; i++ {
+		time.Sleep(time.Millisecond)
+	}
+	s.Push(&Frame{})
+	s.Push(&Frame{})
+	if !s.Push(&Frame{}) {
+		t.Fatal("delta inside the backoff must not ask right away")
+	}
+	s.Close()
+	select {
+	case <-asked:
+		t.Fatal("closed sink asked for a keyframe")
+	case <-time.After(1300 * time.Millisecond):
+	}
+}

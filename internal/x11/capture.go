@@ -269,13 +269,16 @@ func (dw *DamageWatcher) Ack() {
 	damage.Subtract(dw.c, dw.dmg, 0, 0)
 }
 
-func (dw *DamageWatcher) AckRegion() (x, y, w, h int, ok bool) {
+func (dw *DamageWatcher) AckRegion() (x, y, w, h int, ok bool, err error) {
 	damage.Subtract(dw.c, dw.dmg, 0, dw.region)
 	r, err := xfixes.FetchRegion(dw.c, dw.region).Reply()
-	if err != nil || r.Extents.Width == 0 || r.Extents.Height == 0 {
-		return 0, 0, 0, 0, false
+	if err != nil {
+		return 0, 0, 0, 0, false, err
 	}
-	return int(r.Extents.X), int(r.Extents.Y), int(r.Extents.Width), int(r.Extents.Height), true
+	if r.Extents.Width == 0 || r.Extents.Height == 0 {
+		return 0, 0, 0, 0, false, nil
+	}
+	return int(r.Extents.X), int(r.Extents.Y), int(r.Extents.Width), int(r.Extents.Height), true, nil
 }
 
 func (dw *DamageWatcher) Close() {

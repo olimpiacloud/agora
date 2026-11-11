@@ -36,3 +36,24 @@ func TestRTCSessionCloseOnce(t *testing.T) {
 		t.Fatalf("OnClose called %d times", calls.Load())
 	}
 }
+
+func TestRTCSessionAsksForKeyframeWhenConnected(t *testing.T) {
+	q := NewQueueSink("rtc", Interactive, 4, func(*Frame) error { return nil })
+	defer q.Close()
+	var asks atomic.Int32
+	q.SetKeyRequest(func() { asks.Add(1) })
+	q.Push(&Frame{Key: true})
+	s := &RTCSession{Sink: q, closed: make(chan struct{})}
+	s.stateChanged(webrtc.PeerConnectionStateConnected, nil)
+	if asks.Load() != 1 {
+		t.Fatalf("%d keyframe requests on connect", asks.Load())
+	}
+	if !q.needKey.Load() {
+		t.Fatal("deltas written before the track was bound must not be followed by more deltas")
+	}
+	select {
+	case <-s.Closed():
+		t.Fatal("connected closed the session")
+	default:
+	}
+}

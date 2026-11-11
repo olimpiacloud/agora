@@ -26,6 +26,9 @@ type QueueSink struct {
 	nextKey time.Time
 	askedAt time.Time
 	keyAt   time.Time
+	onKey   func()
+	retry   *time.Timer
+	stopped bool
 }
 
 func NewQueueSink(id string, mode Mode, depth int, write func(*Frame) error) *QueueSink {
@@ -43,6 +46,22 @@ func (s *QueueSink) Mode() Mode { return s.mode.Load().(Mode) }
 func (s *QueueSink) SetMode(m Mode) { s.mode.Store(m) }
 
 func (s *QueueSink) Dead() bool { return s.dead.Load() }
+
+func (s *QueueSink) SetKeyRequest(f func()) {
+	s.keyMu.Lock()
+	s.onKey = f
+	s.keyMu.Unlock()
+}
+
+func (s *QueueSink) RequestKey() {
+	s.needKey.Store(true)
+	s.keyMu.Lock()
+	f := s.onKey
+	s.keyMu.Unlock()
+	if f != nil {
+		f()
+	}
+}
 
 func (s *QueueSink) Push(f *Frame) bool {
 	if s.dead.Load() {
@@ -76,12 +95,39 @@ func (s *QueueSink) askKey(overflow bool) bool {
 		s.backoff = 0
 	}
 	if now.Before(s.nextKey) {
+		if s.retry == nil && s.onKey != nil && !s.stopped {
+			s.retry = time.AfterFunc(s.nextKey.Sub(now), s.retryKey)
+		}
 		return false
 	}
 	s.backoff = min(max(2*s.backoff, time.Second), maxKeyBackoff)
 	s.askedAt = now
 	s.nextKey = now.Add(s.backoff)
 	return true
+}
+
+func (s *QueueSink) retryKey() {
+	s.keyMu.Lock()
+	s.retry = nil
+	f := s.onKey
+	stopped := s.stopped
+	s.keyMu.Unlock()
+	if f == nil || stopped || s.dead.Load() || !s.needKey.Load() {
+		return
+	}
+	if s.askKey(false) {
+		f()
+	}
+}
+
+func (s *QueueSink) stopRetry() {
+	s.keyMu.Lock()
+	s.stopped = true
+	if s.retry != nil {
+		s.retry.Stop()
+		s.retry = nil
+	}
+	s.keyMu.Unlock()
 }
 
 func (s *QueueSink) run() {
@@ -92,6 +138,7 @@ func (s *QueueSink) run() {
 		case f := <-s.ch:
 			if err := s.write(f); err != nil {
 				s.dead.Store(true)
+				s.stopRetry()
 				if s.OnError != nil {
 					s.OnError(err)
 				}
@@ -102,5 +149,8 @@ func (s *QueueSink) run() {
 }
 
 func (s *QueueSink) Close() {
-	s.once.Do(func() { close(s.done) })
+	s.once.Do(func() {
+		close(s.done)
+		s.stopRetry()
+	})
 }

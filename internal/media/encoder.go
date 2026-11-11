@@ -9,7 +9,7 @@ import (
 
 type Encoder interface {
 	Name() string
-	Reconfigure(crf, maxKbps int) error
+	Reconfigure(crf, maxKbps, bufKbps int) error
 	Encode(bgrx []byte, stride, srcW, srcH int, ptsMs int64, idr bool) ([]byte, bool, error)
 	EncodeRect(src []byte, stride, rx, ry, rw, rh int, ptsMs int64, idr bool) ([]byte, bool, error)
 	Close()

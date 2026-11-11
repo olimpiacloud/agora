@@ -132,6 +132,9 @@ func (e *Engine) loopEnded(stop chan struct{}) {
 }
 
 func (e *Engine) AddSink(s Sink) {
+	if k, ok := s.(interface{ SetKeyRequest(func()) }); ok {
+		k.SetKeyRequest(e.RequestKeyframe)
+	}
 	e.mu.Lock()
 	e.sinks[s.ID()] = s
 	start := !e.running
@@ -268,7 +271,7 @@ func (e *Engine) loop(stop, done chan struct{}) {
 	var frame *x11.Frame
 	var curMode Mode
 	var encFps, curFps int
-	needFull := true
+	refreshFull := true
 	start := time.Now()
 	last := time.Time{}
 	fpsWin := time.Now()
@@ -298,6 +301,8 @@ func (e *Engine) loop(stop, done chan struct{}) {
 		retry = nil
 		sinks, mode := e.snapshotSinks()
 		if len(sinks) == 0 {
+			e.softKey.Store(false)
+			glass = time.Time{}
 			continue
 		}
 		fps, crf, kbps := params(mode, e.recentInput())
@@ -327,9 +332,9 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			curMode = mode
 			encFps, curFps = fps, fps
 			e.keyReq.Store(true)
-			needFull = true
+			refreshFull = true
 		} else if mode != curMode || fps != curFps {
-			enc.Reconfigure(crf, scaledKbps(kbps, encFps, fps))
+			enc.Reconfigure(crf, scaledKbps(kbps, encFps, fps), kbps)
 			curMode = mode
 			curFps = fps
 		}
@@ -342,23 +347,29 @@ func (e *Engine) loop(stop, done chan struct{}) {
 		pts := now.Sub(start).Milliseconds()
 		var data []byte
 		var isKey bool
-		rx, ry, rw, rh, ok := dw.AckRegion()
+		rx, ry, rw, rh, ok, aerr := dw.AckRegion()
+		if aerr != nil {
+			refreshFull = true
+		}
 		ew, eh := e.w, e.h
 		var t1 time.Time
-		if !ok && !key && !needFull {
+		if !ok && !key && !refreshFull {
 			glass = time.Time{}
 			continue
 		}
-		if needFull || !ok {
+		if refreshFull || !ok {
 			frame, err = cp.Grab(0, 0, ew, eh, frame)
 			if err != nil {
-				needFull = true
+				refreshFull = true
+				if key {
+					e.keyReq.Store(true)
+				}
 				retry = time.After(minGap)
 				continue
 			}
 			t1 = time.Now()
-			data, isKey, err = enc.Encode(frame.Pix, frame.Stride, frame.Width, frame.Height, pts, key || needFull)
-			needFull = false
+			data, isKey, err = enc.Encode(frame.Pix, frame.Stride, frame.Width, frame.Height, pts, key)
+			refreshFull = false
 		} else {
 			x0, y0 := rx&^1, ry&^1
 			x1, y1 := (rx+rw+1)&^1, (ry+rh+1)&^1
@@ -378,7 +389,10 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			if x1 > x0 && y1 > y0 {
 				frame, err = cp.Grab(x0, y0, x1-x0, y1-y0, frame)
 				if err != nil || frame.Width != x1-x0 || frame.Height != y1-y0 {
-					needFull = true
+					refreshFull = true
+					if key {
+						e.keyReq.Store(true)
+					}
 					retry = time.After(minGap)
 					continue
 				}
@@ -399,7 +413,7 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			if failures++; failures > 5 {
 				return
 			}
-			needFull = true
+			refreshFull = true
 			e.keyReq.Store(true)
 			e.poke()
 			continue
