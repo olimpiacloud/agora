@@ -60,14 +60,14 @@ Each sandboxed process starts through `agora sandbox-exec`, which runs it in new
 - The whole system is mounted read-only and without setuid bits.
 - Home directories, `/tmp`, `/run`, `/var/lib` (which holds the Agora state, Docker and databases), `/var/log` and the Agora home directory are hidden behind empty mounts.
 - Only the workspace's own directory, its Chrome profile and its X socket are mounted read-write.
-- The workspace gets a private `/tmp`, `/dev/shm` and `/proc`. Its apps cannot see, signal or trace processes of other workspaces.
+- The workspace gets a private `/tmp`, `/dev/shm` and `/proc`. Its apps cannot see, signal or trace processes of other workspaces. Apps of an unsandboxed workspace share the host's process view and run as the same apps user, so they can signal processes of other workspaces, sandboxed or not.
 - The process runs as the unprivileged apps user, with no supplementary groups and no capabilities. Chrome's own sandbox keeps working inside.
 
 Limits:
 
 - **Root only.** The daemon must run as root with an apps user (the default for `agora.service`). Otherwise a sandboxed workspace fails to start.
 - **Shared network.** Sandboxed processes can reach services on `127.0.0.1`, including the Agora API (which still needs a token). Do not run unauthenticated local services next to untrusted workspaces.
-- **Shared display.** Xvfb runs outside the sandbox (as the apps user, not root), and X11 does not isolate clients on the same display: every app in the workspace can read the screen and send input to every other window of that workspace.
+- **Shared display.** Xvfb runs outside the sandbox (as the dedicated `agora-x` user, neither root nor the apps user), and X11 does not isolate clients on the same display: every app in the workspace can read the screen and send input to every other window of that workspace.
 - **Readable system files.** World-readable files in `/etc` and `/usr` stay readable. Keep secrets out of them.
 - **Same user, same kernel.** A kernel exploit escapes the sandbox. For hostile code, use a VM or a separate machine.
 - **Launched agents are not sandboxed.** Agents started by `cursor_spawn` (`claude`, `codex`) run as the daemon user, because they need its credentials. The sandbox covers Chrome and `desktop_launch` apps only.

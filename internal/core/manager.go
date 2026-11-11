@@ -22,6 +22,7 @@ import (
 type Config struct {
 	Home            string
 	AppsUser        string
+	XUser           string
 	ChromeBinary    string
 	Width           int
 	Height          int
@@ -54,6 +55,8 @@ type Manager struct {
 	cg        *Cgroups
 	rtc       *stream.RTC
 	uid, gid  int
+	xuid      int
+	xgid      int
 	sandboxed bool
 	mu        sync.Mutex
 	ws        map[string]*Workspace
@@ -129,6 +132,10 @@ func NewManager(cfg Config) (*Manager, error) {
 		}
 		m.uid, _ = strconv.Atoi(u.Uid)
 		m.gid, _ = strconv.Atoi(u.Gid)
+		m.xuid, m.xgid, err = lookupXUser(cfg.XUser, m.uid)
+		if err != nil {
+			log.Printf("Xvfb runs as root: %v", err)
+		}
 	}
 	if cfg.SandboxDefault {
 		if err := m.probeSandbox(); err != nil {
@@ -172,6 +179,22 @@ func NewManager(cfg Config) (*Manager, error) {
 	m.ctx, m.cancel = context.WithCancel(context.Background())
 	go m.schedule()
 	return m, nil
+}
+
+func lookupXUser(name string, appsUid int) (int, int, error) {
+	if name == "" {
+		return 0, 0, errors.New("no X user configured")
+	}
+	u, err := user.Lookup(name)
+	if err != nil {
+		return 0, 0, fmt.Errorf("X user %q: %w (create it with: useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin %s)", name, err, name)
+	}
+	uid, _ := strconv.Atoi(u.Uid)
+	gid, _ := strconv.Atoi(u.Gid)
+	if uid == appsUid {
+		return 0, 0, fmt.Errorf("X user %q is the apps user; it must be a separate user", name)
+	}
+	return uid, gid, nil
 }
 
 func (m *Manager) Config() Config { return m.cfg }

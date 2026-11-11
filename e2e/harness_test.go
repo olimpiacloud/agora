@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -48,11 +49,14 @@ func newHWith(t *testing.T, tune func(*core.Config)) *H {
 		t.Fatal(err)
 	}
 	os.Chmod(home, 0711)
-	appsUser := ""
+	appsUser, xUser := "", ""
 	if os.Getuid() == 0 {
 		appsUser = "agora"
+		if _, err := user.Lookup("agora-x"); err == nil {
+			xUser = "agora-x"
+		}
 	}
-	cfg := core.Config{Home: home, AppsUser: appsUser, IdleAfter: time.Hour, RTC: stream.RTCOptions{IncludeLoop: true}, SandboxDefault: true}
+	cfg := core.Config{Home: home, AppsUser: appsUser, XUser: xUser, IdleAfter: time.Hour, RTC: stream.RTCOptions{IncludeLoop: true}, SandboxDefault: true}
 	if tune != nil {
 		tune(&cfg)
 	}

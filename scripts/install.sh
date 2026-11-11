@@ -103,11 +103,15 @@ install_deps() {
 }
 
 create_user() {
-	if id agora >/dev/null 2>&1; then
-		return
+	if ! id agora >/dev/null 2>&1; then
+		say "Creating the unprivileged agora user"
+		useradd --system --create-home --home-dir "$APPS_HOME" --shell /usr/sbin/nologin agora
 	fi
-	say "Creating the unprivileged agora user"
-	useradd --system --create-home --home-dir "$APPS_HOME" --shell /usr/sbin/nologin agora
+	if ! id agora-x >/dev/null 2>&1; then
+		say "Creating the agora-x user for the X servers"
+		useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin agora-x
+		CHANGED=1
+	fi
 }
 
 latest_version() {

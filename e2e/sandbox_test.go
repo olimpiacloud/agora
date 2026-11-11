@@ -95,6 +95,25 @@ func TestSandboxedWorkspace(t *testing.T) {
 	if renderers == 0 {
 		t.Error("no renderer process found for the sandboxed workspace")
 	}
+	want := "0"
+	if xu, err := user.Lookup("agora-x"); err == nil {
+		want = xu.Uid
+	}
+	xvfb := 0
+	for _, e := range ents {
+		cmd, err := os.ReadFile(filepath.Join("/proc", e.Name(), "cmdline"))
+		if err != nil || !strings.HasPrefix(string(cmd), "Xvfb\x00") || !strings.Contains(string(cmd), filepath.Join("workspaces", ws, "run")) {
+			continue
+		}
+		xvfb++
+		st, _ := os.ReadFile(filepath.Join("/proc", e.Name(), "status"))
+		if !strings.Contains(string(st), "\nUid:\t"+want+"\t") {
+			t.Errorf("Xvfb %s does not run as uid %s", e.Name(), want)
+		}
+	}
+	if xvfb != 1 {
+		t.Errorf("found %d Xvfb processes for the sandboxed workspace, want 1", xvfb)
+	}
 }
 
 func TestWorkspacesAreSandboxedByDefault(t *testing.T) {

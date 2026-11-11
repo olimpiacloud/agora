@@ -61,14 +61,14 @@ Cada proceso con sandbox arranca a través de `agora sandbox-exec`, que lo corre
 - Todo el sistema se monta como solo lectura y sin bits setuid.
 - Los directorios home, `/tmp`, `/run`, `/var/lib` (donde están el estado de Agora, Docker y las bases de datos), `/var/log` y el directorio home de Agora quedan ocultos detrás de mounts vacíos.
 - Solo el directorio propio del workspace, su perfil de Chrome y su socket de X se montan con lectura y escritura.
-- El workspace tiene sus propios `/tmp`, `/dev/shm` y `/proc` privados. Sus apps no pueden ver, mandar señales ni hacer trace de procesos de otros workspaces.
+- El workspace tiene sus propios `/tmp`, `/dev/shm` y `/proc` privados. Sus apps no pueden ver, mandar señales ni hacer trace de procesos de otros workspaces. Las apps de un workspace sin sandbox comparten la vista de procesos del host y corren con el mismo usuario de apps, así que pueden mandar señales a procesos de otros workspaces, tengan sandbox o no.
 - El proceso corre como el usuario de apps sin privilegios, sin grupos suplementarios y sin capabilities. El sandbox propio de Chrome sigue funcionando adentro.
 
 Límites:
 
 - **Solo como root.** El daemon tiene que correr como root con un usuario de apps (lo que viene por defecto en `agora.service`). Si no, un workspace con sandbox no arranca.
 - **Red compartida.** Los procesos con sandbox pueden llegar a servicios en `127.0.0.1`, incluida la API de Agora (que igual necesita un token). No corras servicios locales sin autenticación al lado de workspaces no confiables.
-- **Display compartido.** Xvfb corre fuera del sandbox (como el usuario de apps, no como root), y X11 no aísla a los clientes de un mismo display: cualquier app del workspace puede leer la pantalla y mandar input a cualquier otra ventana de ese workspace.
+- **Display compartido.** Xvfb corre fuera del sandbox (con el usuario dedicado `agora-x`, que no es root ni el usuario de apps), y X11 no aísla a los clientes de un mismo display: cualquier app del workspace puede leer la pantalla y mandar input a cualquier otra ventana de ese workspace.
 - **Archivos del sistema legibles.** Los archivos de `/etc` y `/usr` legibles por todos siguen siendo legibles. No guardes secretos ahí.
 - **Mismo usuario, mismo kernel.** Un exploit del kernel se escapa del sandbox. Para código hostil, usá una VM o una máquina aparte.
 - **Los agentes lanzados no tienen sandbox.** Los agentes que arranca `cursor_spawn` (`claude`, `codex`) corren como el usuario del daemon, porque necesitan sus credenciales. El sandbox cubre solo Chrome y las apps de `desktop_launch`.

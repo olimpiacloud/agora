@@ -64,8 +64,8 @@ func (d *Display) NewCapturer() (*Capturer, error) {
 	if err := extInit("MIT-SHM", c); err == nil {
 		size := 3840 * 2160 * 4
 		id, err := unix.SysvShmGet(unix.IPC_PRIVATE, size, unix.IPC_CREAT|0600)
-		if err == nil && d.uid != 0 {
-			if err = shmOwner(id, d.uid, d.gid); err != nil {
+		if err == nil && d.xuid != 0 {
+			if err = shmOwner(id, d.xuid, d.xgid); err != nil {
 				unix.SysvShmCtl(id, unix.IPC_RMID, nil)
 			}
 		}
