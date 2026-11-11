@@ -11,6 +11,8 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Pending cursors without a launch and without a Paseo agent are cancelled after 24 hours, and the Paseo plugin deletes cursors of Paseo agents that no longer exist, are closed or are archived.
 - `agora serve --cursor-retention` (7 days by default, `0` keeps them): finished cursors with no live descendants are deleted after that time.
 - `make check`: gofmt, vet, the unit tests and both TypeScript typechecks; tests that need Xvfb skip when it is missing.
+- Snapshots report ARIA state (`checked` and `disabled` from `aria-*`, plus `selected` and `expanded`).
+- `board_read` returns posts oldest first with `more: true` when there are more than `limit`, so posts are no longer skipped.
 
 ### Changed
 
@@ -29,6 +31,11 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - The dashboard no longer refetches cursors, workspaces and tabs on every pointer move.
 - The Paseo plugin wakes live views at most every 100 ms per workspace.
 - CI fails when the committed `web/dist` does not match `web/src`.
+- Snapshots stop collecting at the element cap and compute names only for the elements they return, and tabs no longer enable the CDP `Runtime` domain.
+- MCP coordinates are mapped from the last screenshot only until `browser_snapshot boxes=true`, `desktop_windows` or a resize; tool descriptions say which coordinate space applies. `browser_eval` results over 64 KB are truncated in MCP.
+- Tab actions on a tab with an open JavaScript dialog fail at once with the dialog text instead of waiting for the timeout, and an action that opens a dialog returns it.
+- Encoder rate control keeps the VBV buffer at the real bitrate when the frame rate changes, failed grabs refresh the frame without forcing a keyframe, and a WebRTC viewer asks for a keyframe when it connects.
+- The Paseo plugin times out daemon requests after 10 s, and the web viewer reconnects after repeated decoder errors.
 
 ### Security
 
@@ -42,6 +49,15 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - App ids are validated, so they can no longer place the root-created app log outside the workspace.
 - The daemon no longer follows symlinks planted by the apps user: the workspace directory and `run/` stay owned by root, and ownership changes, Chrome preferences and X authority files go through no-follow, beneath-the-base file operations.
 - `browser_audit` checks broken links without cookies and skips logout and delete links.
+- Only admins can launch `codex` subagents: Codex keeps its built-in shell, which would run as the daemon user.
+- Cursors need `desktop` to open streams, `desktop` or `browser` for saved screenshots, `browser` to list tabs, `process` to list processes and `message` to message cursors or post on the board. `checkpoint`, `resize` and `layout` need the `workspace` permission; `thaw` no longer does, since every call resumes a workspace anyway. An admin acting as a cursor is never limited.
+- Cursors cannot lock the `workspace` surface; other surface locks need the matching permission, expire after at most 10 minutes and carry a reason of at most 200 characters.
+- Workspaces created by a cursor stay sandboxed when its own workspace is, cannot exceed its budget, and one cursor tree can keep at most 5 live workspaces.
+- Cursor uploads must come from the workspace home.
+- Browser navigation, new tabs and autostart URLs accept only `http`, `https`, `about:blank` and `data:`.
+- Password and one-time-code inputs no longer leak their value as the element name in snapshots.
+- Worktree git commands run without repository hooks or fsmonitor, and worktree port counts are limited to 20.
+- The agent environment allowlist also passes `AWS_`, `GOOGLE_`, `CLOUD_ML_`, `AZURE_` and `VERTEX_` variables, and logs the names of variables it drops.
 
 ### Fixed
 
@@ -61,6 +77,19 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - The WebSocket viewer recreates its video decoder after a decode error instead of freezing on the last frame.
 - The dashboard stopped refreshing the tab list once 300 events had arrived.
 - The Paseo plugin kept live hubs (and their JPEG streams) alive forever after a view closed on a static desktop, and concurrent agent opens could create duplicate workspaces.
+- `agora open <ws> --control=false` ignored flags after the workspace and granted control.
+- A slow viewer on a still screen could keep a stale picture forever, and the stream loop could spin when every viewer had disconnected.
+- A data race on xgb's global extension tables could crash the daemon; X extensions are registered once per process.
+- A viewer `take` racing with its disconnect could leave a permanent human lock.
+- The CDP client could hang a call made while the browser closed, writes ignored their context, and events could be lost right after launch.
+- Attaching to a tab twice created two CDP sessions, and a failed attach left a half-attached tab or an orphan target.
+- Navigating to a `#fragment` of the current page always timed out.
+- An agent result line over 16 KB lost its usage and was stored as broken JSON.
+- A cursor cancelled while it completed could keep its result, failed state writes are retried, and a clean shutdown waits for agents to record how they exited.
+- Pruning could delete finished cursors that a live root still needed, breaking `cursor_get` and `cursor_wait`; whole finished trees are pruned instead.
+- A file or symlink planted at `home/Downloads` or `home/.xdg-run` stopped the workspace from starting.
+- File operations fall back to a no-follow walk when `openat2` is blocked by seccomp, and root caps how much of an apps-user file it reads.
+- The dashboard tab list now refreshes on tab actions and reclaimed tabs.
 
 ## [0.1.0] - 2026-11-06
 
