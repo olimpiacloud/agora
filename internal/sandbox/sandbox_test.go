@@ -10,6 +10,53 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == Cmd {
+		Main(os.Args[2:])
+		return
+	}
+	os.Exit(m.Run())
+}
+
+func TestHelperDropsPrivileges(t *testing.T) {
+	if os.Getuid() != 0 {
+		t.Skip("needs root")
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := "grep -E '^(Uid|CapBnd|NoNewPrivs):' /proc/self/status"
+	argv := append(Wrap(self, Spec{Uid: 65534, Gid: 65534}), "sh", "-c", script)
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.SysProcAttr = Attr()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helper: %v: %s", err, out)
+	}
+	lines := map[string]bool{}
+	uid := ""
+	for _, l := range strings.Split(string(out), "\n") {
+		f := strings.Fields(l)
+		if len(f) == 0 {
+			continue
+		}
+		if f[0] == "Uid:" && len(f) > 1 {
+			uid = f[1]
+		}
+		lines[strings.Join(f, " ")] = true
+	}
+	if uid != "65534" {
+		t.Errorf("uid %q, want 65534: %s", uid, out)
+	}
+	if !lines["CapBnd: 0000000000000000"] {
+		t.Errorf("capability bounding set not empty: %s", out)
+	}
+	if !lines["NoNewPrivs: 1"] {
+		t.Errorf("no_new_privs not set: %s", out)
+	}
+}
+
 func TestRootIsReadOnlyNosuidNodev(t *testing.T) {
 	want := uint64(unix.MOUNT_ATTR_RDONLY | unix.MOUNT_ATTR_NOSUID | unix.MOUNT_ATTR_NODEV)
 	if rootAttr&want != want {

@@ -75,6 +75,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - The installer writes the agents' token to a `0600` file and registers it as `AGORA_TOKEN_FILE` instead of passing it in argv and storing it in agent configs (existing inline entries are migrated), and aborts instead of building `main` when no release is found. The uninstaller removes that file as its owner.
 - Read-only tab actions no longer claim a tab, and claims are atomic, so a cursor that only looked at a tab cannot close it when it ends.
 - Built with Go 1.27.4, which fixes a `net/http` server crash (GO-2026-6859).
+- The sandbox helper now empties the capability bounding set and sets `no_new_privs` before it starts a workspace's Chrome or apps, as `docs/SANDBOX.md` already described.
 
 ### Fixed
 
