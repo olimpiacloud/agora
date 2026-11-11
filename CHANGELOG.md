@@ -46,6 +46,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Screenshots are kept per workspace (64 shots or 24 MB each, 256 MB in total) and dropped when the workspace suspends or is destroyed.
 - MCP tool calls are cancelled on `notifications/cancelled`; after stdin closes, running calls get up to 30 s to finish.
 - `make check` and CI run unit tests for the dashboard (`bun test` in `web/`) and typecheck the test files of the dashboard and the Paseo plugin.
+- The dashboard ignores pointer and stream-statistics events, refetches only the list an event can have changed (active cursors for progress and status, workspaces for workspace events), reads `/v1/system` and the full cursor list on its 5-second timer, and loads the tab list only while the Tabs pane is open.
 
 ### Security
 
