@@ -77,6 +77,7 @@ type Server struct {
 	cursor string
 	admin  bool
 	once   sync.Once
+	idErr  error
 	tools  []Tool
 	byName map[string]*Tool
 	out    io.Writer
@@ -164,17 +165,63 @@ func (s *Server) identity(ctx context.Context) {
 				Workspace string `json:"workspace"`
 			} `json:"cursor"`
 		}
-		if err := s.c.Do(ctx, "GET", "/v1/me", nil, &me); err == nil {
+		err := s.c.Do(ctx, "GET", "/v1/me", nil, &me)
+		if err == nil {
 			s.admin = me.Admin
 			if me.Cursor != nil {
 				s.cursor = me.Cursor.ID
 				s.ws = me.Cursor.Workspace
 			}
 		}
+		if os.Getenv("AGORA_MCP_SESSION") == "1" {
+			if err != nil {
+				s.idErr = fmt.Errorf("session mode: cannot identify the token: %w", err)
+				return
+			}
+			if !me.Admin && me.Cursor != nil && me.Cursor.Workspace == "" {
+				if err := s.openSession(ctx); err != nil {
+					s.idErr = fmt.Errorf("session mode: %w", err)
+					return
+				}
+			}
+		}
 		if s.ws == "" {
 			s.ws = os.Getenv("AGORA_WORKSPACE")
 		}
 	})
+}
+
+func (s *Server) openSession(ctx context.Context) error {
+	var ws struct {
+		ID string `json:"id"`
+	}
+	if err := s.c.Do(ctx, "POST", "/v1/workspaces", map[string]any{"name": "mcp session"}, &ws); err != nil {
+		return fmt.Errorf("create workspace: %w", err)
+	}
+	if ws.ID == "" {
+		return errors.New("create workspace: no id in the response")
+	}
+	var cur struct {
+		Cursor *struct {
+			ID        string `json:"id"`
+			Workspace string `json:"workspace"`
+		} `json:"cursor"`
+		Token string `json:"token"`
+		Error string `json:"error"`
+	}
+	if err := s.c.Do(ctx, "POST", "/v1/cursors", map[string]any{"workspace": ws.ID, "name": "mcp session"}, &cur); err != nil {
+		return fmt.Errorf("create session cursor: %w", err)
+	}
+	if cur.Error != "" {
+		return fmt.Errorf("create session cursor: %s", cur.Error)
+	}
+	if cur.Cursor == nil || cur.Cursor.ID == "" || cur.Token == "" || cur.Cursor.Workspace != ws.ID {
+		return errors.New("create session cursor: incomplete response")
+	}
+	s.c.Token = cur.Token
+	s.cursor = cur.Cursor.ID
+	s.ws = cur.Cursor.Workspace
+	return nil
 }
 
 func (s *Server) wsArg(a Args) (string, error) {
@@ -351,6 +398,9 @@ func (s *Server) handle(ctx context.Context, req rpcReq) (any, map[string]any) {
 			p.Arguments = Args{}
 		}
 		s.identity(ctx)
+		if s.idErr != nil {
+			return map[string]any{"content": []content{{Type: "text", Text: "error: " + s.idErr.Error()}}, "isError": true}, nil
+		}
 		out, err := t.Run(ctx, s, p.Arguments)
 		if err != nil {
 			return map[string]any{"content": []content{{Type: "text", Text: "error: " + err.Error()}}, "isError": true}, nil
