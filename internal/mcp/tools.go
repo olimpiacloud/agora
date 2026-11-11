@@ -49,28 +49,29 @@ func (s *Server) tab(ctx context.Context, a Args, body map[string]any) ([]conten
 		return nil, fmt.Errorf("target is required")
 	}
 	act, _ := body["action"].(string)
+	key := "tab:" + ws + "/" + t
 	if pointing[act] && a.S("ref") == "" {
-		s.mapPoints("tab:"+t, a, body)
+		s.mapPoints(key, a, body)
 	}
 	var out map[string]any
 	if err := s.c.Do(ctx, "POST", "/v1/workspaces/"+ws+"/tabs/"+t, body, &out); err != nil {
 		return nil, err
 	}
-	if act == "emulate" {
-		s.setShot("tab:"+t, nil)
+	if act == "emulate" || (act == "snapshot" && body["boxes"] == true) {
+		s.setShot(key, nil)
 	}
 	if img, ok := out["image"].(string); ok {
 		res := []content{{Type: "image", Data: img, MimeType: fmt.Sprint(out["mime"])}}
 		note := ""
 		if full, _ := out["full_page"].(bool); full {
-			s.setShot("tab:"+t, nil)
+			s.setShot(key, nil)
 			note = fullNote
 		} else if vp, ok := out["viewport"].([]any); ok && len(vp) == 2 {
 			raw, _ := base64.StdEncoding.DecodeString(img)
 			vw, _ := vp[0].(float64)
 			vh, _ := vp[1].(float64)
 			m := shotScale(raw, vw, vh, 0, 0)
-			s.setShot("tab:"+t, m)
+			s.setShot(key, m)
 			if m != nil {
 				note = tabNote
 			}
@@ -119,6 +120,27 @@ func pick(a Args, keys ...string) map[string]any {
 	return m
 }
 
+const (
+	deskCoords = "Coordinates are positions in your last desktop_screenshot of this workspace; after desktop_windows, a resize or without a screenshot they are desktop pixels."
+	tabCoords  = "Coordinates are positions in your last browser_screenshot of this tab; after browser_snapshot boxes=true, browser_emulate, a resize or without a screenshot they are CSS viewport pixels."
+	evalMax    = 64 << 10
+)
+
+func capText(cs []content, n int) []content {
+	for i := range cs {
+		if cs[i].Type != "text" || len(cs[i].Text) <= n {
+			continue
+		}
+		t := cs[i].Text
+		cut := n
+		for cut > 0 && !utf8.RuneStart(t[cut]) {
+			cut--
+		}
+		cs[i].Text = t[:cut] + fmt.Sprintf("\n…[truncated %d bytes]", len(t)-cut)
+	}
+	return cs
+}
+
 func tools() []Tool {
 	return []Tool{
 		{Name: "workspace_list", Desc: "List workspaces with state, resources, viewers and cursors.", Props: map[string]any{},
@@ -138,13 +160,18 @@ func tools() []Tool {
 				}
 				return s.call(ctx, "GET", "/v1/workspaces/"+ws, nil)
 			}},
-		{Name: "workspace_op", Desc: "Lifecycle: start | suspend | resume | freeze | thaw | checkpoint | fork | resize | layout | browser-restart.", Props: with(map[string]any{"op": str("Operation"), "name": str("fork name"), "width": num("resize width"), "height": num("resize height"), "layout": str("tile|max|float"), "snapshot": boo("checkpoint: also snapshot browser profile")}), Required: []string{"op"},
+		{Name: "workspace_op", Desc: "Lifecycle: start | suspend | resume | freeze | thaw | checkpoint | fork | resize | layout | browser-restart. resize drops the coordinate mapping of earlier screenshots.", Props: with(map[string]any{"op": str("Operation"), "name": str("fork name"), "width": num("resize width"), "height": num("resize height"), "layout": str("tile|max|float"), "snapshot": boo("checkpoint: also snapshot browser profile")}), Required: []string{"op"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				ws, err := s.wsArg(a)
 				if err != nil {
 					return nil, err
 				}
-				return s.call(ctx, "POST", "/v1/workspaces/"+ws+"/"+a.S("op"), pick(a, "name", "width", "height", "layout", "snapshot"))
+				out, err := s.call(ctx, "POST", "/v1/workspaces/"+ws+"/"+a.S("op"), pick(a, "name", "width", "height", "layout", "snapshot"))
+				if err == nil && a.S("op") == "resize" {
+					s.setShot("ws:"+ws, nil)
+					s.clearShots("tab:" + ws + "/")
+				}
+				return out, err
 			}},
 		{Name: "desktop_screenshot", Desc: "Capture the desktop (or one window / region) as an image, 1024 px wide JPEG by default; desktop_click/move/drag/scroll then take positions in that image. Region x/y/w/h are desktop pixels.", Props: with(map[string]any{"window": num("X window id"), "x": num("region x"), "y": num("region y"), "w": num("region width"), "h": num("region height"), "max_width": num("downscale to this width (default 1024)"), "format": str("jpeg|png"), "quality": num("JPEG quality (default 60)")}),
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
@@ -160,27 +187,28 @@ func tools() []Tool {
 				}
 				return s.image(ctx, "/v1/workspaces/"+ws+"/screenshot"+q("window", f("window", 0), "x", f("x", 0), "y", f("y", 0), "w", f("w", 0), "h", f("h", 0), "max_width", f("max_width", 1024), "quality", f("quality", 60), "format", a.S("format")), "ws:"+ws)
 			}},
-		{Name: "desktop_windows", Desc: "List top-level windows (id, title, class, geometry).", Props: with(map[string]any{}),
+		{Name: "desktop_windows", Desc: "List top-level windows (id, title, class, geometry). Geometry is in desktop pixels: after this call desktop_click/move/drag/scroll take desktop pixels until the next desktop_screenshot.", Props: with(map[string]any{}),
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				ws, err := s.wsArg(a)
 				if err != nil {
 					return nil, err
 				}
+				s.setShot("ws:"+ws, nil)
 				return s.call(ctx, "GET", "/v1/workspaces/"+ws+"/windows", nil)
 			}},
-		{Name: "desktop_click", Desc: "Click with your own pointer at screen coordinates. Focuses and raises the window under it.", Props: with(map[string]any{"x": num("x"), "y": num("y"), "button": num("1 left, 2 middle, 3 right"), "count": num("clicks (2 = double)")}), Required: []string{"x", "y"},
+		{Name: "desktop_click", Desc: "Click with your own pointer at x,y. Focuses and raises the window under it. " + deskCoords, Props: with(map[string]any{"x": num("x"), "y": num("y"), "button": num("1 left, 2 middle, 3 right"), "count": num("clicks (2 = double)")}), Required: []string{"x", "y"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				return s.input(ctx, a, map[string]any{"action": "click", "x": a.N("x"), "y": a.N("y"), "button": a.N("button"), "count": a.N("count")})
 			}},
-		{Name: "desktop_move", Desc: "Move your pointer (hover).", Props: with(map[string]any{"x": num("x"), "y": num("y")}), Required: []string{"x", "y"},
+		{Name: "desktop_move", Desc: "Move your pointer (hover). " + deskCoords, Props: with(map[string]any{"x": num("x"), "y": num("y")}), Required: []string{"x", "y"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				return s.input(ctx, a, map[string]any{"action": "move", "x": a.N("x"), "y": a.N("y")})
 			}},
-		{Name: "desktop_drag", Desc: "Drag with the left button from (x,y) to (x2,y2).", Props: with(map[string]any{"x": num("from x"), "y": num("from y"), "x2": num("to x"), "y2": num("to y")}), Required: []string{"x", "y", "x2", "y2"},
+		{Name: "desktop_drag", Desc: "Drag with the left button from (x,y) to (x2,y2). " + deskCoords, Props: with(map[string]any{"x": num("from x"), "y": num("from y"), "x2": num("to x"), "y2": num("to y")}), Required: []string{"x", "y", "x2", "y2"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				return s.input(ctx, a, map[string]any{"action": "drag", "x": a.N("x"), "y": a.N("y"), "x2": a.N("x2"), "y2": a.N("y2")})
 			}},
-		{Name: "desktop_scroll", Desc: "Scroll at a position. dy>0 scrolls down (notches).", Props: with(map[string]any{"x": num("x"), "y": num("y"), "dx": num("horizontal notches"), "dy": num("vertical notches")}),
+		{Name: "desktop_scroll", Desc: "Scroll at a position. dy>0 scrolls down (notches). " + deskCoords, Props: with(map[string]any{"x": num("x"), "y": num("y"), "dx": num("horizontal notches"), "dy": num("vertical notches")}),
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				return s.input(ctx, a, map[string]any{"action": "scroll", "x": a.N("x"), "y": a.N("y"), "dx": a.N("dx"), "dy": a.N("dy")})
 			}},
@@ -248,23 +276,23 @@ func tools() []Tool {
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				return s.tab(ctx, a, map[string]any{"action": "navigate", "url": a.S("url"), "wait": a.S("wait")})
 			}},
-		{Name: "browser_snapshot", Desc: "Full semantic view of the whole page (also offscreen): interactive elements with refs [eN], roles and names, plus page text. Use refs with browser_click/browser_fill.", Props: tabProp(map[string]any{"max_text": num("Max visible text chars (default 3000)"), "boxes": boo("Also list each element's viewport box @x,y wxh")}), Required: []string{"target"},
+		{Name: "browser_snapshot", Desc: "Full semantic view of the whole page (also offscreen): interactive elements with refs [eN], roles and names, plus page text. Use refs with browser_click/browser_fill.", Props: tabProp(map[string]any{"max_text": num("Max visible text chars (default 3000)"), "boxes": boo("Also list each element's viewport box @x,y wxh in CSS pixels; after this, browser_click/hover/drag/scroll take CSS viewport pixels until the next browser_screenshot")}), Required: []string{"target"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				return s.tab(ctx, a, map[string]any{"action": "snapshot", "max_text": a.N("max_text"), "boxes": a.B("boxes")})
 			}},
-		{Name: "browser_click", Desc: "Click an element by ref, or at viewport coordinates x,y (for canvases, cross-origin iframes, CAPTCHA widgets).", Props: tabProp(map[string]any{"ref": str("Element ref"), "x": num("viewport x"), "y": num("viewport y"), "button": str("left|right|middle"), "count": num("click count")}), Required: []string{"target"},
+		{Name: "browser_click", Desc: "Click an element by ref, or at x,y (for canvases, cross-origin iframes, CAPTCHA widgets). " + tabCoords, Props: tabProp(map[string]any{"ref": str("Element ref"), "x": num("viewport x"), "y": num("viewport y"), "button": str("left|right|middle"), "count": num("click count")}), Required: []string{"target"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				b := pick(a, "ref", "x", "y", "button", "count")
 				b["action"] = "click"
 				return s.tab(ctx, a, b)
 			}},
-		{Name: "browser_hover", Desc: "Hover an element by ref or coordinates.", Props: tabProp(map[string]any{"ref": str("Element ref"), "x": num("x"), "y": num("y")}), Required: []string{"target"},
+		{Name: "browser_hover", Desc: "Hover an element by ref or coordinates. " + tabCoords, Props: tabProp(map[string]any{"ref": str("Element ref"), "x": num("x"), "y": num("y")}), Required: []string{"target"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				b := pick(a, "ref", "x", "y")
 				b["action"] = "hover"
 				return s.tab(ctx, a, b)
 			}},
-		{Name: "browser_drag", Desc: "Drag inside the page from (x,y) to (x2,y2) in viewport coordinates.", Props: tabProp(map[string]any{"x": num("x"), "y": num("y"), "x2": num("x2"), "y2": num("y2")}), Required: []string{"target", "x", "y", "x2", "y2"},
+		{Name: "browser_drag", Desc: "Drag inside the page from (x,y) to (x2,y2). " + tabCoords, Props: tabProp(map[string]any{"x": num("x"), "y": num("y"), "x2": num("x2"), "y2": num("y2")}), Required: []string{"target", "x", "y", "x2", "y2"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				b := pick(a, "x", "y", "x2", "y2")
 				b["action"] = "drag"
@@ -286,7 +314,7 @@ func tools() []Tool {
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				return s.tab(ctx, a, map[string]any{"action": "press", "keys": a.S("keys")})
 			}},
-		{Name: "browser_scroll", Desc: "Scroll the page by pixels (dy>0 down).", Props: tabProp(map[string]any{"dx": num("dx px"), "dy": num("dy px"), "x": num("at x"), "y": num("at y")}), Required: []string{"target"},
+		{Name: "browser_scroll", Desc: "Scroll the page by pixels (dy>0 down). " + tabCoords, Props: tabProp(map[string]any{"dx": num("dx px"), "dy": num("dy px"), "x": num("at x"), "y": num("at y")}), Required: []string{"target"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				b := pick(a, "dx", "dy", "x", "y")
 				b["action"] = "scroll"
@@ -304,9 +332,10 @@ func tools() []Tool {
 				b["action"] = "upload"
 				return s.tab(ctx, a, b)
 			}},
-		{Name: "browser_eval", Desc: "Evaluate a JavaScript expression in the page and return the JSON value.", Props: tabProp(map[string]any{"expression": str("JS expression (promises are awaited)")}), Required: []string{"target", "expression"},
+		{Name: "browser_eval", Desc: "Evaluate a JavaScript expression in the page and return the JSON value (cut at 64 KB).", Props: tabProp(map[string]any{"expression": str("JS expression (promises are awaited)")}), Required: []string{"target", "expression"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
-				return s.tab(ctx, a, map[string]any{"action": "eval", "expression": a.S("expression")})
+				out, err := s.tab(ctx, a, map[string]any{"action": "eval", "expression": a.S("expression")})
+				return capText(out, evalMax), err
 			}},
 		{Name: "browser_wait", Desc: "Wait until a selector exists, text appears, or URL contains a string.", Props: tabProp(map[string]any{"selector": str("CSS selector"), "text": str("Visible text"), "url_contains": str("URL fragment"), "timeout_ms": num("Timeout (default 15000)")}), Required: []string{"target"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
@@ -396,7 +425,7 @@ func tools() []Tool {
 				}
 				return s.call(ctx, "POST", "/v1/workspaces/"+ws+"/board", pick(a, "kind", "topic", "text"))
 			}},
-		{Name: "board_read", Desc: "Read the shared board: current claims and posts after seq. Check it before starting a work item.", Props: with(map[string]any{"since": num("Last seen seq")}),
+		{Name: "board_read", Desc: "Read the shared board: current claims and the oldest posts after seq. Check it before starting a work item. When more=true there are further posts: read again with since=seq.", Props: with(map[string]any{"since": num("Last seen seq")}),
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				ws, err := s.wsArg(a)
 				if err != nil {
