@@ -484,7 +484,9 @@ func (m *Manager) DetailedUsage(id string) *WorkspaceUsage {
 		u.CPU = cur.CPU
 	}
 	m.mu.Lock()
-	m.usage[id] = u
+	if m.rt[id] == r {
+		m.usage[id] = u
+	}
 	m.mu.Unlock()
 	return u
 }

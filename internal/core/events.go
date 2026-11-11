@@ -61,8 +61,11 @@ type Bus struct {
 	logs   map[string]*auditLog
 	maxLog int64
 	gone   map[string]bool
+	goneQ  []string
 	quiet  map[string]bool
 }
+
+const maxGoneLogs = 1024
 
 type auditLog struct {
 	f    *os.File
@@ -149,7 +152,14 @@ func (b *Bus) RemoveLog(ws string) {
 		l.f.Close()
 		delete(b.logs, ws)
 	}
-	b.gone[ws] = true
+	if !b.gone[ws] {
+		b.gone[ws] = true
+		b.goneQ = append(b.goneQ, ws)
+		if len(b.goneQ) > maxGoneLogs {
+			delete(b.gone, b.goneQ[0])
+			b.goneQ = b.goneQ[1:]
+		}
+	}
 	os.Remove(b.logPath(ws))
 	os.Remove(b.logPath(ws) + ".1")
 }
