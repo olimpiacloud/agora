@@ -28,6 +28,8 @@ type Proc struct {
 	cmd     *exec.Cmd
 	done    chan struct{}
 	Exit    *int `json:"exit,omitempty"`
+	termAt  time.Time
+	killed  bool
 }
 
 type seatLease struct {
@@ -64,6 +66,7 @@ type Runtime struct {
 	restored   bool
 	lastObs    map[string]string
 	offsets    map[string][3]int
+	opening    int
 }
 
 func (m *Manager) runtime(id string) *Runtime {
@@ -412,29 +415,7 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 			return nil, err
 		}
 	}
-	onEvent := func(kind string, data map[string]any) {
-		cur := ""
-		if t, ok := data["target"].(string); ok {
-			r.mu.Lock()
-			cur = r.tabOwner[t]
-			r.mu.Unlock()
-		}
-		if kind == "browser.challenge.detected" && cur != "" {
-			m.setCursorStatus(cur, CursorNeedHuman, fmt.Sprintf("%v challenge on %v", data["kind"], data["url"]), false)
-		}
-		if kind == "browser.tab.created" {
-			if op, _ := data["opener"].(string); op != "" {
-				r.mu.Lock()
-				if o := r.tabOwner[op]; o != "" {
-					r.tabOwner[data["target"].(string)] = o
-					cur = o
-				}
-				r.mu.Unlock()
-			}
-		}
-		m.Bus.Publish(kind, r.id, cur, data)
-	}
-	b, err := browser.Launch(ctx, browser.LaunchOptions{Wrap: wrap, CgroupFD: cgfd, Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: cfg.BrowserArgs, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log"), OnEvent: onEvent})
+	b, err := browser.Launch(ctx, browser.LaunchOptions{Wrap: wrap, CgroupFD: cgfd, Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: cfg.BrowserArgs, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log"), OnEvent: r.onBrowserEvent})
 	if err != nil {
 		return nil, err
 	}
@@ -449,6 +430,35 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 		go r.restoreTabs(b, restore)
 	}
 	return b, nil
+}
+
+func (r *Runtime) onBrowserEvent(kind string, data map[string]any) {
+	t, _ := data["target"].(string)
+	cur := ""
+	if t != "" {
+		r.mu.Lock()
+		cur = r.tabOwner[t]
+		r.mu.Unlock()
+	}
+	if kind == "browser.challenge.detected" && cur != "" {
+		r.m.setCursorStatus(cur, CursorNeedHuman, fmt.Sprintf("%v challenge on %v", data["kind"], data["url"]), false)
+	}
+	if kind == "browser.tab.created" {
+		if op, _ := data["opener"].(string); op != "" {
+			r.mu.Lock()
+			if o := r.tabOwner[op]; o != "" {
+				r.tabOwner[t] = o
+				cur = o
+			}
+			r.mu.Unlock()
+		}
+	}
+	if kind == "browser.tab.closed" && t != "" {
+		r.mu.Lock()
+		delete(r.lastObs, t)
+		r.mu.Unlock()
+	}
+	r.m.Bus.Publish(kind, r.id, cur, data)
 }
 
 func (r *Runtime) sandboxWrap(extra ...string) ([]string, error) {

@@ -402,6 +402,7 @@ func (m *Manager) Transfer(id string, t TransferReq) (*Cursor, error) {
 			c.Root = c.ID
 			c.Depth = 0
 		}
+		m.rerootLocked(c, 0)
 	}
 	if t.Agent != nil {
 		c.Agent = *t.Agent
@@ -414,6 +415,20 @@ func (m *Manager) Transfer(id string, t TransferReq) (*Cursor, error) {
 	}
 	m.Bus.Publish("cursor.transferred", cp.Workspace, id, map[string]any{"from_workspace": oldWS, "parent": cp.Parent, "agent": cp.Agent})
 	return &cp, nil
+}
+
+func (m *Manager) rerootLocked(c *Cursor, level int) {
+	if level > 32 {
+		return
+	}
+	for _, ch := range m.cursors {
+		if ch.Parent == c.ID && ch.ID != c.ID {
+			ch.Root = c.Root
+			ch.Depth = c.Depth + 1
+			m.saveCursor(ch)
+			m.rerootLocked(ch, level+1)
+		}
+	}
 }
 
 func (m *Manager) releaseCursorIn(ws, id string) {

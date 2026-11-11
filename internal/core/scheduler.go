@@ -185,12 +185,14 @@ func (m *Manager) reapApps(id string, r *Runtime) {
 		pid     int
 		owner   string
 		started time.Time
+		termAt  time.Time
+		killed  bool
 	}
 	var apps []app
 	r.mu.Lock()
 	for pid, p := range r.procs {
 		if p.App.Owner != "" {
-			apps = append(apps, app{pid, p.App.Owner, p.Started})
+			apps = append(apps, app{pid, p.App.Owner, p.Started, p.termAt, p.killed})
 		}
 	}
 	r.mu.Unlock()
@@ -198,8 +200,22 @@ func (m *Manager) reapApps(id string, r *Runtime) {
 		if time.Since(a.started) < m.cfg.TabIdle || m.ownerActive(a.owner) {
 			continue
 		}
-		syscall.Kill(-a.pid, syscall.SIGTERM)
-		m.Bus.Publish("scheduler.app_stopped", id, a.owner, map[string]any{"pid": a.pid, "reason": "owner ended"})
+		if a.termAt.IsZero() {
+			syscall.Kill(-a.pid, syscall.SIGTERM)
+			r.mu.Lock()
+			if p := r.procs[a.pid]; p != nil {
+				p.termAt = time.Now()
+			}
+			r.mu.Unlock()
+			m.Bus.Publish("scheduler.app_stopped", id, a.owner, map[string]any{"pid": a.pid, "reason": "owner ended"})
+		} else if !a.killed && time.Since(a.termAt) > m.cfg.AppKillGrace {
+			syscall.Kill(-a.pid, syscall.SIGKILL)
+			r.mu.Lock()
+			if p := r.procs[a.pid]; p != nil {
+				p.killed = true
+			}
+			r.mu.Unlock()
+		}
 	}
 }
 
@@ -420,8 +436,12 @@ func (m *Manager) usageTick() {
 		u := m.measureLight(id, r)
 		m.mu.Lock()
 		if prev := m.usage[id]; prev != nil && prev.Detailed && time.Since(prev.Time) < time.Minute {
-			prev.CPU, prev.CgroupMB, prev.RSSMB, prev.Procs = u.CPU, u.CgroupMB, u.RSSMB, u.Procs
-			u = prev
+			cp := *prev
+			cp.CPU, cp.CgroupMB, cp.RSSMB, cp.Procs = u.CPU, u.CgroupMB, u.RSSMB, u.Procs
+			u = &cp
+			if m.rt[id] == r {
+				m.usage[id] = u
+			}
 		} else if m.rt[id] == r {
 			m.usage[id] = u
 		}

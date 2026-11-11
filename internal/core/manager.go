@@ -33,6 +33,7 @@ type Config struct {
 	TabIdle            time.Duration
 	CursorRetention    time.Duration
 	WorkspaceRetention time.Duration
+	AppKillGrace       time.Duration
 	RTC                stream.RTCOptions
 	AgoraBinary        string
 	ListenURL          string
@@ -100,6 +101,9 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 	if cfg.IdleAfter == 0 {
 		cfg.IdleAfter = 5 * time.Minute
+	}
+	if cfg.AppKillGrace == 0 {
+		cfg.AppKillGrace = 10 * time.Second
 	}
 	var roots []string
 	for _, root := range cfg.WorktreeRoots {

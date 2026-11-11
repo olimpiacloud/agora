@@ -118,6 +118,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - A cascading cancel marks the cursor cancelled before its children, so a subagent spawned during the cancel can no longer survive it.
 - An expired workspace is destroyed once: `workspace.expired` and `workspace.destroyed` are no longer published again every two seconds while the destroy runs, and destroying an already destroyed workspace does nothing.
 - Input from a viewer that was already detached no longer marks a suspended or frozen workspace active or restarts it, a call that arrives while an idle suspend is queued keeps its runtime, the list of tabs to restore survives a restore that restored nothing, and a browser crash is recorded (with its tabs and a `browser.crashed` event) even when an API call notices it before the watcher does.
+- `budget.max_tabs` holds when several cursors open tabs at the same time. An app whose owner cursor ended gets SIGTERM once and SIGKILL 10 seconds later, with a single `scheduler.app_stopped` event instead of one every 2 seconds. Transferring a cursor updates the root and depth of its whole subtree. A desktop created larger than 1920x1200 can be resized up to its own size again. Per-tab observation caches are dropped when the tab closes, and usage figures are no longer modified while being served.
 
 ## [0.1.0] - 2026-11-06
 
