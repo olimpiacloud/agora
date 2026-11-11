@@ -121,7 +121,13 @@ export class DesktopSession {
       return
     }
     if (m.type === 'hello') this.connected = true
-    if (m.type === 'bye' && m.reason === 'suspended') this.asleep = true
+    if (m.type === 'bye') {
+      if (m.reason === 'suspended') this.asleep = true
+      if (this.pc) {
+        this.cleanupRTC()
+        if (!this.closed) this.scheduleRetry()
+      }
+    }
     if (m.type === 'hello' && m.width) {
       this.cb.onSize(m.width as number, m.height as number)
     }
@@ -259,7 +265,7 @@ export class DesktopSession {
       }
       pc.onconnectionstatechange = () => {
         check()
-        if (this.stats.transport === 'webrtc' && (pc.connectionState === 'failed' || pc.connectionState === 'disconnected')) {
+        if (this.pc === pc && this.stats.transport === 'webrtc' && ['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
           this.cleanupRTC()
           if (!this.closed) this.scheduleRetry()
         }
