@@ -34,7 +34,7 @@ func TestSandboxedWorkspace(t *testing.T) {
 	h.waitEval(h.admin, ws, tg, "document.readyState", "complete", 20*time.Second)
 
 	home := filepath.Join(h.home, "workspaces", ws, "home")
-	script := `id -u > r_id; ls -A /root > r_root 2>&1; ls -A ` + h.home + ` > r_state 2>&1; (echo x > /usr/agora-x) 2> r_usr; ls /proc | grep -c '^[0-9]' > r_procs; touch r_done`
+	script := `id -u > r_id; ls -A /root > r_root 2>&1; ls -A ` + h.home + ` > r_state 2>&1; (echo x > /usr/agora-x) 2> r_usr; ls /proc | grep -c '^[0-9]' > r_procs; ls -A /dev | tr '\n' ' ' > r_dev; awk '$2=="/"{print $4}' /proc/mounts > r_rootopts; (exec 3<>/dev/ptmx && echo ok) > r_ptmx 2>&1; head -c 4 /dev/urandom | wc -c > r_urandom; touch r_done`
 	h.do(h.admin, "POST", "/v1/workspaces/"+ws+"/apps", map[string]any{"command": "sh", "args": []string{"-c", script}})
 	deadline := time.Now().Add(15 * time.Second)
 	for {
@@ -65,6 +65,18 @@ func TestSandboxedWorkspace(t *testing.T) {
 	}
 	if got := read("r_procs"); got == "" || len(got) > 2 {
 		t.Errorf("sandbox sees %s processes; expected only its own", got)
+	}
+	if got := strings.Fields(read("r_dev")); strings.Join(got, " ") != "fd full null ptmx pts random shm stderr stdin stdout tty urandom zero" {
+		t.Errorf("sandbox /dev has %v", got)
+	}
+	if got := read("r_rootopts"); !strings.Contains(got, "ro") || !strings.Contains(got, "nosuid") || !strings.Contains(got, "nodev") {
+		t.Errorf("sandbox root mount options %q", got)
+	}
+	if got := read("r_ptmx"); got != "ok" {
+		t.Errorf("/dev/ptmx unusable in sandbox: %q", got)
+	}
+	if got := read("r_urandom"); got != "4" {
+		t.Errorf("/dev/urandom unreadable in sandbox: %q", got)
 	}
 
 	renderers := 0
