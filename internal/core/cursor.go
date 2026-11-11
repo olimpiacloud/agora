@@ -359,6 +359,7 @@ func (m *Manager) DeleteCursor(id string) error {
 	m.mu.Unlock()
 	m.store.Delete("cursors", id)
 	os.RemoveAll(filepath.Join(m.cfg.Home, "agents", id))
+	m.reclaimWorktrees(id, c.Workspace)
 	m.Bus.Publish("cursor.deleted", c.Workspace, id, nil)
 	return nil
 }

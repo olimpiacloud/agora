@@ -78,6 +78,7 @@ type Manager struct {
 	profiles  map[string]*profileLease
 	portsHeld map[int]bool
 	expiring  map[string]bool
+	wtPending map[string]int
 	shots     shotStore
 	started   time.Time
 	ctx       context.Context
