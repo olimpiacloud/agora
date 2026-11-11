@@ -385,6 +385,9 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 	restore := r.lastTabs
 	if len(restore) == 0 && len(cfg.AutostartURLs) > 0 {
 		for _, u := range cfg.AutostartURLs {
+			if browser.AllowedURL(u) != nil {
+				continue
+			}
 			restore = append(restore, TabRecord{URL: u})
 		}
 	}
@@ -397,15 +400,7 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 			return nil, err
 		}
 	}
-	b, err := browser.Launch(ctx, browser.LaunchOptions{Wrap: wrap, CgroupFD: cgfd, Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: cfg.BrowserArgs, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log")})
-	if err != nil {
-		return nil, err
-	}
-	launched = true
-	m.mu.Lock()
-	lease.b = b
-	m.mu.Unlock()
-	b.OnEvent = func(kind string, data map[string]any) {
+	onEvent := func(kind string, data map[string]any) {
 		cur := ""
 		if t, ok := data["target"].(string); ok {
 			r.mu.Lock()
@@ -427,6 +422,14 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 		}
 		m.Bus.Publish(kind, r.id, cur, data)
 	}
+	b, err := browser.Launch(ctx, browser.LaunchOptions{Wrap: wrap, CgroupFD: cgfd, Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: cfg.BrowserArgs, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log"), OnEvent: onEvent})
+	if err != nil {
+		return nil, err
+	}
+	launched = true
+	m.mu.Lock()
+	lease.b = b
+	m.mu.Unlock()
 	r.browser = b
 	m.Bus.Publish("browser.started", r.id, "", map[string]any{"pid": b.Pid(), "profile": profile})
 	go r.watchBrowser(b, profile, lease)

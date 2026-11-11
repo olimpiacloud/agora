@@ -34,9 +34,13 @@ type CDPError struct {
 
 func (e *CDPError) Error() string { return fmt.Sprintf("cdp %d: %s %s", e.Code, e.Message, e.Data) }
 
+type writeReq struct {
+	b    []byte
+	done chan error
+}
+
 type CDP struct {
-	w       io.Writer
-	wmu     sync.Mutex
+	wq      chan writeReq
 	next    atomic.Int64
 	mu      sync.Mutex
 	pending map[int64]chan cdpMsg
@@ -49,9 +53,22 @@ type CDP struct {
 var ErrClosed = errors.New("browser connection closed")
 
 func NewCDP(r io.Reader, w io.Writer) *CDP {
-	c := &CDP{w: w, pending: map[int64]chan cdpMsg{}, subs: map[int]func(Event){}, closed: make(chan struct{})}
+	c := &CDP{wq: make(chan writeReq), pending: map[int64]chan cdpMsg{}, subs: map[int]func(Event){}, closed: make(chan struct{})}
 	go c.read(r)
+	go c.write(w)
 	return c
+}
+
+func (c *CDP) write(w io.Writer) {
+	for {
+		select {
+		case req := <-c.wq:
+			_, err := w.Write(req.b)
+			req.done <- err
+		case <-c.closed:
+			return
+		}
+	}
 }
 
 func (c *CDP) read(r io.Reader) {
@@ -65,8 +82,8 @@ func (c *CDP) read(r io.Reader) {
 				close(ch)
 				delete(c.pending, id)
 			}
-			c.mu.Unlock()
 			close(c.closed)
+			c.mu.Unlock()
 			return
 		}
 		b = b[:len(b)-1]
@@ -136,31 +153,55 @@ func (c *CDP) Call(ctx context.Context, session, method string, params any, out 
 	}
 	c.pending[id] = ch
 	c.mu.Unlock()
-	c.wmu.Lock()
-	_, err = c.w.Write(append(b, 0))
-	c.wmu.Unlock()
-	if err != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return err
-	}
+	done := make(chan error, 1)
 	select {
-	case m, ok := <-ch:
-		if !ok {
-			return ErrClosed
-		}
-		if m.Error != nil {
-			return m.Error
-		}
-		if out != nil && len(m.Result) > 0 {
-			return json.Unmarshal(m.Result, out)
-		}
-		return nil
+	case c.wq <- writeReq{b: append(b, 0), done: done}:
 	case <-ctx.Done():
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
+		c.drop(id)
 		return ctx.Err()
+	case <-c.closed:
+		c.drop(id)
+		return ErrClosed
 	}
+	for {
+		select {
+		case err := <-done:
+			if err != nil {
+				c.drop(id)
+				return err
+			}
+			done = nil
+		case m, ok := <-ch:
+			return reply(m, ok, out)
+		case <-ctx.Done():
+			c.drop(id)
+			return ctx.Err()
+		case <-c.closed:
+			select {
+			case m, ok := <-ch:
+				return reply(m, ok, out)
+			default:
+				return ErrClosed
+			}
+		}
+	}
+}
+
+func (c *CDP) drop(id int64) {
+	c.mu.Lock()
+	delete(c.pending, id)
+	c.mu.Unlock()
+}
+
+func reply(m cdpMsg, ok bool, out any) error {
+	if !ok {
+		return ErrClosed
+	}
+	if m.Error != nil {
+		return m.Error
+	}
+	if out != nil && len(m.Result) > 0 {
+		return json.Unmarshal(m.Result, out)
+	}
+	return nil
 }

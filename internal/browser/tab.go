@@ -21,9 +21,11 @@ type Tab struct {
 	ownsContext bool
 	b           *Browser
 	mu          sync.Mutex
+	navMu       sync.Mutex
 	lastUsed    time.Time
 	loadCh      chan struct{}
 	dialog      map[string]any
+	dialogCh    chan struct{}
 	chooser     map[string]any
 	closed      bool
 	dragCh      chan json.RawMessage
@@ -49,6 +51,44 @@ func (t *Tab) Info() map[string]any {
 	return map[string]any{"target": t.TargetID, "url": t.URL, "title": t.Title, "owner": t.Owner, "context": t.ContextID, "dialog": t.dialog, "file_chooser": t.chooser != nil, "last_used": t.lastUsed}
 }
 
+var ErrDialogOpen = errors.New("javascript dialog opened")
+
+func (t *Tab) Dialog() map[string]any {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.dialog == nil {
+		return nil
+	}
+	d := make(map[string]any, len(t.dialog))
+	for k, v := range t.dialog {
+		d[k] = v
+	}
+	return d
+}
+
+func (t *Tab) DialogContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	t.mu.Lock()
+	if t.dialogCh == nil {
+		t.dialogCh = make(chan struct{})
+	}
+	ch := t.dialogCh
+	t.mu.Unlock()
+	dctx, cancel := context.WithCancelCause(ctx)
+	stop := make(chan struct{})
+	go func() {
+		select {
+		case <-ch:
+			cancel(ErrDialogOpen)
+		case <-stop:
+		case <-dctx.Done():
+		}
+	}()
+	return dctx, func() {
+		close(stop)
+		cancel(nil)
+	}
+}
+
 func (t *Tab) closeLocal() {
 	t.mu.Lock()
 	t.closed = true
@@ -69,12 +109,16 @@ func (t *Tab) onEvent(ev Event) {
 		}
 		t.b.emit("browser.page.loaded", map[string]any{"target": t.TargetID})
 	case "Page.javascriptDialogOpening":
-		var p map[string]any
+		p := map[string]any{}
 		json.Unmarshal(ev.Params, &p)
+		p["target"] = t.TargetID
 		t.mu.Lock()
 		t.dialog = p
+		if t.dialogCh != nil {
+			close(t.dialogCh)
+			t.dialogCh = nil
+		}
 		t.mu.Unlock()
-		p["target"] = t.TargetID
 		t.b.emit("browser.dialog.opened", p)
 	case "Page.javascriptDialogClosed":
 		t.mu.Lock()
@@ -92,24 +136,33 @@ func (t *Tab) onEvent(ev Event) {
 			}
 		}
 	case "Page.fileChooserOpened":
-		var p map[string]any
+		p := map[string]any{}
 		json.Unmarshal(ev.Params, &p)
+		p["target"] = t.TargetID
 		t.mu.Lock()
 		t.chooser = p
 		t.mu.Unlock()
-		p["target"] = t.TargetID
 		t.b.emit("browser.filechooser.opened", p)
 	}
 }
 
 func (t *Tab) Navigate(ctx context.Context, url string, wait string, timeout time.Duration) error {
+	if err := AllowedURL(url); err != nil {
+		return err
+	}
+	if url == "" {
+		url = "about:blank"
+	}
 	if timeout == 0 {
 		timeout = 30 * time.Second
 	}
+	t.navMu.Lock()
+	defer t.navMu.Unlock()
 	for len(t.loadCh) > 0 {
 		<-t.loadCh
 	}
 	var r struct {
+		LoaderID  string `json:"loaderId"`
 		ErrorText string `json:"errorText"`
 	}
 	if err := t.call(ctx, "Page.navigate", map[string]any{"url": url}, &r); err != nil {
@@ -118,7 +171,7 @@ func (t *Tab) Navigate(ctx context.Context, url string, wait string, timeout tim
 	if r.ErrorText != "" {
 		return fmt.Errorf("navigate: %s", r.ErrorText)
 	}
-	if wait == "none" {
+	if wait == "none" || r.LoaderID == "" {
 		return nil
 	}
 	if wait == "domcontentloaded" {
@@ -352,8 +405,12 @@ func (t *Tab) InsertText(ctx context.Context, text string) error {
 func (t *Tab) TypeText(ctx context.Context, text string) error {
 	for _, r := range text {
 		s := string(r)
-		if r == '\n' {
-			if err := t.Press(ctx, "Enter"); err != nil {
+		if r == '\n' || r == '\t' {
+			k := "Enter"
+			if r == '\t' {
+				k = "Tab"
+			}
+			if err := t.Press(ctx, k); err != nil {
 				return err
 			}
 			continue
