@@ -648,6 +648,9 @@ func (r *Runtime) launch(spec AppSpec) (*Proc, error) {
 		}
 		return nil, err
 	}
+	if sandboxed {
+		sandbox.WaitSignals(cmd.Process.Pid, 2*time.Second)
+	}
 	p := &Proc{Pid: cmd.Process.Pid, App: spec, Started: time.Now(), cmd: cmd, done: make(chan struct{})}
 	r.mu.Lock()
 	if r.closing {

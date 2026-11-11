@@ -8,7 +8,9 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -50,6 +52,30 @@ func Wrap(self string, s Spec) []string {
 
 func Attr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL, Cloneflags: syscall.CLONE_NEWNS | syscall.CLONE_NEWPID | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS}
+}
+
+func WaitSignals(pid int, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for !catchesTerm(pid) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func catchesTerm(pid int) bool {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		return true
+	}
+	for _, l := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(l, "State:"); ok && strings.HasPrefix(strings.TrimSpace(v), "Z") {
+			return true
+		}
+		if v, ok := strings.CutPrefix(l, "SigCgt:"); ok {
+			m, err := strconv.ParseUint(strings.TrimSpace(v), 16, 64)
+			return err != nil || m&(1<<(uint(syscall.SIGTERM)-1)) != 0
+		}
+	}
+	return true
 }
 
 type list []string

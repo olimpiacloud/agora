@@ -1,8 +1,11 @@
 package sandbox
 
 import (
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -66,5 +69,25 @@ func TestDevMountPlan(t *testing.T) {
 		if links[n] != target {
 			t.Fatalf("/dev/%s -> %q, want %q", n, links[n], target)
 		}
+	}
+}
+
+func TestCatchesTerm(t *testing.T) {
+	if !catchesTerm(os.Getpid()) {
+		t.Fatal("the Go runtime handles SIGTERM in this process")
+	}
+	cmd := exec.Command("sleep", "10")
+	if err := cmd.Start(); err != nil {
+		t.Skip(err)
+	}
+	defer cmd.Wait()
+	defer cmd.Process.Kill()
+	if catchesTerm(cmd.Process.Pid) {
+		t.Fatal("sleep does not handle SIGTERM")
+	}
+	start := time.Now()
+	WaitSignals(cmd.Process.Pid, 50*time.Millisecond)
+	if time.Since(start) < 50*time.Millisecond {
+		t.Fatal("WaitSignals returned before the timeout for a process without a handler")
 	}
 }
