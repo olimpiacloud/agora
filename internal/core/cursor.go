@@ -344,7 +344,7 @@ func (m *Manager) DeleteCursor(id string) error {
 	if !c.Status.Terminal() {
 		m.CancelCursor(id, "deleted", true)
 	} else {
-		m.closeOwned(c.Workspace, id)
+		m.closeOwned(c.Workspace, id, true)
 	}
 	m.mu.Lock()
 	delete(m.cursors, id)
@@ -451,10 +451,10 @@ func (m *Manager) cleanupCursor(id string) {
 	if c.Labels["keep_tabs"] == "true" && c.Status != CursorCancelled {
 		return
 	}
-	m.closeOwned(c.Workspace, id)
+	m.closeOwned(c.Workspace, id, c.Status == CursorCancelled)
 }
 
-func (m *Manager) closeOwned(ws, id string) {
+func (m *Manager) closeOwned(ws, id string, apps bool) {
 	r := m.runtime(ws)
 	if r == nil {
 		return
@@ -469,7 +469,7 @@ func (m *Manager) closeOwned(ws, id string) {
 		}
 	}
 	for pid, p := range r.procs {
-		if p.App.Owner == id {
+		if apps && p.App.Owner == id {
 			pids = append(pids, pid)
 		}
 	}
