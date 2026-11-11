@@ -18,7 +18,7 @@ Agora gives AI agents a real Linux computer, with Chromium, X11 apps and a termi
 - **Human in the loop.** CAPTCHAs and logins are detected, the cursor moves to `needs_human`, a person takes over from the viewer, then hands control back. The agent continues on the same tab and session.
 - **Persistent workspaces.** Freeze, suspend and resume with tabs restored to their owners. Copy-on-write profile forks, checkpoints, TTLs, and memory, CPU, cursor and tab budgets. An unused workspace costs nothing.
 - **Streaming that costs nothing when nobody watches.** H.264 over WebRTC, or WebSocket + WebCodecs through HTTP tunnels, encoded once and fanned out to every viewer. Damage-driven JPEG for light clients. The frame rate follows what the human is doing.
-- **Built for agents.** An MCP server with 50 tools (`agora mcp`), a launcher for Claude Code, Codex or any command with a lean profile and per-cursor token usage, and git worktrees with a port range per subagent.
+- **Built for agents.** An MCP server with 52 tools (`agora mcp`), a launcher for Claude Code, Codex or any command with a lean profile and per-cursor token usage, and git worktrees with a port range per subagent.
 - **Dashboard and Paseo.** An embedded React dashboard and viewer, and a [Paseo](https://paseo.sh) plugin with the live desktop in a panel (it works on mobile) and screenshot cards in the chat.
 
 ## Benchmarks
