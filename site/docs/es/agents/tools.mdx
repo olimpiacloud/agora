@@ -33,7 +33,7 @@ Para cualquier cosa en la web, preferí las herramientas `browser_*`. Hablan con
 
 Para trabajo de UI, usá `browser_audit` una vez en lugar de muchas capturas: revisa overflow, contraste, áreas táctiles, labels, encabezados, etiquetas de SEO, Core Web Vitals, animaciones y links internos rotos. `browser_emulate` configura un viewport móvil (`width: 0` lo resetea). Sacá `browser_screenshot` solo cuando importa la apariencia; por defecto es un JPEG de 1024 px con calidad 60, y `max_width` lo achica.
 
-`browser_upload` carga archivos en un input de archivo; las rutas son del host de Agora. `browser_action` maneja `back`, `forward`, `reload`, diálogos y `close`.
+`browser_upload` carga archivos en un input de archivo; para los cursores, los archivos tienen que estar dentro del home del workspace, por ejemplo en `Downloads`. `browser_action` maneja `back`, `forward`, `reload`, diálogos y `close`.
 
 ## Escritorio [#desktop]
 
@@ -75,7 +75,7 @@ Otros controles: `cursor_list` da un resumen con una vista previa corta del resu
 
 | Campo | Descripción |
 | --- | --- |
-| `adapter` | `claude`, `codex` o `command`. |
+| `adapter` | `claude`, `codex` o `command`. Los cursores solo pueden usar `claude`; `codex` y `command` son solo para el admin. |
 | `model` | Modelo para el CLI del agente. Los agentes lean de Claude Code usan `sonnet` por defecto. |
 | `effort` | `low`, `medium` o `high` (Claude Code). |
 | `prompt` | Reemplaza al goal como prompt. |

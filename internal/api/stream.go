@@ -24,7 +24,7 @@ func (s *Server) viewerAccess(r *http.Request, p *Principal, ws string) (bool, e
 		return p.Viewer.Control, nil
 	}
 	if p.Cursor != nil && p.Cursor.Workspace == ws {
-		return false, nil
+		return false, need(p, "desktop")
 	}
 	return false, core.ErrForbidden
 }

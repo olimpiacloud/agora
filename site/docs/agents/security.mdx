@@ -28,11 +28,16 @@ agora api POST /v1/cursors "{\"name\":\"reader\",\"workspace\":\"$WS\",\"permiss
 
 | Permission | What it allows |
 | --- | --- |
-| `browser` | Opening tabs and acting on them. |
-| `desktop` | Mouse and keyboard input on the desktop, through the cursor's own input seat. |
-| `process` | Launching programs (`desktop_launch`) and creating git worktrees. Programs run as the unprivileged apps user. |
+| `browser` | Opening tabs, acting on them and listing them. |
+| `desktop` | Mouse and keyboard input on the desktop, through the cursor's own input seat, plus screenshots, windows, the clipboard and the live stream. |
+| `process` | Launching, listing and stopping programs (`desktop_launch`) and creating git worktrees. Programs run as the unprivileged apps user. |
 | `spawn` | Creating subagents with `cursor_spawn`. |
-| `workspace` | Creating workspaces, and `suspend`, `freeze`, `fork` and taking or returning control. |
+| `message` | Sending messages with `cursor_message` and posting to the shared board. |
+| `workspace` | Creating workspaces, and `suspend`, `freeze`, `checkpoint`, `fork`, `resize`, `layout`, `browser-restart` and taking or returning control. |
+
+The admin token is never limited by permissions, also when it acts as a cursor with `X-Agora-Cursor`.
+
+A workspace created by a cursor inherits the limits of the cursor's own workspace: it is sandboxed if that one is, and its `memory_mb`, `cpu_percent`, `max_cursors` and `max_tabs` budgets cannot exceed that workspace's. One cursor tree can keep at most 5 live workspaces.
 
 Permissions only narrow down the tree. A child gets the intersection of what it asks for and what its parent has, so an agent can never hand a subagent more than it holds itself. Budgets cap the tree too: `max_cursors` limits direct children and `max_depth` limits depth (never more than 8 levels).
 
@@ -56,7 +61,7 @@ Isolation between cursors in the same workspace is logical: tab owners, surface 
 - **Root's files.** When the daemon runs as root, browsers and apps run as the unprivileged `agora` user.
 - **Input during a human takeover.** While a person holds control, agent input is refused with `409 Conflict`.
 
-Agents launched by Agora with `cursor_spawn` run as the daemon user, because they need its credentials. With the default `lean` profile, Claude Code runs with no built-in tools, so the agent acts only through Agora tools.
+Agents launched by Agora with `cursor_spawn` run as the daemon user, because they need its credentials. With the default `lean` profile, Claude Code runs with no built-in tools, so the agent acts only through Agora tools. Codex keeps its built-in shell in every profile, so only the admin can launch `codex` subagents; cursors can only spawn `claude` ones.
 
 ## Human handoff
 

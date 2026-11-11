@@ -171,7 +171,7 @@ Operaciones (`POST /v1/cursors/{id}/{op}`, por el propio cursor, un ancestro o e
 | `fail` | `error` |
 | `cancel` | `reason`, `cascade` (`true` por defecto) |
 | `pause`, `resume` | |
-| `message` | `body` (cualquier JSON). Cualquier cursor le puede mandar mensajes a otro. |
+| `message` | `body` (cualquier JSON). Necesita el permiso `message`; el destino tiene que compartir el workspace o el árbol del remitente. |
 | `transfer` | `parent`, `workspace` |
 | `wait` | `timeout_ms` → `{cursor, timeout}` |
 

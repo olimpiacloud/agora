@@ -31,7 +31,7 @@ Prefer `browser_*` tools for anything on the web. They talk to Chromium per tab 
 
 For UI work, use `browser_audit` once instead of many screenshots: it checks overflow, contrast, tap targets, labels, headings, SEO tags, Core Web Vitals, animations and broken internal links. `browser_emulate` sets a mobile viewport (`width: 0` resets it). Take `browser_screenshot` only when appearance matters; it defaults to a 1024 px JPEG at quality 60, and `max_width` makes it smaller.
 
-`browser_upload` sets files on a file input; paths are on the Agora host. `browser_action` handles `back`, `forward`, `reload`, dialogs and `close`.
+`browser_upload` sets files on a file input; for cursors the files must be inside the workspace home, for example in `Downloads`. `browser_action` handles `back`, `forward`, `reload`, dialogs and `close`.
 
 ## Desktop
 
@@ -73,7 +73,7 @@ Other controls: `cursor_list` gives an overview with a short result preview and 
 
 | Field | Description |
 | --- | --- |
-| `adapter` | `claude`, `codex` or `command`. |
+| `adapter` | `claude`, `codex` or `command`. Cursors can only use `claude`; `codex` and `command` are admin-only. |
 | `model` | Model for the agent CLI. Lean Claude Code agents default to `sonnet`. |
 | `effort` | `low`, `medium` or `high` (Claude Code). |
 | `prompt` | Overrides the goal as the prompt. |

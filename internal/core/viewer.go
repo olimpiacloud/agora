@@ -362,6 +362,14 @@ func (m *Manager) AcquireSurface(ws, cursorID, surface string, ttl time.Duration
 	if _, err := m.actor(cursorID, ""); err != nil {
 		return nil, err
 	}
+	if cursorID != "" {
+		if ttl <= 0 || ttl > 10*time.Minute {
+			ttl = 10 * time.Minute
+		}
+		if r := []rune(reason); len(r) > 200 {
+			reason = string(r[:200])
+		}
+	}
 	l, err := m.Arb.Acquire(ws, surface, cursorID, PrioAgent, ttl, reason)
 	if err == nil {
 		m.Bus.Publish("control.acquired", ws, cursorID, map[string]any{"surface": surface, "ttl_ms": ttl.Milliseconds()})

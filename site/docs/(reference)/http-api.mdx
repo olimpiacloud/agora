@@ -170,7 +170,7 @@ Operations (`POST /v1/cursors/{id}/{op}`, by the cursor itself, an ancestor or t
 | `fail` | `error` |
 | `cancel` | `reason`, `cascade` (default `true`) |
 | `pause`, `resume` | |
-| `message` | `body` (any JSON). Any cursor can message another. |
+| `message` | `body` (any JSON). Needs the `message` permission; the target must share the sender's workspace or tree. |
 | `transfer` | `parent`, `workspace` |
 | `wait` | `timeout_ms` → `{cursor, timeout}` |
 

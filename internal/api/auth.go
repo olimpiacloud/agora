@@ -143,6 +143,10 @@ func (p *Principal) CursorID() string {
 	return ""
 }
 
+func (p *Principal) limited() bool {
+	return !p.Admin && p.Cursor != nil
+}
+
 func (p *Principal) CanWorkspace(ws string) bool {
 	if p.Admin {
 		return true
