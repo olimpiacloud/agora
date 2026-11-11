@@ -231,6 +231,10 @@ func (e *Engine) snapshotSinks() ([]Sink, Mode) {
 	return out, mode
 }
 
+func scaledKbps(kbps, encFps, fps int) int {
+	return kbps * encFps / fps
+}
+
 func params(m Mode, active bool) (fps, crf, kbps int) {
 	if m == Interactive {
 		if active {
@@ -263,6 +267,7 @@ func (e *Engine) loop(stop, done chan struct{}) {
 	}()
 	var frame *x11.Frame
 	var curMode Mode
+	var encFps, curFps int
 	needFull := true
 	start := time.Now()
 	last := time.Time{}
@@ -320,11 +325,13 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			e.w, e.h = w&^1, h&^1
 			e.mu.Unlock()
 			curMode = mode
+			encFps, curFps = fps, fps
 			e.keyReq.Store(true)
 			needFull = true
-		} else if mode != curMode {
-			enc.Reconfigure(crf, kbps)
+		} else if mode != curMode || fps != curFps {
+			enc.Reconfigure(crf, scaledKbps(kbps, encFps, fps))
 			curMode = mode
+			curFps = fps
 		}
 		t0 := time.Now()
 		key := e.keyReq.Swap(false)

@@ -135,3 +135,16 @@ func TestQueueSinkDeadAfterWriteError(t *testing.T) {
 		t.Fatalf("snapshot kept the dead sink: %d sinks", len(got))
 	}
 }
+
+func TestScaledKbpsKeepsTheCapAtTheCurrentFrameRate(t *testing.T) {
+	for _, c := range []struct{ kbps, enc, fps, want int }{
+		{8000, 30, 30, 8000},
+		{8000, 30, 15, 16000},
+		{2000, 30, 8, 7500},
+		{8000, 8, 30, 2133},
+	} {
+		if got := scaledKbps(c.kbps, c.enc, c.fps); got != c.want {
+			t.Errorf("scaledKbps(%d, %d, %d) = %d, want %d", c.kbps, c.enc, c.fps, got, c.want)
+		}
+	}
+}
