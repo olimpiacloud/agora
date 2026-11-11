@@ -185,6 +185,8 @@ func (v *Viewer) Input(raw []byte) {
 		b, _ := json.Marshal(map[string]any{"type": "pong", "s": msg.S})
 		v.emit(b)
 		return
+	case "noop":
+		return
 	case "key_frame":
 		v.r.mu.Lock()
 		eng := v.r.engine

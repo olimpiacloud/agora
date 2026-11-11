@@ -97,7 +97,7 @@ function Dashboard({ path, go }: { path: string; go: (p: string) => void }) {
     let pending = false
     const unsub = subscribe({}, (e) => {
       setEvents((ev) => [e, ...ev].slice(0, 300))
-      if (!pending && !e.type.startsWith('cursor.action')) {
+      if (!pending && !e.type.startsWith('cursor.action') && e.type !== 'cursor.pointer' && e.type !== 'stream.stats') {
         pending = true
         setTimeout(() => {
           pending = false
@@ -231,9 +231,10 @@ function WorkspaceView({ ws, id, cursors, events, refresh, go }: { ws?: Workspac
     setVt('')
     mintViewer(id).then(setVt).catch(() => {})
   }, [id])
+  const tabSeq = events.find((e) => e.type.startsWith('browser.tab') || (e.type.startsWith('cursor.') && e.type !== 'cursor.pointer' && !e.type.startsWith('cursor.action')))?.seq
   useEffect(() => {
     api<Tab[]>('GET', `/v1/workspaces/${id}/tabs`).then(setTabs).catch(() => {})
-  }, [id, events.length])
+  }, [id, tabSeq])
   const op = async (o: string, body?: unknown) => {
     try {
       const r = await api<{ id?: string }>('POST', `/v1/workspaces/${id}/${o}`, body ?? {})
