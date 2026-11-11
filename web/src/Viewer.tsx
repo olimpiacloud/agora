@@ -251,7 +251,16 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
         {Object.values(overlays).map((o) => (
           <AgentCursor key={o.id} o={o} g={g} />
         ))}
-        {status && <div className="status">{status}</div>}
+        {status && (
+          <div className="status">
+            {status}
+            {status === 'suspended' && (
+              <button className="primary" onPointerDown={(e) => e.stopPropagation()} onClick={() => sess.current?.wake()}>
+                Resume
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

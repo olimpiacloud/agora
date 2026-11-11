@@ -26,6 +26,9 @@ func (s *Server) streamJPEG(w http.ResponseWriter, r *http.Request, p *Principal
 		writeErr(w, err)
 		return
 	}
+	if s.byeIfAsleep(w, r, ws) {
+		return
+	}
 	q := r.URL.Query()
 	fps, _ := strconv.Atoi(q.Get("fps"))
 	if fps <= 0 || fps > 15 {

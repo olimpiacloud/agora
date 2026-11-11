@@ -7,6 +7,8 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 ### Added
 
 - Idle reaping: tabs unused for `--tab-idle` (15 minutes by default) are closed unless their cursor is waiting for a human or the viewer was used in that time, Chromium stops after two minutes with no tabs, and apps of cursors that already ended are stopped. Events `scheduler.tab_closed`, `scheduler.browser_stopped` and `scheduler.app_stopped`.
+- Stream endpoints take `wake=0`: on a suspended workspace they answer `{"type":"bye","reason":"suspended"}` (WebRTC: `409`) instead of resuming it. The web viewer and the Paseo panel use it on reconnects and show a Resume button.
+- Pending cursors without a launch and without a Paseo agent are cancelled after 24 hours, and the Paseo plugin deletes cursors of Paseo agents that no longer exist, are closed or are archived.
 
 ### Changed
 
@@ -16,7 +18,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Lean Claude Code subagents default to the `sonnet` model when `launch.model` is not set.
 - Codex subagents get the lean tool profile and the lean prompt, and their token usage is recorded in `cursor.usage`.
 - The Paseo plugin deletes an agent's cursor when Paseo closes or archives the agent, and gives Codex agents the lean tool descriptions.
-- `agora serve` suspends workspaces after 30 minutes without activity or viewers by default (`--suspend-after`, `0` keeps them running). It also applies to existing workspaces without their own `suspend_after`.
+- `agora serve` suspends workspaces after 30 minutes without activity by default; a viewer that only watches no longer keeps the workspace running (`--suspend-after`, `0` keeps them running). It also applies to existing workspaces without their own `suspend_after`.
 - Agent cursors in the web viewer and the Paseo plugin glide between reported positions with spline interpolation ([perfect-cursors](https://github.com/steveruizok/perfect-cursors)) instead of a linear CSS transition or a jump.
 
 ### Security

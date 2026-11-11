@@ -40,6 +40,9 @@ func (m *Manager) schedule() {
 		}
 		n++
 		m.lifecycleTick()
+		if n%30 == 0 {
+			m.reapCursors()
+		}
 		if n%5 == 0 {
 			m.usageTick()
 		}
@@ -90,6 +93,9 @@ func (m *Manager) lifecycleTick() {
 		r.releaseSeats(m.cfg.SeatIdle)
 		m.reap(it.w.ID, r)
 		if viewers > 0 {
+			if suspendAfter > 0 && idleFor > suspendAfter {
+				go m.Suspend(context.Background(), it.w.ID, "idle")
+			}
 			continue
 		}
 		if m.hasActiveAgents(it.w.ID) && idleFor < 30*time.Minute {
@@ -223,6 +229,34 @@ func (m *Manager) reapTabs(id string, r *Runtime) {
 }
 
 const browserIdle = 2 * time.Minute
+
+const pendingTTL = 24 * time.Hour
+
+func (m *Manager) reapCursors() {
+	var stale []string
+	m.mu.Lock()
+	for id, c := range m.cursors {
+		if c.Status == CursorPending && c.Launch == nil && c.Labels["paseo_agent"] == "" && time.Since(c.Updated) > pendingTTL {
+			stale = append(stale, id)
+		}
+	}
+	m.mu.Unlock()
+	for _, id := range stale {
+		m.CancelCursor(id, "never started", false)
+	}
+}
+
+func (m *Manager) Asleep(ws string) bool {
+	if r := m.runtime(ws); r != nil {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return r.closing
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	w := m.ws[ws]
+	return w != nil && (w.State == StateSuspended || w.State == StateCreated)
+}
 
 func (m *Manager) cursorLive(id string) bool {
 	m.mu.Lock()

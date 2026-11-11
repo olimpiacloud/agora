@@ -91,7 +91,7 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
     const r = await input(a);
     setActErr(r.ok ? null : r.error);
   };
-  const op = async (o: "control-take" | "control-return") => {
+  const op = async (o: "control-take" | "control-return" | "resume") => {
     const r = await ctl({ workspace: ws, op: o });
     setActErr(r.ok ? null : r.error);
   };
@@ -141,6 +141,7 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
             <Chip label="Desktop" on={view === "desktop"} onPress={() => setState({ workspace: ws, view: "desktop" })} />
             <Chip label={`Agent wall (${cursors.length})`} on={view === "wall"} onPress={() => setState({ workspace: ws, view: "wall" })} />
             {view === "desktop" && <Chip label={paused ? "▶ live" : "⏸ pause"} onPress={() => setPaused(!paused)} />}
+            {lv.status === "suspended" && <Chip label="Resume" on onPress={() => void op("resume")} />}
             {iHold ? <Chip label="Return control to agents" on onPress={() => void op("control-return")} /> : <Chip label="Take control" onPress={() => void op("control-take")} />}
             <Text style={styles.muted}>{status ? status : view === "desktop" && region ? `${region.sw}×${region.sh} · tap to click, long press to right click` : ""}</Text>
           </View>

@@ -32,6 +32,8 @@ export class DesktopSession {
   private pingTimer?: number
   private retry = 0
   private tokenAt = Date.now()
+  private connected = false
+  private asleep = false
   stats: SessionStats = { transport: 'connecting', fps: 0, kbps: 0, rtt: 0, width: 0, height: 0 }
 
   constructor(
@@ -62,6 +64,10 @@ export class DesktopSession {
       } catch (e) {
         this.cleanupRTC()
         if (this.closed) return
+        if (this.asleep) {
+          this.cb.onStatus('suspended')
+          return
+        }
         if (this.prefer === 'webrtc') {
           this.cb.onStatus('WebRTC failed: ' + (e as Error).message)
           this.scheduleRetry()
@@ -72,8 +78,24 @@ export class DesktopSession {
     this.startWS()
   }
 
+  wake() {
+    this.asleep = false
+    this.connected = false
+    this.retry = 0
+    this.cb.onStatus('resuming…')
+    this.start()
+  }
+
+  private wakeParam() {
+    return this.connected ? '&wake=0' : ''
+  }
+
   private scheduleRetry() {
     if (this.closed) return
+    if (this.asleep) {
+      this.cb.onStatus('suspended')
+      return
+    }
     const d = Math.min(8000, 500 * 2 ** this.retry++)
     this.cb.onStatus(`reconnecting in ${Math.round(d / 1000)}s`)
     setTimeout(() => !this.closed && this.start(), d)
@@ -98,6 +120,8 @@ export class DesktopSession {
       this.stats.rtt = Math.round(performance.now() - Number(m.s))
       return
     }
+    if (m.type === 'hello') this.connected = true
+    if (m.type === 'bye' && m.reason === 'suspended') this.asleep = true
     if (m.type === 'hello' && m.width) {
       this.cb.onSize(m.width as number, m.height as number)
     }
@@ -128,7 +152,7 @@ export class DesktopSession {
       return
     }
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${proto}://${location.host}/v1/workspaces/${this.wsId}/stream/ws?mode=${this.mode}&token=${encodeURIComponent(this.token)}`)
+    const ws = new WebSocket(`${proto}://${location.host}/v1/workspaces/${this.wsId}/stream/ws?mode=${this.mode}&token=${encodeURIComponent(this.token)}${this.wakeParam()}`)
     ws.binaryType = 'arraybuffer'
     this.ws = ws
     const ctx = this.canvas.getContext('2d', { alpha: false, desynchronized: true })!
@@ -213,11 +237,12 @@ export class DesktopSession {
         }
       }
     })
-    const r = await fetch(`/v1/workspaces/${this.wsId}/stream/webrtc?token=${encodeURIComponent(this.token)}`, {
+    const r = await fetch(`/v1/workspaces/${this.wsId}/stream/webrtc?token=${encodeURIComponent(this.token)}${this.wakeParam()}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sdp: pc.localDescription!.sdp, mode: this.mode }),
     })
+    if (r.status === 409) this.asleep = true
     if (!r.ok) throw new Error(await r.text())
     const ans = await r.json()
     await pc.setRemoteDescription({ type: 'answer', sdp: ans.sdp })
@@ -243,6 +268,7 @@ export class DesktopSession {
     })
     this.stats.transport = 'webrtc'
     this.retry = 0
+    this.connected = true
     this.video.style.display = 'block'
     this.canvas.style.display = 'none'
     this.cb.onStatus('')

@@ -1,3 +1,4 @@
+import type { PluginHookContext } from "@getpaseo/plugin/server";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -127,4 +128,33 @@ export async function releaseAgentCursor(agentId: string): Promise<void> {
 
 export function nameFromCwd(cwd: string): string {
   return basename(cwd) || "paseo";
+}
+
+const RECONCILE_EVERY = 10 * 60 * 1000;
+let reconciledAt = 0;
+
+export async function reconcileAgentCursors(paseo: PluginHookContext["paseo"]): Promise<number> {
+  if (Date.now() - reconciledAt < RECONCILE_EVERY) return 0;
+  reconciledAt = Date.now();
+  const cursors: any[] = await call("GET", "/v1/cursors?active=1");
+  const ids = new Set<string>(Object.keys(loadState().agents));
+  for (const c of cursors) if (c.labels?.paseo_agent) ids.add(c.labels.paseo_agent);
+  let removed = 0;
+  for (const id of ids) {
+    let gone: boolean;
+    try {
+      const r = await paseo.agents.ref(id).refresh();
+      gone = !r || r.agent.archivedAt != null || r.agent.status === "closed";
+    } catch {
+      continue;
+    }
+    if (!gone) continue;
+    for (const c of cursors) {
+      if (c.labels?.paseo_agent !== id) continue;
+      await call("DELETE", `/v1/cursors/${encodeURIComponent(c.id)}`).catch(() => {});
+      removed++;
+    }
+    await releaseAgentCursor(id).catch(() => {});
+  }
+  return removed;
 }

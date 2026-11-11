@@ -1,10 +1,13 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/olimpiacloud/agora/internal/core"
 )
 
@@ -55,4 +58,57 @@ func TestIdleReaper(t *testing.T) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+}
+
+func TestSuspendWithPassiveViewer(t *testing.T) {
+	h := newHWith(t, func(c *core.Config) { c.SuspendAfter = 3 * time.Second })
+	ws := h.workspace("passive")
+	vt := h.do(h.admin, "POST", "/v1/viewer-tokens", map[string]any{"workspace": ws, "control": false})["token"].(string)
+	base := strings.Replace(h.srv.URL, "http", "ws", 1) + "/v1/workspaces/" + ws + "/stream/jpeg?fps=2&token=" + vt
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, base, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	go func() {
+		for {
+			if _, _, err := conn.Read(ctx); err != nil {
+				return
+			}
+		}
+	}()
+	waitState := func(want string) {
+		t.Helper()
+		deadline := time.Now().Add(30 * time.Second)
+		for h.wsView(ws)["state"] != want {
+			if time.Now().After(deadline) {
+				t.Fatalf("state %v, want %s", h.wsView(ws)["state"], want)
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+	}
+	waitState("suspended")
+
+	asleep, _, err := websocket.Dial(ctx, base+"&wake=0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, msg, err := asleep.Read(ctx)
+	asleep.CloseNow()
+	if err != nil || !strings.Contains(string(msg), `"suspended"`) {
+		t.Fatalf("wake=0 on a suspended workspace: %s %v", msg, err)
+	}
+	time.Sleep(time.Second)
+	if st := h.wsView(ws)["state"]; st != "suspended" {
+		t.Fatalf("wake=0 resumed the workspace: %v", st)
+	}
+
+	awake, _, err := websocket.Dial(ctx, base, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer awake.CloseNow()
+	waitState("active")
 }

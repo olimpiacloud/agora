@@ -112,6 +112,7 @@ tr.click:hover { background: var(--panel); }
 .screen canvas, .screen video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; image-rendering: auto; }
 .screen video { display: none; }
 .screen .status { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: #000a; padding: 8px 14px; border-radius: 8px; color: var(--muted); }
+.screen .status button { margin-left: 10px; }
 .agent-cursor { position: absolute; pointer-events: none; z-index: 2; filter: drop-shadow(0 1px 2px #000a); }
 .agent-cursor span { position: absolute; left: 16px; top: 16px; background: var(--c); color: #0b0d10; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
 .agent-cursor.active svg { transform: scale(1.15); }

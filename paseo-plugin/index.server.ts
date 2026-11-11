@@ -1,7 +1,7 @@
-import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { agentCursor, bytes, call, AGORA_BIN, linkedWorkspace, nameFromCwd, releaseAgentCursor } from "./server/agora";
+import type { PluginHookContext, PluginServerContext } from "@getpaseo/plugin/server";
+import { agentCursor, bytes, call, AGORA_BIN, linkedWorkspace, nameFromCwd, reconcileAgentCursors, releaseAgentCursor } from "./server/agora";
 import { control, ensureWorkspace, getShot, listWorkspaces, live, resolveWorkspace, sendInput } from "./shared/agora";
-import { closeAll, pollLive } from "./server/live";
+import { closeAll, pollLive, wakeHubs } from "./server/live";
 
 const MCP_PROVIDERS = ["claude", "codex"];
 
@@ -49,6 +49,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(control, async ({ workspace, op }) => {
     try {
       await call("POST", `/v1/workspaces/${workspace}/${op}`, {});
+      if (op === "resume") wakeHubs(workspace);
       return { ok: true, error: null };
     } catch (e) {
       return { ok: false, error: errText(e) };
@@ -65,7 +66,14 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  server.addHook("agent.open.before", async ({ request }) => {
+  const reconcile = (paseo: PluginHookContext["paseo"]) => {
+    reconcileAgentCursors(paseo)
+      .then((n) => n && console.log(`agora: removed ${n} cursors of closed or archived Paseo agents`))
+      .catch((e) => console.error("agora: could not reconcile cursors:", errText(e)));
+  };
+
+  server.addHook("agent.open.before", async ({ request }, { paseo }) => {
+    reconcile(paseo);
     if (request.purpose === "history") return;
     if (!MCP_PROVIDERS.some((p) => request.provider === p || request.provider.startsWith(p + "/"))) return;
     if (request.labels?.["agora/enabled"] === "false" || !request.workspaceId) return;
@@ -93,7 +101,8 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  const release = async ({ agent }: { agent: { id: string } }) => {
+  const release = async ({ agent }: { agent: { id: string } }, { paseo }: PluginHookContext) => {
+    reconcile(paseo);
     try {
       await releaseAgentCursor(agent.id);
     } catch (e) {

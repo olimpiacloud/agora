@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -40,6 +41,9 @@ func (s *Server) streamWS(w http.ResponseWriter, r *http.Request, p *Principal) 
 	control, err := s.viewerAccess(r, p, ws)
 	if err != nil {
 		writeErr(w, err)
+		return
+	}
+	if s.byeIfAsleep(w, r, ws) {
 		return
 	}
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
@@ -88,11 +92,31 @@ func (s *Server) streamWS(w http.ResponseWriter, r *http.Request, p *Principal) 
 	}
 }
 
+func (s *Server) byeIfAsleep(w http.ResponseWriter, r *http.Request, ws string) bool {
+	if r.URL.Query().Get("wake") != "0" || !s.m.Asleep(ws) {
+		return false
+	}
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
+	if err != nil {
+		return true
+	}
+	b, _ := json.Marshal(map[string]any{"type": "bye", "reason": "suspended"})
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	c.Write(ctx, websocket.MessageText, b)
+	c.Close(websocket.StatusNormalClosure, "suspended")
+	return true
+}
+
 func (s *Server) streamRTC(w http.ResponseWriter, r *http.Request, p *Principal) {
 	ws := r.PathValue("id")
 	control, err := s.viewerAccess(r, p, ws)
 	if err != nil {
 		writeErr(w, err)
+		return
+	}
+	if r.URL.Query().Get("wake") == "0" && s.m.Asleep(ws) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "workspace suspended", "suspended": true})
 		return
 	}
 	var req struct {

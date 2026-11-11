@@ -27,6 +27,8 @@ interface Hub {
   status: string | null;
   lastPoll: number;
   openedAt: number;
+  connected: boolean;
+  asleep: boolean;
   waiters: Set<() => void>;
 }
 
@@ -129,6 +131,7 @@ async function openNow(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidt
   if (!alive()) return;
   const q = new URLSearchParams({ fps: String(t.fps), max_width: String(maxWidth), quality: tier === "full" ? "62" : "55", token });
   if (cursor) q.set("cursor", cursor);
+  if (h.connected) q.set("wake", "0");
   const sock = new WebSocket(wsURL(`/v1/workspaces/${h.workspace}/stream/jpeg?${q}`));
   sock.binaryType = "arraybuffer";
   h.sock = sock;
@@ -141,6 +144,10 @@ async function openNow(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidt
         } else if (m.type === "region") {
           h.region = { x: m.x, y: m.y, w: m.w, h: m.h, sw: m.screen_w, sh: m.screen_h };
           h.gotRegion = true;
+        } else if (m.type === "bye" && m.reason === "suspended") {
+          h.asleep = true;
+          h.status = "suspended";
+          wake(h);
         } else if (m.type === "bye") {
           h.status = `session ended: ${m.reason}`;
           wake(h);
@@ -152,6 +159,7 @@ async function openNow(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidt
     const fw = buf.readUInt16BE(4);
     const fh = buf.readUInt16BE(6);
     if (!h.gotRegion) h.region = { x: 0, y: 0, w: fw, h: fh, sw: fw, sh: fh };
+    h.connected = true;
     h.seq++;
     h.frame = { w: buf.readUInt16BE(0), h: buf.readUInt16BE(2), b64: buf.subarray(8).toString("base64") };
     h.status = null;
@@ -194,6 +202,17 @@ setInterval(() => {
   }
 }, 4000).unref();
 
+export function wakeHubs(workspace: string) {
+  for (const h of hubs.values()) {
+    if (h.workspace !== workspace) continue;
+    h.asleep = false;
+    h.connected = false;
+    h.openedAt = 0;
+    h.status = "connecting";
+    wake(h);
+  }
+}
+
 export function closeAll() {
   for (const h of hubs.values()) h.sock?.close();
   hubs.clear();
@@ -211,12 +230,12 @@ export async function pollLive(input: RpcInput<typeof live>) {
   m.lastUse = Date.now();
   let h = hubs.get(key);
   if (!h) {
-    h = { key, workspace: input.workspace, sock: null, seq: 0, frame: null, region: { x: 0, y: 0, w: 0, h: 0, sw: 0, sh: 0 }, gotRegion: false, status: "connecting", lastPoll: Date.now(), openedAt: 0, waiters: new Set() };
+    h = { key, workspace: input.workspace, sock: null, seq: 0, frame: null, region: { x: 0, y: 0, w: 0, h: 0, sw: 0, sh: 0 }, gotRegion: false, status: "connecting", lastPoll: Date.now(), openedAt: 0, connected: false, asleep: false, waiters: new Set() };
     hubs.set(key, h);
   }
   m.hubs.add(h);
   h.lastPoll = Date.now();
-  if (!h.sock && Date.now() - h.openedAt > 2000) {
+  if (!h.sock && !h.asleep && Date.now() - h.openedAt > 2000) {
     try {
       await open(h, cursor, tier, maxWidth);
     } catch (e) {
