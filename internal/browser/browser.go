@@ -498,7 +498,15 @@ func (b *Browser) attachSession(ctx context.Context, targetID, contextID string,
 	b.mu.Lock()
 	b.sessions[r.SessionID] = t
 	b.mu.Unlock()
-	if err := b.cdp.Call(ctx, r.SessionID, "Page.enable", nil, nil); err != nil {
+	intercept := map[string]any{"enabled": true}
+	dctx, cancel := t.DialogContext(ctx)
+	err := b.cdp.Call(dctx, r.SessionID, "Page.enable", nil, nil)
+	if err == nil && t.Dialog() == nil {
+		b.cdp.Call(dctx, r.SessionID, "Page.setInterceptFileChooserDialog", intercept, nil)
+	}
+	dialog := errors.Is(context.Cause(dctx), ErrDialogOpen) || t.Dialog() != nil
+	cancel()
+	if err != nil && !dialog {
 		b.mu.Lock()
 		delete(b.sessions, r.SessionID)
 		b.mu.Unlock()
@@ -507,7 +515,13 @@ func (b *Browser) attachSession(ctx context.Context, targetID, contextID string,
 		cancel()
 		return nil, err
 	}
-	b.cdp.Call(ctx, r.SessionID, "Page.setInterceptFileChooserDialog", map[string]any{"enabled": true}, nil)
+	if dialog {
+		go func() {
+			cctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			b.cdp.Call(cctx, r.SessionID, "Page.setInterceptFileChooserDialog", intercept, nil)
+		}()
+	}
 	return t, nil
 }
 
