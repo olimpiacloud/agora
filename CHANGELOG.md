@@ -20,6 +20,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - The Paseo live panel takes pointer, wheel and keyboard input.
 - `AGORA_TOKEN_FILE` for the CLI and MCP server.
 - Launched agents can have a maximum runtime: `launch.max_runtime` (for example `"10m"`) per launch and `agora serve --agent-max-runtime` for the daemon (off by default). When it passes, the cursor fails with "agent exceeded its maximum runtime" and the process is stopped. Cursors cannot ask for more than the daemon value.
+- `config.webgl: "software"` (admin only) starts the workspace's Chromium with a CPU WebGL renderer, so pages with 3D content can be tested with the normal browser tools.
 
 ### Changed
 

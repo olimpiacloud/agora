@@ -220,8 +220,8 @@ func (s *Server) routes() {
 		var ws *core.Workspace
 		var err error
 		if p.limited() {
-			if len(req.Config.BrowserArgs) > 0 || req.Config.Profile != "" {
-				writeErr(w, fmt.Errorf("%w: only the admin can set browser_args or profile", core.ErrForbidden))
+			if len(req.Config.BrowserArgs) > 0 || req.Config.Profile != "" || req.Config.WebGL != "" {
+				writeErr(w, fmt.Errorf("%w: only the admin can set browser_args, profile or webgl", core.ErrForbidden))
 				return
 			}
 			if err := reservedLabels(req.Labels); err != nil {

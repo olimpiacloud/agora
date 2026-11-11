@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/olimpiacloud/agora/internal/browser"
 	"github.com/olimpiacloud/agora/internal/sandbox"
 )
 
@@ -61,6 +62,9 @@ func (m *Manager) CreateWorkspace(ctx context.Context, req CreateWorkspaceReq) (
 	}
 	if !nameRe.MatchString(req.Config.Profile) {
 		return nil, fmt.Errorf("invalid profile name %q", req.Config.Profile)
+	}
+	if _, err := browser.WebGLArgs(req.Config.WebGL); err != nil {
+		return nil, err
 	}
 	now := time.Now().UTC()
 	w := &Workspace{ID: id, Name: req.Name, State: StateCreated, Config: req.Config, Owner: req.Owner, OwnerRoot: req.OwnerRoot, Created: now, Updated: now, LastActive: now, Labels: req.Labels}

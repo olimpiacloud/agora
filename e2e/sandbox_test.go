@@ -151,3 +151,23 @@ func TestWorkspacesAreSandboxedByDefault(t *testing.T) {
 		t.Fatalf("admin could not opt out of the sandbox: %v", cfg)
 	}
 }
+
+func TestSoftwareWebGLInSandbox(t *testing.T) {
+	if os.Getuid() != 0 {
+		t.Skip("sandbox needs root")
+	}
+	if _, err := user.Lookup("agora"); err != nil {
+		t.Skip("apps user agora missing")
+	}
+	h := newH(t)
+	w := h.do(h.admin, "POST", "/v1/workspaces", map[string]any{"name": "gl", "start": true, "config": map[string]any{"sandbox": true, "webgl": "software"}})
+	ws := w["id"].(string)
+	tg := h.tab(h.admin, ws, h.site.URL+"/")
+	h.waitEval(h.admin, ws, tg, "document.readyState", "complete", 20*time.Second)
+	probe := `(() => { const c = document.createElement('canvas'); const gl = c.getContext('webgl2') || c.getContext('webgl'); if (!gl) return ''; const e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? String(gl.getParameter(e.UNMASKED_RENDERER_WEBGL)) : 'webgl'; })()`
+	got, _ := h.eval(h.admin, ws, tg, probe).(string)
+	if got == "" {
+		t.Fatal("no WebGL context in a sandboxed workspace with webgl software")
+	}
+	t.Logf("renderer: %s", got)
+}
