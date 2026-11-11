@@ -229,6 +229,9 @@ rq.onsuccess = () => { const db = rq.result; const tx = db.transaction('kv', 're
 	mux.HandleFunc("/dialog", func(w http.ResponseWriter, r *http.Request) {
 		page(w, "Dialog", `<button id=b onclick="document.title='confirm:'+confirm('sure?')">ask</button>`)
 	})
+	mux.HandleFunc("/alert", func(w http.ResponseWriter, r *http.Request) {
+		page(w, "Alert", `<script>alert('loaded')</script>`)
+	})
 	return mux
 }
 

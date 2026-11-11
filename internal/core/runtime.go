@@ -482,7 +482,7 @@ func (r *Runtime) restoreTabs(b *browser.Browser, tabs []TabRecord) {
 				r.mu.Lock()
 				r.tabOwner[tab.TargetID] = t.Owner
 				r.mu.Unlock()
-				tab.Owner = t.Owner
+				tab.SetOwner(t.Owner)
 				r.m.mu.Lock()
 				if c := r.m.cursors[t.Owner]; c != nil && !c.Status.Terminal() {
 					c.Surface = "tab:" + tab.TargetID

@@ -467,6 +467,12 @@ func TestUploadDownloadDialogDnD(t *testing.T) {
 	h.waitEvent(ws, "browser.dialog.opened", 5*time.Second)
 	h.act(c, ws, tab, map[string]any{"action": "dialog", "accept": true})
 	h.waitEval(c, ws, tab, "document.title", "confirm:true", 5*time.Second)
+	start := time.Now()
+	opened := h.do(c, "POST", "/v1/workspaces/"+ws+"/tabs", map[string]any{"url": h.site.URL + "/alert", "observe": true})
+	if time.Since(start) > 8*time.Second || opened["dialog"] == nil {
+		t.Fatalf("observing a tab that alerts on load: took %s, result %v", time.Since(start), opened)
+	}
+	h.act(c, ws, opened["target"].(string), map[string]any{"action": "dialog", "accept": true})
 	h.act(c, ws, tab, map[string]any{"action": "navigate", "url": h.site.URL + "/dnd"})
 	h.act(c, ws, tab, map[string]any{"action": "drag", "x": 60, "y": 60, "x2": 100, "y2": 200})
 	h.waitEval(c, ws, tab, "document.title", "dropped", 5*time.Second)
