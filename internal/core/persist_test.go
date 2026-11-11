@@ -79,6 +79,54 @@ func TestPruneFinishedCursors(t *testing.T) {
 	}
 }
 
+func TestPruneKeepsCursorTreesWhole(t *testing.T) {
+	m := newTestManager(t)
+	root := newCursor(t, m, "root", "")
+	child := newCursor(t, m, "child", root)
+	grand := newCursor(t, m, "grand", child)
+	if err := m.Complete(child, []byte(`{"ok":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	m.CancelCursor(grand, "test", false)
+	ageCursor(m, child, 10*24*time.Hour)
+	ageCursor(m, grand, 10*24*time.Hour)
+	oldRoot := newCursor(t, m, "old-root", "")
+	freshChild := newCursor(t, m, "fresh-child", oldRoot)
+	m.CancelCursor(oldRoot, "test", false)
+	m.CancelCursor(freshChild, "test", false)
+	ageCursor(m, oldRoot, 10*24*time.Hour)
+	deadRoot := newCursor(t, m, "dead-root", "")
+	deadA := newCursor(t, m, "dead-a", deadRoot)
+	deadB := newCursor(t, m, "dead-b", deadRoot)
+	deadLeaf := newCursor(t, m, "dead-leaf", deadA)
+	for _, id := range []string{deadRoot, deadA, deadB, deadLeaf} {
+		m.CancelCursor(id, "test", false)
+		ageCursor(m, id, 10*24*time.Hour)
+	}
+	m.pruneCursors(24 * time.Hour)
+	for _, id := range []string{root, child, grand, oldRoot, freshChild} {
+		if _, err := m.GetCursor(id); err != nil {
+			t.Fatalf("cursor %s was pruned", id)
+		}
+	}
+	if !m.IsAncestor(root, grand) {
+		t.Fatal("live root lost its finished descendants")
+	}
+	for _, id := range []string{deadRoot, deadA, deadB, deadLeaf} {
+		if _, err := m.GetCursor(id); err == nil {
+			t.Fatalf("cursor %s of a finished tree was kept", id)
+		}
+	}
+	m.CancelCursor(root, "test", false)
+	ageCursor(m, root, 10*24*time.Hour)
+	m.pruneCursors(24 * time.Hour)
+	for _, id := range []string{root, child, grand} {
+		if _, err := m.GetCursor(id); err == nil {
+			t.Fatalf("cursor %s kept after its tree ended", id)
+		}
+	}
+}
+
 func checkpointJSONs(t *testing.T, dir string) map[string]bool {
 	t.Helper()
 	ents, err := os.ReadDir(dir)

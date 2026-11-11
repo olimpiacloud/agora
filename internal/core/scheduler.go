@@ -276,30 +276,39 @@ func (m *Manager) pruneCursors(retention time.Duration) {
 	}
 	old := map[string]string{}
 	m.mu.Lock()
-	busy := map[string]bool{}
-	for _, c := range m.cursors {
-		if c.Status.Terminal() {
-			continue
+	group := map[string]string{}
+	find := func(id string) string {
+		root := id
+		for group[root] != "" {
+			root = group[root]
 		}
-		p := c.Parent
-		for i := 0; i < 32 && p != "" && !busy[p]; i++ {
-			busy[p] = true
-			pc := m.cursors[p]
-			if pc == nil {
-				break
-			}
-			p = pc.Parent
+		for id != root {
+			next := group[id]
+			group[id] = root
+			id = next
 		}
+		return root
 	}
 	for id, c := range m.cursors {
-		if !c.Status.Terminal() || busy[id] {
-			continue
+		if _, ok := m.cursors[c.Parent]; ok && c.Parent != id {
+			a, b := find(id), find(c.Parent)
+			if a != b {
+				group[a] = b
+			}
 		}
+	}
+	keep := map[string]bool{}
+	for id, c := range m.cursors {
 		last := c.Updated
 		if c.Ended != nil && c.Ended.After(last) {
 			last = *c.Ended
 		}
-		if time.Since(last) > retention {
+		if !c.Status.Terminal() || time.Since(last) <= retention {
+			keep[find(id)] = true
+		}
+	}
+	for id, c := range m.cursors {
+		if !keep[find(id)] {
 			old[id] = c.Workspace
 		}
 	}
