@@ -221,23 +221,28 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
     void refreshList();
   }, [workspaceId]);
 
+  const run = useCallback(
+    async (op: "control-take" | "control-return" | "resume") => {
+      const r = await ctl({ workspace: ws, op });
+      setActErr(r.ok ? null : r.error);
+    },
+    [ws, ctl],
+  );
+
   const act = useMemo<Actions>(
     () => ({
       desktop: () => setState({ workspace: ws, view: "desktop" }),
       wall: () => setState({ workspace: ws, view: "wall" }),
       pause: () => setPaused((p) => !p),
-      resume: async () => {
-        const r = await ctl({ workspace: ws, op: "resume" });
-        setActErr(r.ok ? null : r.error);
-      },
+      resume: () => void run("resume"),
       take: () => {
         setPaused(false);
         if (view !== "desktop") setState({ workspace: ws, view: "desktop" });
-        sender.push([{ t: "take" }]);
+        void run("control-take");
       },
-      release: () => sender.push([{ t: "release" }]),
+      release: () => void run("control-return"),
     }),
-    [ws, view, sender, ctl, setState],
+    [ws, view, run, setState],
   );
 
   const onScroll = useCallback(
@@ -264,7 +269,7 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
   );
 
   const needsHuman = roster.find((c) => c.status === "needs_human");
-  const iHold = !!pane.viewer && locked === `human:${pane.viewer}`;
+  const iHold = locked === "human:api";
   const status = actErr || (view === "desktop" ? pane.status : meta.status);
   const line = status ? status : view === "desktop" && pane.sw ? (Platform.OS === "web" ? `${pane.sw}×${pane.sh} · click the desktop to use mouse, wheel and keyboard` : `${pane.sw}×${pane.sh} · tap to click, drag to drag, long press to right click`) : "";
   const pad = layout.compact ? 8 : 12;

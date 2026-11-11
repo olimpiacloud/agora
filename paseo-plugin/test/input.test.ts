@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { viewerMsg, type ViewerMsg } from "../shared/agora";
-import { click, createSeat, createSender, createWheel, isPasteKey, keyName, PASTE_KEYS, tapKeys, throttle, wheelSteps } from "../client/input";
+import { click, createSeat, createSender, createWheel, finiteMsg, isPasteKey, keyName, PASTE_KEYS, tapKeys, throttle, wheelSteps } from "../client/input";
 
 const key = (code: string, k: string, mods: { ctrlKey?: boolean; metaKey?: boolean } = {}) => ({ code, key: k, ctrlKey: !!mods.ctrlKey, metaKey: !!mods.metaKey });
 
@@ -81,7 +81,7 @@ describe("seat", () => {
 
 describe("message builders", () => {
   test("produce messages the server schema accepts", () => {
-    const all: ViewerMsg[] = [...click(1, 2, 2), ...tapKeys("ctrl+l"), ...wheelSteps(3, 4, -5), ...PASTE_KEYS, { t: "text", s: "hi" }, { t: "clip", s: "x" }, { t: "take" }, { t: "release" }];
+    const all: ViewerMsg[] = [...click(1, 2, 2), ...tapKeys("ctrl+l"), ...wheelSteps(3, 4, -5), ...PASTE_KEYS, { t: "text", s: "hi" }, { t: "clip", s: "x" }];
     for (const m of all) expect(viewerMsg.parse(m)).toEqual(m);
   });
 
@@ -164,11 +164,28 @@ describe("sender", () => {
       batches.push(msgs);
       return batches.length === 1 ? new Promise<void>(() => {}) : Promise.resolve();
     }, 20);
-    s.push([{ t: "take" }]);
-    s.push([{ t: "release" }]);
+    s.push([{ t: "text", s: "a" }]);
+    s.push([{ t: "text", s: "b" }]);
     await sleep(40);
-    expect(batches).toEqual([[{ t: "take" }], [{ t: "release" }]]);
+    expect(batches).toEqual([[{ t: "text", s: "a" }], [{ t: "text", s: "b" }]]);
     expect(s.pending()).toBe(0);
+  });
+
+  test("drops messages with non-finite coordinates without sinking the batch", () => {
+    const batches: ViewerMsg[][] = [];
+    const s = createSender(async (msgs) => {
+      batches.push(msgs);
+    });
+    s.push([
+      { t: "move", x: Number.NaN, y: 1 },
+      { t: "down", x: 1, y: Number.POSITIVE_INFINITY, b: 0 },
+      { t: "wheel", x: 1, y: 1, dy: Number.NaN },
+      { t: "up", x: 3, y: 4, b: 0 },
+      { t: "key", key: "a", down: false },
+    ]);
+    expect(batches).toEqual([[{ t: "up", x: 3, y: 4, b: 0 }, { t: "key", key: "a", down: false }]]);
+    expect(finiteMsg({ t: "wheel", x: 0, y: 0, dx: 1 })).toBe(true);
+    expect(finiteMsg({ t: "wheel", x: 0, y: 0, dx: Number.NaN })).toBe(false);
   });
 
   test("a failed request does not stall later input", async () => {
@@ -177,10 +194,10 @@ describe("sender", () => {
       batches.push(msgs);
       if (batches.length === 1) throw new Error("boom");
     });
-    s.push([{ t: "take" }]);
-    s.push([{ t: "release" }]);
+    s.push([{ t: "text", s: "a" }]);
+    s.push([{ t: "text", s: "b" }]);
     await sleep(0);
     await sleep(0);
-    expect(batches).toEqual([[{ t: "take" }], [{ t: "release" }]]);
+    expect(batches).toEqual([[{ t: "text", s: "a" }], [{ t: "text", s: "b" }]]);
   });
 });

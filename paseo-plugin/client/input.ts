@@ -157,6 +157,12 @@ export function throttle<T>(ms: number, fire: (v: T) => void, now: () => number 
   };
 }
 
+export function finiteMsg(m: ViewerMsg): boolean {
+  if (m.t !== "move" && m.t !== "down" && m.t !== "up" && m.t !== "wheel") return true;
+  if (!Number.isFinite(m.x) || !Number.isFinite(m.y)) return false;
+  return m.t !== "wheel" || ((m.dx === undefined || Number.isFinite(m.dx)) && (m.dy === undefined || Number.isFinite(m.dy)));
+}
+
 export function createSender(post: (msgs: ViewerMsg[]) => Promise<unknown>, timeoutMs = 4000, max = 64) {
   const queue: ViewerMsg[] = [];
   let busy = false;
@@ -177,6 +183,7 @@ export function createSender(post: (msgs: ViewerMsg[]) => Promise<unknown>, time
   return {
     push(msgs: ViewerMsg[]) {
       for (const m of msgs) {
+        if (!finiteMsg(m)) continue;
         if (m.t === "move" && queue[queue.length - 1]?.t === "move") queue[queue.length - 1] = m;
         else queue.push(m);
       }

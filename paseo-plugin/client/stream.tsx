@@ -339,7 +339,7 @@ export function DesktopView({
   const web = Platform.OS === "web";
   const interactive = !web && !!onInput && !!frame && scale > 0;
   const surface = useRef<View>(null);
-  useWebInput(surface, toScreen, onInput, web && !!frame);
+  useWebInput(surface, toScreen, onInput, web && !!frame && scale > 0);
   const drop = useRef<() => void>(() => {});
   drop.current = () => {
     const s = g.current;

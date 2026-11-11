@@ -83,14 +83,14 @@ afterAll(() => {
 
 describe("live input over the viewer socket", () => {
   test("refuses tiers without control", async () => {
-    const r = await sendLiveInput({ workspace: "ws_a", tier: "tile", msgs: [{ t: "take" }] });
+    const r = await sendLiveInput({ workspace: "ws_a", tier: "tile", msgs: [{ t: "text", s: "a" }] });
     expect(r.ok).toBe(false);
     expect(FakeSocket.all.length).toBe(0);
   });
 
   test("opens the full hub with a control token and writes the batch in order", async () => {
     const msgs = [
-      { t: "take" as const },
+      { t: "text" as const, s: "a" },
       { t: "down" as const, x: 10, y: 20, b: 0 },
       { t: "up" as const, x: 30, y: 40, b: 0 },
       { t: "key" as const, key: "a", down: true },
@@ -112,8 +112,8 @@ describe("live input over the viewer socket", () => {
     expect(r.viewer).toBe("jpeg_1");
     expect(r.frame).not.toBeNull();
     expect(r.cursors).toBeNull();
-    await sendLiveInput({ workspace: "ws_a", tier: "full", maxWidth: 1440, msgs: [{ t: "release" }] });
-    expect(JSON.parse(sock.sent.at(-1)!)).toEqual({ t: "release" });
+    await sendLiveInput({ workspace: "ws_a", tier: "full", maxWidth: 1440, msgs: [{ t: "text", s: "b" }] });
+    expect(JSON.parse(sock.sent.at(-1)!)).toEqual({ t: "text", s: "b" });
   });
 
   test("cursor events wake meta polls but not frame-only polls", async () => {

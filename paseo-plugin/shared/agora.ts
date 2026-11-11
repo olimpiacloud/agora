@@ -36,7 +36,6 @@ export const viewerMsg = z.discriminatedUnion("t", [
   z.object({ t: z.literal("wheel"), ...point, dx: z.number().optional(), dy: z.number().optional() }),
   z.object({ t: z.literal("key"), key: z.string().min(1).max(32), down: z.boolean() }),
   z.object({ t: z.enum(["text", "clip"]), s: z.string().max(65536) }),
-  z.object({ t: z.enum(["take", "release"]) }),
 ]);
 
 export type ViewerMsg = z.output<typeof viewerMsg>;
@@ -54,7 +53,7 @@ export const liveInput = defineRpc({
 
 export const control = defineRpc({
   name: "agora.control",
-  input: z.object({ workspace: z.string(), op: z.enum(["resume", "suspend"]) }),
+  input: z.object({ workspace: z.string(), op: z.enum(["control-take", "control-return", "resume", "suspend"]) }),
   output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
 });
 
