@@ -49,7 +49,7 @@ Agora does not checkpoint memory: a suspended workspace keeps cookies and storag
 
 ## Sandboxed workspaces
 
-Set `"sandbox": true` in a workspace's `config` to run its Chrome and every app launched in it in a confined view of the host:
+New workspaces are sandboxed by default (`agora serve --sandbox-default`, on unless you turn it off): their Chrome and every app launched in them run in a confined view of the host. Only the admin can create an unsandboxed workspace, with `"sandbox": false` in its `config`; workspaces created before the default keep their stored setting. To request it explicitly:
 
 ```bash
 agora api POST /v1/workspaces '{"name":"untrusted","start":true,"config":{"sandbox":true}}'
@@ -67,7 +67,7 @@ Limits:
 
 - **Root only.** The daemon must run as root with an apps user (the default for `agora.service`). Otherwise a sandboxed workspace fails to start.
 - **Shared network.** Sandboxed processes can reach services on `127.0.0.1`, including the Agora API (which still needs a token). Do not run unauthenticated local services next to untrusted workspaces.
-- **Shared display.** Xvfb runs outside the sandbox, and X11 does not isolate clients on the same display: every app in the workspace can read the screen and send input to every other window of that workspace.
+- **Shared display.** Xvfb runs outside the sandbox (as the apps user, not root), and X11 does not isolate clients on the same display: every app in the workspace can read the screen and send input to every other window of that workspace.
 - **Readable system files.** World-readable files in `/etc` and `/usr` stay readable. Keep secrets out of them.
 - **Same user, same kernel.** A kernel exploit escapes the sandbox. For hostile code, use a VM or a separate machine.
 - **Launched agents are not sandboxed.** Agents started by `cursor_spawn` (`claude`, `codex`) run as the daemon user, because they need its credentials. The sandbox covers Chrome and `desktop_launch` apps only.
