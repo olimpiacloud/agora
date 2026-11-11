@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -133,27 +134,56 @@ func serve(args []string) {
 	m.Shutdown()
 }
 
+type openOpts struct {
+	ws      string
+	control bool
+	base    string
+	ttl     int
+}
+
+func parseOpen(args []string) (openOpts, error) {
+	o := openOpts{}
+	fs := flag.NewFlagSet("open", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.BoolVar(&o.control, "control", true, "allow input")
+	fs.StringVar(&o.base, "base", "", "public base URL (default AGORA_URL)")
+	fs.IntVar(&o.ttl, "ttl", 3600, "seconds")
+	var pos []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return o, err
+		}
+		if fs.NArg() == 0 {
+			break
+		}
+		pos = append(pos, fs.Arg(0))
+		args = fs.Args()[1:]
+	}
+	if len(pos) != 1 {
+		return o, fmt.Errorf("expected one workspace id, got %d arguments", len(pos))
+	}
+	o.ws = pos[0]
+	return o, nil
+}
+
 func openURL(args []string) {
-	fs := flag.NewFlagSet("open", flag.ExitOnError)
-	control := fs.Bool("control", true, "allow input")
-	base := fs.String("base", "", "public base URL (default AGORA_URL)")
-	ttl := fs.Int("ttl", 3600, "seconds")
-	fs.Parse(args)
-	if fs.NArg() < 1 {
-		log.Fatal("workspace id required")
+	o, err := parseOpen(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agora open: %v\nusage: agora open <workspace> [--control=false] [--base URL] [--ttl 3600]\n", err)
+		os.Exit(2)
 	}
 	c := client.FromEnv()
 	var out struct {
 		Token string `json:"token"`
 	}
-	if err := c.Do(context.Background(), "POST", "/v1/viewer-tokens", map[string]any{"workspace": fs.Arg(0), "control": *control, "ttl_seconds": *ttl}, &out); err != nil {
+	if err := c.Do(context.Background(), "POST", "/v1/viewer-tokens", map[string]any{"workspace": o.ws, "control": o.control, "ttl_seconds": o.ttl}, &out); err != nil {
 		log.Fatal(err)
 	}
-	b := *base
+	b := o.base
 	if b == "" {
 		b = c.URL
 	}
-	fmt.Printf("%s/view/%s#vt=%s\n", strings.TrimRight(b, "/"), fs.Arg(0), out.Token)
+	fmt.Printf("%s/view/%s#vt=%s\n", strings.TrimRight(b, "/"), o.ws, out.Token)
 }
 
 func apiCmd(args []string) {
