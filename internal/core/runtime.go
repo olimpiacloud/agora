@@ -18,6 +18,7 @@ import (
 	"github.com/olimpiacloud/agora/internal/sandbox"
 	"github.com/olimpiacloud/agora/internal/stream"
 	"github.com/olimpiacloud/agora/internal/x11"
+	"golang.org/x/sys/unix"
 )
 
 type Proc struct {
@@ -201,8 +202,11 @@ func (m *Manager) prepareWSDir(id string) error {
 	if err := safefs.MkdirBeneath(dir, "run", 0711); err != nil {
 		return err
 	}
-	for _, rel := range []string{"home/Downloads", "home/.xdg-run"} {
-		if err := safefs.MkdirBeneath(dir, rel, 0700); err != nil {
+	if err := safefs.MkdirBeneath(dir, "home", 0700); err != nil {
+		return err
+	}
+	for _, n := range []string{"Downloads", ".xdg-run"} {
+		if err := mkdirLeaf(dir, "home", n); err != nil {
 			return err
 		}
 	}
@@ -214,6 +218,29 @@ func (m *Manager) prepareWSDir(id string) error {
 		}
 	}
 	return nil
+}
+
+func mkdirLeaf(base, parent, name string) error {
+	var err error
+	for range 3 {
+		var d *os.File
+		d, err = safefs.OpenBeneath(base, parent, syscall.O_RDONLY|syscall.O_DIRECTORY, 0)
+		if err != nil {
+			return err
+		}
+		var st unix.Stat_t
+		if unix.Fstatat(int(d.Fd()), name, &st, unix.AT_SYMLINK_NOFOLLOW) == nil && st.Mode&unix.S_IFMT != unix.S_IFDIR {
+			if e := unix.Unlinkat(int(d.Fd()), name, 0); e != nil && e != unix.ENOENT {
+				d.Close()
+				return &os.PathError{Op: "unlink", Path: filepath.Join(base, parent, name), Err: e}
+			}
+		}
+		d.Close()
+		if err = safefs.MkdirBeneath(base, filepath.Join(parent, name), 0700); err == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 func (r *Runtime) startDisplay(ctx context.Context, cfg WorkspaceConfig) error {

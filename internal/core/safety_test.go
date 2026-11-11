@@ -79,10 +79,28 @@ func TestPrepareWSDir(t *testing.T) {
 	if err := os.Rename(filepath.Join(dir, "home", "Downloads2"), filepath.Join(dir, "home", "Downloads")); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.prepareWSDir("ws1"); err == nil {
-		t.Fatal("prepareWSDir followed a Downloads symlink")
+	os.Remove(filepath.Join(dir, "home", ".xdg-run"))
+	if err := os.WriteFile(filepath.Join(dir, "home", ".xdg-run"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
 	}
-	if u, _ := own(outside); u != 0 {
-		t.Fatalf("outside dir chowned to %d", u)
+	if err := os.WriteFile(filepath.Join(outside, "keep"), []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.prepareWSDir("ws1"); err != nil {
+		t.Fatalf("planted Downloads symlink and .xdg-run file: %v", err)
+	}
+	for _, rel := range []string{"home/Downloads", "home/.xdg-run"} {
+		if u, mode := own(filepath.Join(dir, rel)); u != 4242 || !mode.IsDir() {
+			t.Fatalf("%s uid %d mode %v", rel, u, mode)
+		}
+	}
+	if u, mode := own(outside); u != 0 || !mode.IsDir() {
+		t.Fatalf("outside dir uid %d mode %v", u, mode)
+	}
+	if ents, _ := os.ReadDir(outside); len(ents) != 1 || ents[0].Name() != "keep" {
+		t.Fatalf("outside dir changed: %v", ents)
+	}
+	if b, _ := os.ReadFile(filepath.Join(outside, "keep")); string(b) != "keep" {
+		t.Fatalf("outside file changed: %q", b)
 	}
 }
