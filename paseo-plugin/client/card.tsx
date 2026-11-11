@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Image, Pressable, Text, View } from "react-native";
 import { z } from "zod";
 import { getShot, resolveWorkspace } from "../shared/agora";
+import { cardBadge } from "./badge";
 import { DesktopView, statusColor, useIsNewestCard, useLive } from "./stream";
 
 export const cardSchema = z.object({
@@ -60,6 +61,7 @@ export function makeLiveCard(client: PluginClientContext) {
     const open = () => workspaceId && client.openPanel("live", { workspaceId });
     const label = mode === "browse" ? url || tool.replace(/^.*agora__/, "") : tool.replace(/^mcp__agora__/, "agora · ");
     const hasLive = !!lv.frame && !!lv.region;
+    const badge = cardBadge(streaming, newest, lv.status);
     const showPreview = mode === "shot" || hasLive;
     return (
       <View style={styles.card}>
@@ -71,8 +73,8 @@ export function makeLiveCard(client: PluginClientContext) {
           <View style={{ flex: 1 }} />
           {hasLive && (
             <Pressable accessibilityRole="button" accessibilityLabel={streaming ? "Pause live preview" : "Resume live preview"} onPress={() => setPaused(!paused)} style={styles.badge} disabled={!newest}>
-              <View style={[styles.dot, { backgroundColor: streaming ? theme.colors.statusDanger : theme.colors.foregroundMuted }]} />
-              <Text style={styles.muted}>{streaming ? "Live" : newest ? "Paused" : "Earlier"}</Text>
+              <View style={[styles.dot, { backgroundColor: badge.live ? theme.colors.statusDanger : theme.colors.foregroundMuted }]} />
+              <Text style={styles.muted}>{badge.label}</Text>
             </Pressable>
           )}
           {workspaceId && (

@@ -36,10 +36,12 @@ interface Hub {
 }
 
 const TIERS = {
-  card: { maxWidth: 720, fps: 4, control: false },
-  tile: { maxWidth: 560, fps: 3, control: false },
-  full: { maxWidth: 1400, fps: 15, control: true },
+  card: { maxWidth: 720, fps: 4, control: false, wake: false },
+  tile: { maxWidth: 560, fps: 3, control: false, wake: false },
+  full: { maxWidth: 1400, fps: 15, control: true, wake: true },
 } as const;
+
+export const tuning = { reprobeMs: 10_000 };
 
 const hubs = new Map<string, Hub>();
 const metas = new Map<string, Meta>();
@@ -145,7 +147,7 @@ async function openNow(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidt
   if (!alive()) return;
   const q = new URLSearchParams({ fps: String(t.fps), max_width: String(maxWidth), quality: tier === "full" ? "62" : "55", token });
   if (cursor) q.set("cursor", cursor);
-  if (h.connected) q.set("wake", "0");
+  if (h.connected || h.asleep || !t.wake) q.set("wake", "0");
   const sock = new WebSocket(wsURL(`/v1/workspaces/${h.workspace}/stream/jpeg?${q}`));
   sock.binaryType = "arraybuffer";
   h.sock = sock;
@@ -157,6 +159,11 @@ async function openNow(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidt
           onEvent(h.workspace, m.event);
         } else if (m.type === "hello") {
           h.viewer = typeof m.viewer === "string" ? m.viewer : null;
+          if (h.asleep) {
+            h.asleep = false;
+            h.status = "connecting";
+            wake(h);
+          }
         } else if (m.type === "region") {
           h.region = { x: m.x, y: m.y, w: m.w, h: m.h, sw: m.screen_w, sh: m.screen_h };
           h.gotRegion = true;
@@ -259,7 +266,7 @@ function hubFor(input: HubInput) {
 }
 
 async function ensureOpen(h: Hub, cursor: string, tier: keyof typeof TIERS, maxWidth: number) {
-  if (h.sock || h.asleep || Date.now() - h.openedAt <= 2000) return;
+  if (h.sock || Date.now() - h.openedAt <= (h.asleep ? tuning.reprobeMs : 2000)) return;
   try {
     await open(h, cursor, tier, maxWidth);
   } catch (e) {

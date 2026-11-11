@@ -22,6 +22,7 @@ class FakeSocket {
   static CLOSING = 2;
   static CLOSED = 3;
   static all: FakeSocket[] = [];
+  static asleep = new Set<string>();
   readyState = 0;
   sent: string[] = [];
   binaryType = "";
@@ -32,8 +33,17 @@ class FakeSocket {
   constructor(public url: string) {
     FakeSocket.all.push(this);
     setTimeout(() => {
+      const ws = /workspaces\/([^/]+)\//.exec(this.url)?.[1] ?? "";
       this.readyState = 1;
       this.emit("open", {});
+      if (FakeSocket.asleep.has(ws)) {
+        if (this.url.includes("wake=0")) {
+          this.message(JSON.stringify({ type: "bye", reason: "suspended" }));
+          this.close();
+          return;
+        }
+        FakeSocket.asleep.delete(ws);
+      }
       this.message(JSON.stringify({ type: "hello", viewer: `jpeg_${FakeSocket.all.length}` }));
     }, 5);
   }
@@ -74,7 +84,8 @@ class FakeSocket {
 
 const realWS = globalThis.WebSocket;
 (globalThis as { WebSocket: unknown }).WebSocket = FakeSocket;
-const { closeAll, pollLive, sendLiveInput } = await import("../server/live");
+const { closeAll, pollLive, sendLiveInput, tuning } = await import("../server/live");
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 afterAll(() => {
   closeAll();
@@ -133,5 +144,62 @@ describe("live input over the viewer socket", () => {
     const f = await frame;
     expect(f.cursors).toBeNull();
     expect(f.seq).toBe(2);
+  });
+});
+
+describe("suspended workspaces", () => {
+  test("a card never wakes a suspended workspace", async () => {
+    FakeSocket.asleep.add("ws_s1");
+    const before = FakeSocket.all.length;
+    const r = await pollLive({ workspace: "ws_s1", tier: "card", after: 0, metaAfter: 0 });
+    expect(FakeSocket.all.length).toBe(before + 1);
+    expect(FakeSocket.all.at(-1)!.url).toContain("wake=0");
+    expect(r.status).toBe("suspended");
+    expect(r.frame).toBeNull();
+    expect(FakeSocket.asleep.has("ws_s1")).toBe(true);
+  });
+
+  test("a tile never wakes a suspended workspace", async () => {
+    FakeSocket.asleep.add("ws_s3");
+    const before = FakeSocket.all.length;
+    const r = await pollLive({ workspace: "ws_s3", cursor: "cur_1", tier: "tile", after: 0, metaAfter: 0 });
+    expect(FakeSocket.all.length).toBe(before + 1);
+    expect(FakeSocket.all.at(-1)!.url).toContain("wake=0");
+    expect(r.status).toBe("suspended");
+    expect(r.frame).toBeNull();
+    expect(FakeSocket.asleep.has("ws_s3")).toBe(true);
+  });
+
+  test("a sleeping hub does not reconnect before the re-probe interval", async () => {
+    const before = FakeSocket.all.length;
+    const r = await pollLive({ workspace: "ws_s1", tier: "card", after: 0, metaAfter: 0 });
+    expect(FakeSocket.all.length).toBe(before);
+    expect(r.status).toBe("suspended");
+  });
+
+  test("a sleeping hub comes back when something else resumed the workspace", async () => {
+    tuning.reprobeMs = 0;
+    try {
+      await sleep(5);
+      FakeSocket.asleep.delete("ws_s1");
+      const p = pollLive({ workspace: "ws_s1", tier: "card", after: 0 });
+      await sleep(20);
+      FakeSocket.all.at(-1)!.frame();
+      const back = await p;
+      expect(FakeSocket.all.at(-1)!.url).toContain("wake=0");
+      expect(back.frame).not.toBeNull();
+      expect(back.status).toBeNull();
+    } finally {
+      tuning.reprobeMs = 10_000;
+    }
+  });
+
+  test("the desktop panel still wakes on its first open", async () => {
+    FakeSocket.asleep.add("ws_s2");
+    setTimeout(() => FakeSocket.all.at(-1)!.frame(), 20);
+    const r = await pollLive({ workspace: "ws_s2", tier: "full", maxWidth: 1440, after: 0 });
+    expect(FakeSocket.all.at(-1)!.url).not.toContain("wake=0");
+    expect(FakeSocket.asleep.has("ws_s2")).toBe(false);
+    expect(r.frame).not.toBeNull();
   });
 });
