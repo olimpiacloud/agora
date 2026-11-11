@@ -1,10 +1,11 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import { type PluginWorkspacePanelProps, useRpc, useTabState, useWorkspace } from "@getpaseo/plugin/client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { z } from "zod";
-import { control, ensureWorkspace, listWorkspaces, sendInput } from "../shared/agora";
-import { type Cur, type DeskInput, DesktopView, statusColor, useLive } from "./stream";
+import { control, ensureWorkspace, listWorkspaces, liveInput } from "../shared/agora";
+import { createSender, tapKeys, wheelSteps } from "./input";
+import { type Cur, DesktopView, statusColor, useLive } from "./stream";
 
 const tabSchema = z.object({ workspace: z.string(), view: z.enum(["desktop", "wall"]).optional() });
 
@@ -42,7 +43,7 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
   const [state, setState] = useTabState(tab, tabSchema, { workspace: "", view: "desktop" });
   const list = useRpc(listWorkspaces);
   const ensure = useRpc(ensureWorkspace);
-  const input = useRpc(sendInput);
+  const post = useRpc(liveInput);
   const ctl = useRpc(control);
   const [wss, setWss] = useState<{ id: string; name: string; state: string; cursors: number; linked: boolean }[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -51,11 +52,10 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
   const [paused, setPaused] = useState(false);
   const [width, setWidth] = useState(0);
   const [gesture, setGesture] = useState(false);
-  const chain = useRef<Promise<void>>(Promise.resolve());
-  const pendingMove = useRef<{ x: number; y: number } | null>(null);
   const ws = state.workspace;
   const view = state.view || "desktop";
-  const lv = useLive({ workspace: ws || null, tier: "full", maxWidth: layout.compact ? 960 : 1440, metaOnly: view === "wall" || paused, enabled: !!ws });
+  const maxWidth = layout.compact ? 960 : 1440;
+  const lv = useLive({ workspace: ws || null, tier: "full", maxWidth, metaOnly: view === "wall" || paused, enabled: !!ws });
   const { frame, region, cursors, locked } = lv;
   const status = actErr || lv.status;
 
@@ -90,45 +90,30 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
     void refreshList();
   }, [workspaceId]);
 
-  const act = async (a: Parameters<typeof input>[0]) => {
-    const r = await input(a);
+  const sender = useMemo(
+    () =>
+      createSender(async (msgs) => {
+        try {
+          const r = await post({ workspace: ws, tier: "full", maxWidth, msgs });
+          setActErr(r.ok ? null : r.error);
+        } catch (e) {
+          setActErr(e instanceof Error ? e.message : String(e));
+        }
+      }),
+    [post, ws, maxWidth],
+  );
+  const resume = async () => {
+    const r = await ctl({ workspace: ws, op: "resume" });
     setActErr(r.ok ? null : r.error);
   };
-  const queue = (f: () => Promise<void>) => {
-    chain.current = chain.current.then(f, f);
+  const take = () => {
+    setPaused(false);
+    if (view !== "desktop") setState({ workspace: ws, view: "desktop" });
+    sender.push([{ t: "take" }]);
   };
-  const pointer = (kind: "down" | "move" | "up", x: number, y: number) => {
-    if (kind === "move") {
-      const queued = pendingMove.current !== null;
-      pendingMove.current = { x, y };
-      if (!queued)
-        queue(async () => {
-          const p = pendingMove.current;
-          pendingMove.current = null;
-          if (p) await act({ workspace: ws, action: "move", x: p.x, y: p.y });
-        });
-      return;
-    }
-    if (kind === "up") pendingMove.current = null;
-    queue(() => act({ workspace: ws, action: kind, x, y }));
-  };
-  const deskInput = (i: DeskInput) => {
-    if (i.kind === "move") return pointer("move", i.x, i.y);
-    if (i.kind === "up") pendingMove.current = null;
-    if (i.kind === "down" || i.kind === "up") {
-      const { kind, x, y, button } = i;
-      return queue(() => act({ workspace: ws, action: kind, x, y, button }));
-    }
-    if (i.kind === "scroll") return queue(() => act({ workspace: ws, action: "scroll", x: i.x, y: i.y, dy: i.dy, dx: i.dx }));
-    if (i.kind === "type") return queue(() => act({ workspace: ws, action: "type", text: i.text }));
-    if (i.kind === "key") queue(() => act({ workspace: ws, action: "key", keys: i.keys }));
-  };
-  const op = async (o: "control-take" | "control-return" | "resume") => {
-    const r = await ctl({ workspace: ws, op: o });
-    setActErr(r.ok ? null : r.error);
-  };
+  const release = () => sender.push([{ t: "release" }]);
   const needsHuman = cursors.find((c) => c.status === "needs_human");
-  const iHold = !!locked;
+  const iHold = !!lv.viewer && locked === `human:${lv.viewer}`;
   const pad = layout.compact ? 8 : 12;
   const cols = width >= 1100 ? 3 : width >= 620 ? 2 : 1;
   const tileW = width ? Math.floor((width - pad * 2 - (cols - 1) * pad) / cols) : 0;
@@ -166,15 +151,15 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
               <Text style={styles.warn}>
                 {needsHuman.name} needs you: {needsHuman.detail || "human intervention"}
               </Text>
-              <Chip label="Take control" onPress={() => void op("control-take")} />
+              <Chip label="Take control" onPress={take} />
             </View>
           )}
           <View style={styles.bar}>
             <Chip label="Desktop" on={view === "desktop"} onPress={() => setState({ workspace: ws, view: "desktop" })} />
             <Chip label={`Agent wall (${cursors.length})`} on={view === "wall"} onPress={() => setState({ workspace: ws, view: "wall" })} />
             {view === "desktop" && <Chip label={paused ? "▶ live" : "⏸ pause"} onPress={() => setPaused(!paused)} />}
-            {lv.status === "suspended" && <Chip label="Resume" on onPress={() => void op("resume")} />}
-            {iHold ? <Chip label="Return control to agents" on onPress={() => void op("control-return")} /> : <Chip label="Take control" onPress={() => void op("control-take")} />}
+            {lv.status === "suspended" && <Chip label="Resume" on onPress={() => void resume()} />}
+            {iHold ? <Chip label="Return control to agents" on onPress={release} /> : <Chip label="Take control" onPress={take} />}
             <Text style={styles.muted}>{status ? status : view === "desktop" && region ? (Platform.OS === "web" ? `${region.sw}×${region.sh} · click the desktop to use mouse, wheel and keyboard` : `${region.sw}×${region.sh} · tap to click, drag to drag, long press to right click`) : ""}</Text>
           </View>
           {view === "wall" ? (
@@ -192,11 +177,8 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
                 frame={frame}
                 region={region}
                 cursors={cursors}
-                onTap={(x, y) => void act({ workspace: ws, action: "click", x, y })}
-                onLongTap={(x, y) => void act({ workspace: ws, action: "right_click", x, y })}
-                onPointer={pointer}
                 onGesture={setGesture}
-                onInput={deskInput}
+                onInput={sender.push}
               />
               <View style={styles.bar}>
                 <TextInput
@@ -206,16 +188,16 @@ export function LivePanel({ theme, layout, workspaceId, tab }: PluginWorkspacePa
                   placeholderTextColor={theme.colors.foregroundMuted}
                   style={styles.input}
                   onSubmitEditing={() => {
-                    if (text) void act({ workspace: ws, action: "type", text });
+                    if (text) sender.push([{ t: "text", s: text }]);
                     setText("");
                   }}
                 />
-                <Chip label="Send" onPress={() => { if (text) void act({ workspace: ws, action: "type", text }); setText("") }} />
+                <Chip label="Send" onPress={() => { if (text) sender.push([{ t: "text", s: text }]); setText("") }} />
                 {["Enter", "Tab", "Escape", "BackSpace", "ctrl+l", "ctrl+a"].map((k) => (
-                  <Chip key={k} label={k} onPress={() => void act({ workspace: ws, action: "key", keys: k === "BackSpace" ? "backspace" : k })} />
+                  <Chip key={k} label={k} onPress={() => sender.push(tapKeys(k === "BackSpace" ? "backspace" : k))} />
                 ))}
-                <Chip label="▲" onPress={() => region && void act({ workspace: ws, action: "scroll", x: region.sw / 2, y: region.sh / 2, dy: -5 })} />
-                <Chip label="▼" onPress={() => region && void act({ workspace: ws, action: "scroll", x: region.sw / 2, y: region.sh / 2, dy: 5 })} />
+                <Chip label="▲" onPress={() => region && sender.push(wheelSteps(region.sw / 2, region.sh / 2, -5))} />
+                <Chip label="▼" onPress={() => region && sender.push(wheelSteps(region.sw / 2, region.sh / 2, 5))} />
               </View>
             </>
           )}

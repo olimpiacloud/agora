@@ -28,25 +28,33 @@ export const getShot = defineRpc({
   output: z.object({ mime: z.string(), base64: z.string() }),
 });
 
-export const sendInput = defineRpc({
-  name: "agora.input",
+const point = { x: z.number(), y: z.number() };
+
+export const viewerMsg = z.discriminatedUnion("t", [
+  z.object({ t: z.literal("move"), ...point }),
+  z.object({ t: z.enum(["down", "up"]), ...point, b: z.number().int().min(0).max(31) }),
+  z.object({ t: z.literal("wheel"), ...point, dx: z.number().optional(), dy: z.number().optional() }),
+  z.object({ t: z.literal("key"), key: z.string().min(1).max(32), down: z.boolean() }),
+  z.object({ t: z.enum(["text", "clip"]), s: z.string().max(65536) }),
+  z.object({ t: z.enum(["take", "release"]) }),
+]);
+
+export type ViewerMsg = z.output<typeof viewerMsg>;
+
+export const liveInput = defineRpc({
+  name: "agora.live_input",
   input: z.object({
     workspace: z.string(),
-    action: z.enum(["click", "double_click", "right_click", "type", "key", "scroll", "move", "down", "up"]),
-    x: z.number().optional(),
-    y: z.number().optional(),
-    text: z.string().optional(),
-    keys: z.string().optional(),
-    dy: z.number().optional(),
-    dx: z.number().optional(),
-    button: z.number().optional(),
+    tier: z.enum(["card", "tile", "full"]),
+    maxWidth: z.number().optional(),
+    msgs: z.array(viewerMsg).min(1).max(256),
   }),
   output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
 });
 
 export const control = defineRpc({
   name: "agora.control",
-  input: z.object({ workspace: z.string(), op: z.enum(["control-take", "control-return", "resume", "suspend"]) }),
+  input: z.object({ workspace: z.string(), op: z.enum(["resume", "suspend"]) }),
   output: z.object({ ok: z.boolean(), error: z.string().nullable() }),
 });
 
@@ -80,6 +88,7 @@ export const live = defineRpc({
     frame: z.object({ w: z.number(), h: z.number(), b64: z.string() }).nullable(),
     region: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number(), sw: z.number(), sh: z.number() }),
     status: z.string().nullable(),
+    viewer: z.string().nullable(),
     metaSeq: z.number(),
     cursors: z.array(liveCursor).nullable(),
     locked: z.string().nullable(),

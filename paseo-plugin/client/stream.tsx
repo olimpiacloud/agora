@@ -3,16 +3,17 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { type GestureResponderEvent, Image, type LayoutChangeEvent, Platform, Text, View } from "react-native";
 import type { z } from "zod";
-import { live, type liveCursor } from "../shared/agora";
+import { live, type liveCursor, type ViewerMsg } from "../shared/agora";
+import { click, createSeat, createWheel, isPasteKey, PASTE_KEYS, throttle } from "./input";
 import { useSmoothPoint } from "./smooth";
 
 export type Cur = z.output<typeof liveCursor>;
 export type Region = { x: number; y: number; w: number; h: number; sw: number; sh: number };
 export type Frame = { w: number; h: number; uri: string };
 
-type LiveState = { frame: Frame | null; region: Region | null; cursors: Cur[]; locked: string | null; status: string | null };
+type LiveState = { frame: Frame | null; region: Region | null; cursors: Cur[]; locked: string | null; status: string | null; viewer: string | null };
 
-const EMPTY: LiveState = { frame: null, region: null, cursors: [], locked: null, status: "connecting" };
+const EMPTY: LiveState = { frame: null, region: null, cursors: [], locked: null, status: "connecting", viewer: null };
 
 export function useLive(opts: { workspace: string | null; cursor?: string; tier: "card" | "tile" | "full"; maxWidth?: number; metaOnly?: boolean; enabled: boolean }) {
   const poll = useRpc(live);
@@ -38,6 +39,7 @@ export function useLive(opts: { workspace: string | null; cursor?: string; tier:
             cursors: r.cursors ?? p.cursors,
             locked: r.locked,
             status: r.status,
+            viewer: r.viewer,
           }));
         } catch (e) {
           if (stop) return;
@@ -175,126 +177,96 @@ function CursorMark({ theme, cursor: c, region, scale, width, height, dim, small
   );
 }
 
-export type DeskInput =
-  | { kind: "down" | "move" | "up"; x: number; y: number; button?: number }
-  | { kind: "scroll"; x: number; y: number; dy: number; dx: number }
-  | { kind: "type"; text: string }
-  | { kind: "key"; keys: string };
-
-const NAMED: Record<string, string> = {
-  Enter: "enter",
-  Tab: "tab",
-  Escape: "escape",
-  Backspace: "backspace",
-  Delete: "delete",
-  Insert: "insert",
-  Home: "home",
-  End: "end",
-  PageUp: "pageup",
-  PageDown: "pagedown",
-  ArrowLeft: "left",
-  ArrowRight: "right",
-  ArrowUp: "up",
-  ArrowDown: "down",
-  " ": "space",
-};
-
-function keyInput(e: KeyboardEvent): DeskInput | null {
-  if (["Shift", "Control", "Alt", "Meta", "CapsLock", "Dead", "Process", "Unidentified"].includes(e.key)) return null;
-  const ctrl = e.ctrlKey || e.metaKey;
-  if (e.key.length === 1 && !ctrl && !e.altKey) return { kind: "type", text: e.key };
-  let name = NAMED[e.key] || (/^F\d{1,2}$/.test(e.key) ? e.key.toLowerCase() : e.key.length === 1 ? e.key.toLowerCase() : "");
-  if (!name) return null;
-  const mods = [ctrl && "ctrl", e.altKey && "alt", e.shiftKey && e.key.length !== 1 && "shift"].filter(Boolean);
-  return { kind: "key", keys: [...mods, name].join("+") };
-}
-
-function useWebInput(node: { current: unknown }, toScreen: (lx: number, ly: number) => [number, number], onInput: ((i: DeskInput) => void) | undefined, active: boolean) {
-  const latest = useRef({ toScreen, onInput });
-  latest.current = { toScreen, onInput };
+function useWebInput(node: { current: unknown }, toScreen: (lx: number, ly: number) => [number, number], onInput: ((msgs: ViewerMsg[]) => void) | undefined, active: boolean) {
+  const latest = useRef(toScreen);
+  latest.current = toScreen;
   useEffect(() => {
     const el = node.current as HTMLElement | null;
-    if (Platform.OS !== "web" || !active || !el || typeof el.addEventListener !== "function") return;
+    if (Platform.OS !== "web" || !active || !onInput || !el || typeof el.addEventListener !== "function") return;
     el.tabIndex = 0;
     el.style.outline = "none";
     el.style.cursor = "default";
     el.style.userSelect = "none";
     el.style.touchAction = "none";
-    const send = (i: DeskInput) => latest.current.onInput?.(i);
+    const send = (msgs: ViewerMsg[]) => {
+      if (msgs.length) onInput(msgs);
+    };
     const at = (e: MouseEvent): [number, number] => {
       const r = el.getBoundingClientRect();
-      return latest.current.toScreen(Math.min(Math.max(e.clientX - r.left, 0), r.width - 1), Math.min(Math.max(e.clientY - r.top, 0), r.height - 1));
+      return latest.current(Math.min(Math.max(e.clientX - r.left, 0), r.width - 1), Math.min(Math.max(e.clientY - r.top, 0), r.height - 1));
     };
-    const pressed = new Set<number>();
-    let lastMove = 0;
-    let wheel = 0;
+    const seat = createSeat();
+    const wheel = createWheel();
+    const moves = throttle(30, ([x, y]: [number, number]) => send(seat.move(x, y)));
     const down = (e: PointerEvent) => {
       e.preventDefault();
       el.focus({ preventScroll: true });
       el.setPointerCapture?.(e.pointerId);
-      const b = e.button + 1;
-      pressed.add(b);
-      send({ kind: "down", ...xy(at(e)), button: b });
+      moves.flush();
+      send(seat.down(...at(e), e.button));
     };
-    const move = (e: PointerEvent) => {
-      const now = performance.now();
-      if (now - lastMove < 30) return;
-      lastMove = now;
-      send({ kind: "move", ...xy(at(e)) });
-    };
+    const move = (e: PointerEvent) => moves.push(at(e));
     const up = (e: PointerEvent) => {
-      const b = e.button + 1;
-      if (!pressed.delete(b)) return;
-      send({ kind: "up", ...xy(at(e)), button: b });
+      moves.flush();
+      send(seat.up(...at(e), e.button));
     };
-    const cancel = (e: PointerEvent) => {
-      for (const b of pressed) send({ kind: "up", ...xy(at(e)), button: b });
-      pressed.clear();
+    const lost = () => {
+      moves.flush();
+      send(seat.releaseButtons());
     };
     const wheelH = (e: WheelEvent) => {
       e.preventDefault();
-      wheel += e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY;
-      const n = Math.trunc(wheel / 60);
-      const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? Math.sign(e.deltaX) : 0;
-      if (!n && !dx) return;
-      wheel -= n * 60;
-      send({ kind: "scroll", ...xy(at(e)), dy: n, dx });
+      moves.flush();
+      send(wheel(...at(e), e.deltaX, e.deltaY, e.deltaMode));
     };
     const menu = (e: Event) => e.preventDefault();
-    const key = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") return;
-      const i = keyInput(e);
-      if (!i) return;
+    const keyDown = (e: KeyboardEvent) => {
+      if (isPasteKey(e)) return;
       e.preventDefault();
-      send(i);
+      send(seat.key(e, true));
+    };
+    const keyUp = (e: KeyboardEvent) => {
+      e.preventDefault();
+      send(seat.key(e, false));
     };
     const paste = (e: ClipboardEvent) => {
       const t = e.clipboardData?.getData("text/plain");
       e.preventDefault();
-      if (t) send({ kind: "type", text: t });
+      if (!t) return;
+      send([{ t: "clip", s: t }]);
+      setTimeout(() => send(PASTE_KEYS), 60);
     };
+    const blur = () => send(seat.releaseAll());
     el.addEventListener("pointerdown", down);
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);
-    el.addEventListener("pointercancel", cancel);
+    el.addEventListener("pointercancel", lost);
+    el.addEventListener("lostpointercapture", lost);
     el.addEventListener("wheel", wheelH, { passive: false });
     el.addEventListener("contextmenu", menu);
-    el.addEventListener("keydown", key);
+    el.addEventListener("keydown", keyDown);
+    el.addEventListener("keyup", keyUp);
     el.addEventListener("paste", paste);
+    el.addEventListener("blur", blur);
     return () => {
       el.removeEventListener("pointerdown", down);
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
-      el.removeEventListener("pointercancel", cancel);
+      el.removeEventListener("pointercancel", lost);
+      el.removeEventListener("lostpointercapture", lost);
       el.removeEventListener("wheel", wheelH);
       el.removeEventListener("contextmenu", menu);
-      el.removeEventListener("keydown", key);
+      el.removeEventListener("keydown", keyDown);
+      el.removeEventListener("keyup", keyUp);
       el.removeEventListener("paste", paste);
+      el.removeEventListener("blur", blur);
+      moves.flush();
+      send(seat.releaseAll());
     };
-  }, [node, active]);
+  }, [node, active, onInput]);
 }
 
-function xy([x, y]: [number, number]) {
+function pt([x, y]: [number, number]) {
   return { x, y };
 }
 
@@ -306,9 +278,6 @@ export function DesktopView({
   highlight,
   showOthers = true,
   small,
-  onTap,
-  onLongTap,
-  onPointer,
   onGesture,
   onInput,
 }: {
@@ -319,11 +288,8 @@ export function DesktopView({
   highlight?: string | null;
   showOthers?: boolean;
   small?: boolean;
-  onTap?: (x: number, y: number) => void;
-  onLongTap?: (x: number, y: number) => void;
-  onPointer?: (kind: "down" | "move" | "up", x: number, y: number) => void;
   onGesture?: (active: boolean) => void;
-  onInput?: (i: DeskInput) => void;
+  onInput?: (msgs: ViewerMsg[]) => void;
 }) {
   const [boxW, setBoxW] = useState(0);
   const onLayout = (e: LayoutChangeEvent) => setBoxW(e.nativeEvent.layout.width);
@@ -333,10 +299,19 @@ export function DesktopView({
   const toScreen = (lx: number, ly: number): [number, number] => [Math.round((region?.x || 0) + lx / scale), Math.round((region?.y || 0) + ly / scale)];
   const aspect = rw && rh ? rw / rh : frame ? frame.w / frame.h : 16 / 10;
   const g = useRef<{ sx: number; sy: number; px: number; py: number; lx: number; ly: number; drag: boolean; long: boolean; moved: number; timer: ReturnType<typeof setTimeout> | null } | null>(null);
-  const web = Platform.OS === "web" && !!onInput;
-  const interactive = !web && !!onTap && !!frame && scale > 0;
+  const web = Platform.OS === "web";
+  const interactive = !web && !!onInput && !!frame && scale > 0;
   const surface = useRef<View>(null);
   useWebInput(surface, toScreen, onInput, web && !!frame);
+  const drop = useRef<() => void>(() => {});
+  drop.current = () => {
+    const s = g.current;
+    g.current = null;
+    if (!s) return;
+    if (s.timer) clearTimeout(s.timer);
+    if (s.drag) onInput?.([{ t: "up", ...pt(toScreen(s.lx, s.ly)), b: 0 }]);
+  };
+  useEffect(() => () => drop.current(), []);
   const at = (e: GestureResponderEvent): [number, number] => {
     const s = g.current!;
     const lx = Math.min(Math.max(s.sx + e.nativeEvent.pageX - s.px, 0), boxW - 1);
@@ -349,9 +324,9 @@ export function DesktopView({
     if (!s) return;
     if (s.timer) clearTimeout(s.timer);
     if (s.drag) {
-      onPointer?.("up", ...toScreen(s.lx, s.ly));
+      onInput?.([{ t: "up", ...pt(toScreen(s.lx, s.ly)), b: 0 }]);
     } else if (e && !s.long) {
-      onTap?.(...toScreen(s.sx, s.sy));
+      onInput?.(click(...toScreen(s.sx, s.sy)));
     }
     onGesture?.(false);
   };
@@ -366,7 +341,7 @@ export function DesktopView({
           s.timer = setTimeout(() => {
             if (g.current !== s || s.drag) return;
             s.long = true;
-            onLongTap?.(...toScreen(s.sx, s.sy));
+            onInput?.(click(...toScreen(s.sx, s.sy), 2));
           }, 500);
           g.current = s;
           onGesture?.(true);
@@ -378,15 +353,15 @@ export function DesktopView({
           s.lx = lx;
           s.ly = ly;
           if (!s.drag) {
-            if (!onPointer || Math.hypot(lx - s.sx, ly - s.sy) < 8) return;
+            if (Math.hypot(lx - s.sx, ly - s.sy) < 8) return;
             s.drag = true;
             if (s.timer) clearTimeout(s.timer);
-            onPointer("down", ...toScreen(s.sx, s.sy));
+            onInput?.([{ t: "down", ...pt(toScreen(s.sx, s.sy)), b: 0 }]);
           }
           const now = Date.now();
           if (now - s.moved < 40) return;
           s.moved = now;
-          onPointer?.("move", ...toScreen(lx, ly));
+          onInput?.([{ t: "move", ...pt(toScreen(lx, ly)) }]);
         },
         onResponderRelease: (e: GestureResponderEvent) => {
           if (g.current?.drag) {
