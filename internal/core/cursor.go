@@ -261,6 +261,9 @@ func (m *Manager) setCursorStatusWith(id string, st CursorStatus, detail string,
 	m.saveCursor(c)
 	ws := c.Workspace
 	m.mu.Unlock()
+	if prev == CursorPaused && st != CursorPaused {
+		m.signalLaunch(id, false)
+	}
 	m.Bus.Publish("cursor.status", ws, id, map[string]any{"from": string(prev), "to": string(st), "detail": detail})
 	if st.Terminal() {
 		m.Bus.Publish("cursor.ended", ws, id, map[string]any{"status": string(st)})
@@ -308,12 +311,13 @@ func (m *Manager) Fail(id, msg string) error {
 }
 
 func (m *Manager) CancelCursor(id, reason string, cascade bool) error {
+	err := m.setCursorStatus(id, CursorCancelled, reason, false)
 	if cascade {
 		for _, ch := range m.ListCursors(CursorQuery{Parent: id, Active: true}) {
 			m.CancelCursor(ch.ID, "parent cancelled", true)
 		}
 	}
-	return m.setCursorStatus(id, CursorCancelled, reason, false)
+	return err
 }
 
 func (m *Manager) Pause(id string) error {

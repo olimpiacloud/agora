@@ -468,6 +468,9 @@ func (m *Manager) Destroy(ctx context.Context, id string, purge bool) error {
 	if err != nil {
 		return err
 	}
+	if w.State == StateDestroyed && !purge {
+		return nil
+	}
 	if r := m.runtime(id); r != nil {
 		r.shutdown(ctx)
 		m.mu.Lock()

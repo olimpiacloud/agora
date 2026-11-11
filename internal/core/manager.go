@@ -74,6 +74,7 @@ type Manager struct {
 	usage     map[string]*WorkspaceUsage
 	profiles  map[string]*profileLease
 	portsHeld map[int]bool
+	expiring  map[string]bool
 	shots     shotStore
 	started   time.Time
 	ctx       context.Context

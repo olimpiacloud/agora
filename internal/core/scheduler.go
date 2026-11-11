@@ -60,7 +60,13 @@ func (m *Manager) lifecycleTick() {
 	var expired []string
 	for id, w := range m.ws {
 		if w.Config.TTL.Duration > 0 && w.State != StateDestroyed && now.Sub(w.Created) > w.Config.TTL.Duration {
-			expired = append(expired, id)
+			if !m.expiring[id] {
+				if m.expiring == nil {
+					m.expiring = map[string]bool{}
+				}
+				m.expiring[id] = true
+				expired = append(expired, id)
+			}
 			continue
 		}
 		if r := m.rt[id]; r != nil {
@@ -70,7 +76,12 @@ func (m *Manager) lifecycleTick() {
 	m.mu.Unlock()
 	for _, id := range expired {
 		m.Bus.Publish("workspace.expired", id, "", nil)
-		go m.Destroy(context.Background(), id, false)
+		go func(id string) {
+			m.Destroy(context.Background(), id, false)
+			m.mu.Lock()
+			delete(m.expiring, id)
+			m.mu.Unlock()
+		}(id)
 	}
 	for _, it := range items {
 		r := it.r
