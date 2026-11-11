@@ -225,6 +225,6 @@ func (m *Manager) wsDir(id string) string {
 
 func (m *Manager) chownApps(p string) {
 	if m.uid != 0 {
-		os.Chown(p, m.uid, m.gid)
+		os.Lchown(p, m.uid, m.gid)
 	}
 }

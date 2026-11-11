@@ -69,7 +69,7 @@
   out.animations = document.getAnimations().filter((a) => a.playState === 'running').length;
   out.reducedMotionRules = [...document.styleSheets].some((s) => { try { return [...s.cssRules].some((r) => r.conditionText && r.conditionText.includes('prefers-reduced-motion')); } catch { return false; } });
   const links = [...new Set([...document.querySelectorAll('a[href]')].map((a) => a.href).filter((h) => h.startsWith(location.origin) && !h.includes('#')))];
-  out.brokenLinks = (await Promise.all(links.slice(0, 40).map(async (h) => { try { const r = await fetch(h, { method: 'HEAD', redirect: 'follow' }); return r.ok ? null : h + ' ' + r.status; } catch (e) { return h + ' ERR'; } }))).filter(Boolean);
+  out.brokenLinks = (await Promise.all(links.filter((h) => !/log-?out|sign-?out|logoff|delete|remove|unsubscribe|destroy|action=/i.test(h)).slice(0, 40).map(async (h) => { try { const r = await fetch(h, { method: 'HEAD', redirect: 'follow', credentials: 'omit' }); return r.ok ? null : h + ' ' + r.status; } catch (e) { return h + ' ERR'; } }))).filter(Boolean);
   out.internalLinks = links;
   out.anchors = [...document.querySelectorAll('a[href^="#"]')].map((a) => a.getAttribute('href')).filter((h) => h.length > 1 && !document.getElementById(h.slice(1)));
   return out;

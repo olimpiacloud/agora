@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/olimpiacloud/agora/internal/browser"
+	"github.com/olimpiacloud/agora/internal/safefs"
 	"github.com/olimpiacloud/agora/internal/sandbox"
 	"github.com/olimpiacloud/agora/internal/stream"
 	"github.com/olimpiacloud/agora/internal/x11"
@@ -116,12 +117,8 @@ func (m *Manager) ensureRuntimeLocked(ctx context.Context, id string, display bo
 	m.mu.Unlock()
 	if r == nil {
 		r = &Runtime{m: m, id: id, seats: map[string]*seatLease{}, procs: map[int]*Proc{}, viewers: map[string]*Viewer{}, activity: time.Now(), started: time.Now(), tabOwner: map[string]string{}, offsets: map[string][3]int{}}
-		home := m.wsDir(id)
-		os.MkdirAll(filepath.Join(home, "home", "Downloads"), 0700)
-		os.MkdirAll(filepath.Join(home, "run"), 0711)
-		os.MkdirAll(filepath.Join(home, "home", ".xdg-run"), 0700)
-		for _, p := range []string{home, filepath.Join(home, "home"), filepath.Join(home, "home", "Downloads"), filepath.Join(home, "home", ".xdg-run")} {
-			m.chownApps(p)
+		if err := m.prepareWSDir(id); err != nil {
+			return nil, fmt.Errorf("workspace dir: %w", err)
 		}
 		if m.cg != nil {
 			m.cg.Ensure(id, cfg.Budget)
@@ -163,6 +160,55 @@ func (m *Manager) ensureRuntimeLocked(ctx context.Context, id string, display bo
 	}
 	m.setState(id, StateActive, "runtime")
 	return r, nil
+}
+
+func (m *Manager) prepareWSDir(id string) error {
+	dir := m.wsDir(id)
+	if err := os.MkdirAll(dir, 0711); err != nil {
+		return err
+	}
+	if m.uid != 0 {
+		d, err := safefs.OpenBeneath(dir, ".", syscall.O_RDONLY|syscall.O_DIRECTORY, 0)
+		if err != nil {
+			return err
+		}
+		err = d.Chown(0, 0)
+		if err == nil {
+			err = d.Chmod(0711)
+		}
+		d.Close()
+		if err != nil {
+			return err
+		}
+		for _, n := range []string{"home", "run"} {
+			p := filepath.Join(dir, n)
+			st, err := os.Lstat(p)
+			if err != nil {
+				continue
+			}
+			if !st.IsDir() || (n == "run" && st.Sys().(*syscall.Stat_t).Uid != 0) {
+				if err := os.RemoveAll(p); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if err := safefs.MkdirBeneath(dir, "run", 0711); err != nil {
+		return err
+	}
+	for _, rel := range []string{"home/Downloads", "home/.xdg-run"} {
+		if err := safefs.MkdirBeneath(dir, rel, 0700); err != nil {
+			return err
+		}
+	}
+	if m.uid != 0 {
+		for _, rel := range []string{"home", "home/Downloads", "home/.xdg-run"} {
+			if err := safefs.ChownBeneath(dir, rel, m.uid, m.gid); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (r *Runtime) startDisplay(ctx context.Context, cfg WorkspaceConfig) error {

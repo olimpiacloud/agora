@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/olimpiacloud/agora/internal/safefs"
 	"github.com/olimpiacloud/agora/internal/sandbox"
 )
 
@@ -79,7 +81,7 @@ func Launch(ctx context.Context, o LaunchOptions) (*Browser, error) {
 		return nil, err
 	}
 	if o.Uid != 0 {
-		os.Chown(o.UserDataDir, int(o.Uid), int(o.Gid))
+		os.Lchown(o.UserDataDir, int(o.Uid), int(o.Gid))
 	}
 	disableTranslate(o.UserDataDir, o.Uid, o.Gid)
 	if lock, err := os.Readlink(filepath.Join(o.UserDataDir, "SingletonLock")); err == nil {
@@ -151,7 +153,7 @@ func Launch(ctx context.Context, o LaunchOptions) (*Browser, error) {
 	}
 	cmd.SysProcAttr = attr
 	if o.LogPath != "" {
-		if f, err := os.OpenFile(o.LogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); err == nil {
+		if f, err := os.OpenFile(o.LogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND|syscall.O_NOFOLLOW, 0600); err == nil {
 			cmd.Stdout = f
 			cmd.Stderr = f
 			defer f.Close()
@@ -477,12 +479,14 @@ func (b *Browser) checkChallenge(targetID string) {
 }
 
 func disableTranslate(dir string, uid, gid uint32) {
-	p := filepath.Join(dir, "Default", "Preferences")
+	p := filepath.Join("Default", "Preferences")
 	prefs := map[string]any{}
-	if b, err := os.ReadFile(p); err == nil {
+	if b, err := safefs.ReadFileBeneath(dir, p); err == nil {
 		if json.Unmarshal(b, &prefs) != nil {
 			return
 		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return
 	}
 	tr, _ := prefs["translate"].(map[string]any)
 	if tr == nil {
@@ -497,9 +501,14 @@ func disableTranslate(dir string, uid, gid uint32) {
 	if err != nil {
 		return
 	}
-	os.MkdirAll(filepath.Dir(p), 0700)
-	if os.WriteFile(p, b, 0600) == nil && uid != 0 {
-		os.Chown(filepath.Dir(p), int(uid), int(gid))
-		os.Chown(p, int(uid), int(gid))
+	owner, group := -1, -1
+	if uid != 0 {
+		owner, group = int(uid), int(gid)
+	}
+	if safefs.MkdirBeneath(dir, "Default", 0700) != nil {
+		return
+	}
+	if safefs.WriteFileBeneath(dir, p, b, 0600, owner, group) == nil {
+		safefs.ChownBeneath(dir, "Default", owner, group)
 	}
 }

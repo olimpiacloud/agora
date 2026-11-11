@@ -473,7 +473,17 @@ func (m *Manager) SetLayout(ctx context.Context, id, layout string) error {
 	return nil
 }
 
+func checkAppID(id string) error {
+	if id != "" && !nameRe.MatchString(id) {
+		return fmt.Errorf("invalid app id %q", id)
+	}
+	return nil
+}
+
 func (m *Manager) LaunchApp(ctx context.Context, id string, spec AppSpec) (*Proc, error) {
+	if err := checkAppID(spec.ID); err != nil {
+		return nil, err
+	}
 	r, err := m.ensureRuntime(ctx, id, true)
 	if err != nil {
 		return nil, err
@@ -483,6 +493,9 @@ func (m *Manager) LaunchApp(ctx context.Context, id string, spec AppSpec) (*Proc
 }
 
 func (r *Runtime) launch(spec AppSpec) (*Proc, error) {
+	if err := checkAppID(spec.ID); err != nil {
+		return nil, err
+	}
 	if spec.ID == "" {
 		spec.ID = NewID("app")
 	}
@@ -510,7 +523,7 @@ func (r *Runtime) launch(spec AppSpec) (*Proc, error) {
 		attr.CgroupFD = cgfd
 	}
 	cmd.SysProcAttr = attr
-	logf, _ := os.OpenFile(filepath.Join(r.m.wsDir(r.id), "run", spec.ID+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	logf, _ := os.OpenFile(filepath.Join(r.m.wsDir(r.id), "run", spec.ID+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND|syscall.O_NOFOLLOW, 0600)
 	cmd.Stdout = logf
 	cmd.Stderr = logf
 	if err := cmd.Start(); err != nil {
