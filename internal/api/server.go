@@ -638,6 +638,10 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 			return
 		}
 	}
+	if op == "checkpoint" && body.Snapshot && p.limited() && s.m.Snapshots(id) >= maxCursorSnapshots {
+		writeErr(w, fmt.Errorf("%w: workspace already has %d profile snapshots (limit %d for cursors)", core.ErrForbidden, s.m.Snapshots(id), maxCursorSnapshots))
+		return
+	}
 	var err error
 	var res any = map[string]any{"ok": true}
 	switch op {
@@ -654,7 +658,11 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 	case "checkpoint":
 		res, err = s.m.Checkpoint(ctx, id, cmp.Or(body.Reason, "api"), body.Snapshot)
 	case "fork":
-		res, err = s.m.Fork(ctx, id, body.Name)
+		if p.limited() {
+			res, err = s.forkCursorWorkspace(ctx, p.Cursor, id, body.Name)
+		} else {
+			res, err = s.m.Fork(ctx, id, body.Name)
+		}
 	case "resize":
 		err = s.m.Resize(ctx, id, body.Width, body.Height)
 	case "layout":
@@ -871,7 +879,41 @@ func acquireAllowed(p *Principal, surface string) error {
 	return need(p, "desktop")
 }
 
-const maxCursorWorkspaces = 5
+const (
+	maxCursorWorkspaces = 5
+	maxCursorSnapshots  = 3
+)
+
+func (s *Server) treeWorkspaces(c *core.Cursor) int {
+	n := 0
+	for _, v := range s.m.ListWorkspaces() {
+		if v.State == core.StateDestroyed {
+			continue
+		}
+		if v.OwnerRoot != "" {
+			if v.OwnerRoot == c.Root {
+				n++
+			}
+			continue
+		}
+		if v.Owner == "" {
+			continue
+		}
+		if o, err := s.m.GetCursor(v.Owner); err == nil && o.Root == c.Root {
+			n++
+		}
+	}
+	return n
+}
+
+func (s *Server) forkCursorWorkspace(ctx context.Context, c *core.Cursor, id, name string) (*core.Workspace, error) {
+	s.wsMu.Lock()
+	defer s.wsMu.Unlock()
+	if n := s.treeWorkspaces(c); n >= maxCursorWorkspaces {
+		return nil, fmt.Errorf("%w: cursor tree already has %d live workspaces (limit %d)", core.ErrForbidden, n, maxCursorWorkspaces)
+	}
+	return s.m.ForkAs(ctx, id, name, c.ID, c.Root)
+}
 
 func (s *Server) createCursorWorkspace(ctx context.Context, c *core.Cursor, req core.CreateWorkspaceReq) (*core.Workspace, error) {
 	if c.Workspace != "" {
@@ -879,18 +921,14 @@ func (s *Server) createCursorWorkspace(ctx context.Context, c *core.Cursor, req 
 			inheritLimits(&req.Config, parent.Config)
 		}
 	}
+	if max := s.m.Config().SuspendAfter; max > 0 && req.Config.SuspendAfter.Duration > max {
+		req.Config.SuspendAfter.Duration = max
+	}
+	req.OwnerRoot = c.Root
 	start := req.Start
 	req.Start = false
 	s.wsMu.Lock()
-	n := 0
-	for _, v := range s.m.ListWorkspaces() {
-		if v.State == core.StateDestroyed || v.Owner == "" {
-			continue
-		}
-		if o, err := s.m.GetCursor(v.Owner); err == nil && o.Root == c.Root {
-			n++
-		}
-	}
+	n := s.treeWorkspaces(c)
 	if n >= maxCursorWorkspaces {
 		s.wsMu.Unlock()
 		return nil, fmt.Errorf("%w: cursor tree already has %d live workspaces (limit %d)", core.ErrForbidden, n, maxCursorWorkspaces)

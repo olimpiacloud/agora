@@ -75,6 +75,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Read-only tab actions no longer claim a tab, and claims are atomic, so a cursor that only looked at a tab cannot close it when it ends.
 - Cursor progress messages, status details, errors and human-request reasons are cut to 2000 characters; results over 256 KB, message bodies over 64 KB, goals and prompts over 64 KB, names over 200 bytes and more than 32 labels are refused; cursor, board and workspace-creation requests are limited to 512 KB. A cursor could previously make the daemon keep gigabytes in memory.
 - `agora serve --max-agents` (16 by default, `0` removes the limit): the daemon refuses to launch another agent while that many launched agents are alive, so one cursor can no longer fan out an unbounded number of agent processes. A subagent's `budget.max_cursors` can no longer exceed its parent's.
+- The limit of 5 live workspaces per cursor tree now counts forks and the workspaces of deleted cursors. A workspace forked by a cursor belongs to that cursor (it could not use its own fork before). Cursors cannot set `suspend_after` above the daemon default, negative `idle_after`, `suspend_after` and `ttl` are refused, and a cursor cannot add a profile snapshot to a workspace that already has 3.
 
 ### Fixed
 

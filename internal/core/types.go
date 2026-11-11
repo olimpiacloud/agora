@@ -78,6 +78,7 @@ type Workspace struct {
 	State      WSState           `json:"state"`
 	Config     WorkspaceConfig   `json:"config"`
 	Owner      string            `json:"owner,omitempty"`
+	OwnerRoot  string            `json:"owner_root,omitempty"`
 	ForkOf     string            `json:"fork_of,omitempty"`
 	Created    time.Time         `json:"created"`
 	Updated    time.Time         `json:"updated"`
