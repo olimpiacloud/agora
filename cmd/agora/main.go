@@ -88,7 +88,8 @@ func serve(args []string) {
 	rtcIfaces := fs.String("rtc-interfaces", "", "comma-separated interfaces for WebRTC candidates")
 	rtcLoop := fs.Bool("rtc-loopback", true, "offer loopback ICE candidates")
 	idle := fs.Duration("idle-after", 5*time.Minute, "mark workspace idle after inactivity")
-	suspend := fs.Duration("suspend-after", 0, "suspend idle workspaces after (0 = never by default)")
+	suspend := fs.Duration("suspend-after", 30*time.Minute, "suspend workspaces after this long without activity or viewers (0 = never)")
+	tabIdle := fs.Duration("tab-idle", 15*time.Minute, "close browser tabs and stop launched apps of ended cursors after this long unused (0 = never)")
 	fs.Parse(args)
 	host, _, _ := net.SplitHostPort(*listen)
 	if host != "127.0.0.1" && host != "localhost" && host != "::1" && os.Getenv("AGORA_ALLOW_PUBLIC") != "1" {
@@ -101,7 +102,7 @@ func serve(args []string) {
 	exe, _ := os.Executable()
 	m, err := core.NewManager(core.Config{
 		Home: *home, AppsUser: *appsUser, ChromeBinary: *chrome,
-		IdleAfter: *idle, SuspendAfter: *suspend,
+		IdleAfter: *idle, SuspendAfter: *suspend, TabIdle: *tabIdle,
 		RTC:         stream.RTCOptions{UDPPort: *rtcPort, IncludeLoop: *rtcLoop, Interfaces: ifaces},
 		AgoraBinary: exe, ListenURL: "http://" + *listen,
 	})

@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime"
 	"sort"
+	"syscall"
 	"time"
 )
 
@@ -76,13 +77,18 @@ func (m *Manager) lifecycleTick() {
 		frozen := r.frozen
 		idle := r.idle
 		r.mu.Unlock()
+		suspendAfter := it.w.Config.SuspendAfter.Duration
+		if suspendAfter == 0 {
+			suspendAfter = m.cfg.SuspendAfter
+		}
 		if frozen {
-			if it.w.Config.SuspendAfter.Duration > 0 && idleFor > it.w.Config.SuspendAfter.Duration {
+			if suspendAfter > 0 && idleFor > suspendAfter {
 				go m.Suspend(context.Background(), it.w.ID, "idle")
 			}
 			continue
 		}
 		r.releaseSeats(m.cfg.SeatIdle)
+		m.reap(it.w.ID, r)
 		if viewers > 0 {
 			continue
 		}
@@ -100,10 +106,139 @@ func (m *Manager) lifecycleTick() {
 			}
 			continue
 		}
-		if it.w.Config.SuspendAfter.Duration > 0 && idleFor > it.w.Config.SuspendAfter.Duration {
+		if suspendAfter > 0 && idleFor > suspendAfter {
 			go m.Suspend(context.Background(), it.w.ID, "idle")
 		}
 	}
+}
+
+func (m *Manager) reap(id string, r *Runtime) {
+	if m.cfg.TabIdle <= 0 {
+		return
+	}
+	r.mu.Lock()
+	if r.reaping || r.closing {
+		r.mu.Unlock()
+		return
+	}
+	r.reaping = true
+	r.mu.Unlock()
+	go func() {
+		defer func() {
+			r.mu.Lock()
+			r.reaping = false
+			r.mu.Unlock()
+		}()
+		m.reapApps(id, r)
+		r.mu.Lock()
+		human := r.human
+		r.mu.Unlock()
+		if time.Since(human) > m.cfg.TabIdle {
+			m.reapTabs(id, r)
+		}
+	}()
+}
+
+func (m *Manager) reapApps(id string, r *Runtime) {
+	type app struct {
+		pid     int
+		owner   string
+		started time.Time
+	}
+	var apps []app
+	r.mu.Lock()
+	for pid, p := range r.procs {
+		if p.App.Owner != "" {
+			apps = append(apps, app{pid, p.App.Owner, p.Started})
+		}
+	}
+	r.mu.Unlock()
+	for _, a := range apps {
+		if time.Since(a.started) < m.cfg.TabIdle || m.cursorLive(a.owner) {
+			continue
+		}
+		syscall.Kill(-a.pid, syscall.SIGTERM)
+		m.Bus.Publish("scheduler.app_stopped", id, a.owner, map[string]any{"pid": a.pid, "reason": "owner ended"})
+	}
+}
+
+func (m *Manager) reapTabs(id string, r *Runtime) {
+	r.brMu.Lock()
+	b := r.browser
+	r.brMu.Unlock()
+	if b == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tabs := b.Tabs()
+	open := len(tabs)
+	for _, t := range tabs {
+		if time.Since(t.LastUsed()) < m.cfg.TabIdle {
+			continue
+		}
+		r.mu.Lock()
+		owner := r.tabOwner[t.TargetID]
+		r.mu.Unlock()
+		if m.cursorWaitsForHuman(owner) {
+			continue
+		}
+		url, _ := t.Info()["url"].(string)
+		if err := t.Close(ctx); err != nil {
+			continue
+		}
+		open--
+		r.mu.Lock()
+		delete(r.tabOwner, t.TargetID)
+		r.mu.Unlock()
+		m.Bus.Publish("scheduler.tab_closed", id, owner, map[string]any{"target": t.TargetID, "url": url, "reason": "idle"})
+	}
+	r.mu.Lock()
+	if open > 0 {
+		r.noTabs = time.Time{}
+		r.mu.Unlock()
+		return
+	}
+	if r.noTabs.IsZero() {
+		r.noTabs = time.Now()
+	}
+	stop := time.Since(r.noTabs) > min(browserIdle, m.cfg.TabIdle)
+	r.mu.Unlock()
+	if !stop {
+		return
+	}
+	r.brMu.Lock()
+	if r.browser != b {
+		r.brMu.Unlock()
+		return
+	}
+	r.browser = nil
+	r.brMu.Unlock()
+	r.mu.Lock()
+	r.noTabs = time.Time{}
+	r.lastTabs = nil
+	r.mu.Unlock()
+	b.Close(ctx)
+	m.Bus.Publish("scheduler.browser_stopped", id, "", map[string]any{"reason": "no tabs"})
+}
+
+const browserIdle = 2 * time.Minute
+
+func (m *Manager) cursorLive(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := m.cursors[id]
+	return c != nil && !c.Status.Terminal()
+}
+
+func (m *Manager) cursorWaitsForHuman(id string) bool {
+	if id == "" {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := m.cursors[id]
+	return c != nil && (c.Status == CursorNeedHuman || c.Status == CursorBlocked)
 }
 
 func (m *Manager) hasActiveAgents(ws string) bool {

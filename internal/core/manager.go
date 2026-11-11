@@ -26,6 +26,7 @@ type Config struct {
 	SeatIdle     time.Duration
 	IdleAfter    time.Duration
 	SuspendAfter time.Duration
+	TabIdle      time.Duration
 	RTC          stream.RTCOptions
 	AgoraBinary  string
 	ListenURL    string

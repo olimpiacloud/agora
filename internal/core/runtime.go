@@ -43,6 +43,9 @@ type Runtime struct {
 	brMu      sync.Mutex
 	browser   *browser.Browser
 	brCrashes int
+	noTabs    time.Time
+	human     time.Time
+	reaping   bool
 	engine    *stream.Engine
 	core      *x11.Seat
 	seats     map[string]*seatLease

@@ -208,6 +208,7 @@ func (v *Viewer) Input(raw []byte) {
 	}
 	v.r.touch()
 	v.r.mu.Lock()
+	v.r.human = time.Now()
 	if eng := v.r.engine; eng != nil {
 		eng.Interact()
 	}

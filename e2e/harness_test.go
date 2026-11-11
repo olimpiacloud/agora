@@ -38,6 +38,10 @@ func need(t *testing.T) {
 }
 
 func newH(t *testing.T) *H {
+	return newHWith(t, nil)
+}
+
+func newHWith(t *testing.T, tune func(*core.Config)) *H {
 	need(t)
 	home, err := os.MkdirTemp("/tmp", "agora-e2e-")
 	if err != nil {
@@ -48,7 +52,11 @@ func newH(t *testing.T) *H {
 	if os.Getuid() == 0 {
 		appsUser = "agora"
 	}
-	m, err := core.NewManager(core.Config{Home: home, AppsUser: appsUser, IdleAfter: time.Hour, RTC: stream.RTCOptions{IncludeLoop: true}})
+	cfg := core.Config{Home: home, AppsUser: appsUser, IdleAfter: time.Hour, RTC: stream.RTCOptions{IncludeLoop: true}}
+	if tune != nil {
+		tune(&cfg)
+	}
+	m, err := core.NewManager(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
