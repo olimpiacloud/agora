@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/olimpiacloud/agora/internal/client"
 )
@@ -82,6 +83,7 @@ type Server struct {
 	outMu  sync.Mutex
 	shotMu sync.Mutex
 	shots  map[string]shotMap
+	drain  time.Duration
 }
 
 type shotMap struct {
@@ -143,7 +145,7 @@ func shotScale(data []byte, srcW, srcH, ox, oy float64) *shotMap {
 }
 
 func New(c *client.Client) *Server {
-	s := &Server{c: c, out: os.Stdout}
+	s := &Server{c: c, out: os.Stdout, drain: 30 * time.Second}
 	s.tools = tools()
 	s.byName = map[string]*Tool{}
 	for i := range s.tools {
@@ -267,8 +269,20 @@ func (s *Server) Serve(ctx context.Context, in io.Reader) error {
 			s.write(msg)
 		}(req)
 	}
+	idle := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(idle)
+	}()
+	bound := time.NewTimer(s.drain)
+	select {
+	case <-idle:
+	case <-bound.C:
+	case <-ctx.Done():
+	}
+	bound.Stop()
 	cancelAll()
-	wg.Wait()
+	<-idle
 	return sc.Err()
 }
 

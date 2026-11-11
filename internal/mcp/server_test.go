@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -16,10 +17,11 @@ import (
 type slowAPI struct {
 	started   chan struct{}
 	cancelled chan struct{}
+	release   chan struct{}
 }
 
 func newSlowServer(t *testing.T) (*Server, *slowAPI, *bytes.Buffer) {
-	api := &slowAPI{started: make(chan struct{}, 4), cancelled: make(chan struct{}, 4)}
+	api := &slowAPI{started: make(chan struct{}, 4), cancelled: make(chan struct{}, 4), release: make(chan struct{})}
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/me" {
 			json.NewEncoder(w).Encode(map[string]any{"admin": true})
@@ -30,6 +32,8 @@ func newSlowServer(t *testing.T) (*Server, *slowAPI, *bytes.Buffer) {
 		select {
 		case <-r.Context().Done():
 			api.cancelled <- struct{}{}
+		case <-api.release:
+			json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		case <-time.After(10 * time.Second):
 			json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		}
@@ -95,7 +99,7 @@ func TestToolCallCancelledByNotification(t *testing.T) {
 	}
 }
 
-func TestShutdownCancelsInflightCalls(t *testing.T) {
+func TestInflightCallFinishesAfterEOF(t *testing.T) {
 	s, api, _ := newSlowServer(t)
 	pr, pw := io.Pipe()
 	done := make(chan error, 1)
@@ -105,8 +109,57 @@ func TestShutdownCancelsInflightCalls(t *testing.T) {
 	pw.Close()
 	select {
 	case <-done:
+		t.Fatal("Serve returned before the in-flight call finished")
+	case <-api.cancelled:
+		t.Fatal("the in-flight call was cancelled when stdin closed")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(api.release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("Serve kept waiting for an in-flight call after stdin closed")
+		t.Fatal("Serve did not return after the in-flight call finished")
+	}
+	if out := s.output(); !strings.Contains(out, `"id":"a"`) || !strings.Contains(out, `"result"`) {
+		t.Fatalf("the in-flight call was not answered: %q", out)
+	}
+}
+
+func TestShutdownCancelsInflightCalls(t *testing.T) {
+	s, api, _ := newSlowServer(t)
+	s.drain = 100 * time.Millisecond
+	pr, pw := io.Pipe()
+	done := make(chan error, 1)
+	go func() { done <- s.Serve(t.Context(), pr) }()
+	send(t, pw, slowCall, `"a"`)
+	waitFor(t, api.started, "the tool call to reach the API")
+	pw.Close()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve kept waiting for an in-flight call past the drain bound")
 	}
 	waitFor(t, api.cancelled, "the API request to be cancelled")
+}
+
+func TestContextCancelsInflightCallsAtOnce(t *testing.T) {
+	s, api, _ := newSlowServer(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	done := make(chan error, 1)
+	go func() { done <- s.Serve(ctx, pr) }()
+	send(t, pw, slowCall, `"a"`)
+	waitFor(t, api.started, "the tool call to reach the API")
+	cancel()
+	waitFor(t, api.cancelled, "the API request to be cancelled")
+	pw.Close()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not return after its context was cancelled")
+	}
 }
