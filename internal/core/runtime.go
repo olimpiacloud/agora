@@ -415,7 +415,9 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 			return nil, err
 		}
 	}
-	b, err := browser.Launch(ctx, browser.LaunchOptions{Wrap: wrap, CgroupFD: cgfd, Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: cfg.BrowserArgs, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log"), OnEvent: r.onBrowserEvent})
+	extra, _ := browser.WebGLArgs(cfg.WebGL)
+	extra = append(extra, cfg.BrowserArgs...)
+	b, err := browser.Launch(ctx, browser.LaunchOptions{Wrap: wrap, CgroupFD: cgfd, Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: extra, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log"), OnEvent: r.onBrowserEvent})
 	if err != nil {
 		return nil, err
 	}

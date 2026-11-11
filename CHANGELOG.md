@@ -20,6 +20,8 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - The Paseo live panel takes pointer, wheel and keyboard input.
 - `AGORA_TOKEN_FILE` for the CLI and MCP server.
 - `agora serve --workspace-retention` (7 days by default, `0` keeps them): destroyed workspaces are purged after that time, together with their browser profile (unless a live workspace shares it), home and checkpoints. They used to stay on disk forever. On the first start after upgrading, workspaces destroyed more than 7 days ago are purged within a minute. Deleting a cursor also removes its `agents/<id>` directory and log.
+- Launched agents can have a maximum runtime: `launch.max_runtime` (for example `"10m"`) per launch and `agora serve --agent-max-runtime` for the daemon (off by default). When it passes, the cursor fails with "agent exceeded its maximum runtime" and the process is stopped. Cursors cannot ask for more than the daemon value.
+- `config.webgl: "software"` (admin only) starts the workspace's Chromium with a CPU WebGL renderer, so pages with 3D content can be tested with the normal browser tools.
 
 ### Changed
 
@@ -79,6 +81,10 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Read-only tab actions no longer claim a tab, and claims are atomic, so a cursor that only looked at a tab cannot close it when it ends.
 - The Paseo plugin gives each agent's MCP server its cursor token through a `0600` file (`AGORA_TOKEN_FILE`) instead of an inline `AGORA_TOKEN`, which Paseo passed on the agent's command line where every local user could read it.
 - The stream `hello` message no longer includes `token_hash` or `launch.env` of the workspace's cursors, which every viewer (including read-only viewer links) could read.
+- Cursor progress messages, status details, errors and human-request reasons are cut to 2000 characters; results over 256 KB, message bodies over 64 KB, goals and prompts over 64 KB, names over 200 bytes and more than 32 labels are refused; cursor, board and workspace-creation requests are limited to 512 KB. A cursor could previously make the daemon keep gigabytes in memory.
+- `agora serve --max-agents` (16 by default, `0` removes the limit): the daemon refuses to launch another agent while that many launched agents are alive, so one cursor can no longer fan out an unbounded number of agent processes. A subagent's `budget.max_cursors` can no longer exceed its parent's.
+- The limit of 5 live workspaces per cursor tree now counts forks and the workspaces of deleted cursors. A workspace forked by a cursor belongs to that cursor (it could not use its own fork before). Cursors cannot set `suspend_after` above the daemon default, negative `idle_after`, `suspend_after` and `ttl` are refused, and a cursor cannot add a profile snapshot to a workspace that already has 3.
+- Label keys starting with `paseo_` can only be set with the admin token. A cursor could mark its own cursors and workspaces with the labels the Paseo plugin uses to recognise its agents and workspaces.
 
 ### Fixed
 
@@ -127,6 +133,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - An expired workspace is destroyed once: `workspace.expired` and `workspace.destroyed` are no longer published again every two seconds while the destroy runs, and destroying an already destroyed workspace does nothing.
 - Input from a viewer that was already detached no longer marks a suspended or frozen workspace active or restarts it, a call that arrives while an idle suspend is queued keeps its runtime, the list of tabs to restore survives a restore that restored nothing, and a browser crash is recorded (with its tabs and a `browser.crashed` event) even when an API call notices it before the watcher does.
 - `budget.max_tabs` holds when several cursors open tabs at the same time. An app whose owner cursor ended gets SIGTERM once and SIGKILL 10 seconds later, with a single `scheduler.app_stopped` event instead of one every 2 seconds. Transferring a cursor updates the root and depth of its whole subtree. A desktop created larger than 1920x1200 can be resized up to its own size again. Per-tab observation caches are dropped when the tab closes, and usage figures are no longer modified while being served.
+- A viewer reconnecting with `wake=0` no longer thaws a frozen workspace; it gets `bye: suspended` like on a suspended one.
 
 ## [0.1.0] - 2026-11-06
 

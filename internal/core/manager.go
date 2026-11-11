@@ -34,6 +34,8 @@ type Config struct {
 	CursorRetention    time.Duration
 	WorkspaceRetention time.Duration
 	AppKillGrace       time.Duration
+	MaxAgents          int
+	AgentMaxRuntime    time.Duration
 	RTC                stream.RTCOptions
 	AgoraBinary        string
 	ListenURL          string
@@ -44,6 +46,7 @@ type Config struct {
 const DefaultCursorRetention = 7 * 24 * time.Hour
 
 const DefaultWorkspaceRetention = 7 * 24 * time.Hour
+const DefaultMaxAgents = 16
 
 var (
 	ErrNotFound  = errors.New("not found")

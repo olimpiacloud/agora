@@ -751,3 +751,26 @@ func TestCursorWorktreesStayInsideRoots(t *testing.T) {
 		t.Fatalf("cursor worktree inside the roots: got %d %v, want 201", code, out)
 	}
 }
+
+func TestReservedLabelsAreAdminOnly(t *testing.T) {
+	e := newEnv(t)
+	ws := e.workspace()
+	_, tok := e.cursor(e.admin, map[string]any{"workspace": ws, "permissions": []string{"spawn", "workspace"}})
+	cases := []struct {
+		name, tok, path string
+		body            map[string]any
+		want            int
+	}{
+		{"cursor child with paseo_agent", tok, "/v1/cursors", map[string]any{"labels": map[string]string{"paseo_agent": "x"}}, 403},
+		{"cursor child with plain label", tok, "/v1/cursors", map[string]any{"labels": map[string]string{"note": "x"}}, 201},
+		{"cursor workspace with paseo_workspace", tok, "/v1/workspaces", map[string]any{"labels": map[string]string{"paseo_workspace": "w"}}, 403},
+		{"cursor workspace with plain label", tok, "/v1/workspaces", map[string]any{"labels": map[string]string{"note": "x"}}, 201},
+		{"admin cursor with paseo_agent", e.admin, "/v1/cursors", map[string]any{"workspace": ws, "labels": map[string]string{"paseo_agent": "x"}}, 201},
+		{"admin workspace with paseo_workspace", e.admin, "/v1/workspaces", map[string]any{"labels": map[string]string{"paseo_workspace": "w"}}, 201},
+	}
+	for _, c := range cases {
+		if code, out := e.req(c.tok, "POST", c.path, c.body); code != c.want {
+			t.Fatalf("%s: %d %v, want %d", c.name, code, out, c.want)
+		}
+	}
+}

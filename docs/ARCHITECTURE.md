@@ -26,5 +26,5 @@ A Go daemon (a modular monolith) that runs **one virtual X server (Xvfb) per act
 
 - Isolation between cursors of the same workspace is logical (locks, tab owners, scoped tokens), not a security boundary. Workspaces are sandboxed by default (`--sandbox-default`): Chrome and their apps run in their own mount, PID, IPC and UTS namespaces with a minimal `/dev` (see [SANDBOX.md](SANDBOX.md)). Only the admin can create a workspace with `"sandbox": false`, and workspaces created before the default keep their config. Without the sandbox, the apps and Chrome of every workspace run as the same `agora` user, so separate workspaces are separate processes, profiles and displays, but not a security boundary between each other. Xvfb runs as a dedicated `agora-x` user (`--x-user`), neither root nor the apps user, so apps cannot signal another workspace's X server, read its capture memory or replace its socket.
 - *Hibernated* (memory checkpoint) is not implemented; RAM is not restored after *Suspend*.
-- Xvfb has no GPU; Chromium uses software rasterization.
+- Xvfb has no GPU; Chromium uses software rasterization; a workspace can opt in to software WebGL (`config.webgl`).
 - WebRTC needs UDP to the host; behind a Cloudflare Tunnel the WebSocket transport is used.

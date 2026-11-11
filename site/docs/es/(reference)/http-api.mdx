@@ -158,7 +158,7 @@ Cuerpo de creación:
 | `parent` | Por defecto, el cursor que llama. |
 | `permissions` | Subconjunto de `desktop`, `browser`, `process`, `spawn`, `message`, `workspace`; intersectado con los del padre. |
 | `budget` | `max_cursors` (hijos directos), `max_depth`. |
-| `launch` | `{adapter, model, effort, prompt, command, tools, profile, env}`. Mirá [lanzar subagentes](/agents/tools#subagents). |
+| `launch` | `{adapter, model, effort, prompt, command, tools, profile, env, max_runtime}`. Mirá [lanzar subagentes](/agents/tools#subagents). |
 | `worktree` | `{repo, branch, base, ports}`. |
 
 Operaciones (`POST /v1/cursors/{id}/{op}`, por el propio cursor, un ancestro o el admin):

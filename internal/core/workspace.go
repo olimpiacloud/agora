@@ -13,20 +13,28 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/olimpiacloud/agora/internal/browser"
 	"github.com/olimpiacloud/agora/internal/sandbox"
 )
 
 var nameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 type CreateWorkspaceReq struct {
-	Name   string            `json:"name"`
-	Owner  string            `json:"owner,omitempty"`
-	Config WorkspaceConfig   `json:"config"`
-	Start  bool              `json:"start,omitempty"`
-	Labels map[string]string `json:"labels,omitempty"`
+	Name      string            `json:"name"`
+	Owner     string            `json:"owner,omitempty"`
+	OwnerRoot string            `json:"-"`
+	Config    WorkspaceConfig   `json:"config"`
+	Start     bool              `json:"start,omitempty"`
+	Labels    map[string]string `json:"labels,omitempty"`
 }
 
 func (m *Manager) CreateWorkspace(ctx context.Context, req CreateWorkspaceReq) (*Workspace, error) {
+	if len(req.Name) > maxNameBytes {
+		return nil, fmt.Errorf("name is limited to %d bytes", maxNameBytes)
+	}
+	if err := checkLabels(req.Labels); err != nil {
+		return nil, err
+	}
 	id := NewID("ws")
 	if req.Name == "" {
 		req.Name = id
@@ -40,6 +48,9 @@ func (m *Manager) CreateWorkspace(ctx context.Context, req CreateWorkspaceReq) (
 	if req.Config.Layout == "" {
 		req.Config.Layout = "tile"
 	}
+	if req.Config.IdleAfter.Duration < 0 || req.Config.SuspendAfter.Duration < 0 || req.Config.TTL.Duration < 0 {
+		return nil, fmt.Errorf("idle_after, suspend_after and ttl must not be negative")
+	}
 	if req.Config.IdleAfter.Duration == 0 {
 		req.Config.IdleAfter.Duration = m.cfg.IdleAfter
 	}
@@ -52,8 +63,11 @@ func (m *Manager) CreateWorkspace(ctx context.Context, req CreateWorkspaceReq) (
 	if !nameRe.MatchString(req.Config.Profile) {
 		return nil, fmt.Errorf("invalid profile name %q", req.Config.Profile)
 	}
+	if _, err := browser.WebGLArgs(req.Config.WebGL); err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
-	w := &Workspace{ID: id, Name: req.Name, State: StateCreated, Config: req.Config, Owner: req.Owner, Created: now, Updated: now, LastActive: now, Labels: req.Labels}
+	w := &Workspace{ID: id, Name: req.Name, State: StateCreated, Config: req.Config, Owner: req.Owner, OwnerRoot: req.OwnerRoot, Created: now, Updated: now, LastActive: now, Labels: req.Labels}
 	m.mu.Lock()
 	m.ws[id] = w
 	m.saveWS(w)
@@ -412,6 +426,10 @@ func (m *Manager) Thaw(ctx context.Context, id string) error {
 }
 
 func (m *Manager) Fork(ctx context.Context, id, name string) (*Workspace, error) {
+	return m.ForkAs(ctx, id, name, "", "")
+}
+
+func (m *Manager) ForkAs(ctx context.Context, id, name, owner, ownerRoot string) (*Workspace, error) {
 	src, err := m.GetWorkspace(id)
 	if err != nil {
 		return nil, err
@@ -442,8 +460,11 @@ func (m *Manager) Fork(ctx context.Context, id, name string) (*Workspace, error)
 	if name == "" {
 		name = src.Name + "-fork"
 	}
+	if owner == "" {
+		owner, ownerRoot = src.Owner, src.OwnerRoot
+	}
 	now := time.Now().UTC()
-	w := &Workspace{ID: nid, Name: name, State: StateCreated, Config: cfg, Owner: src.Owner, ForkOf: id, Created: now, Updated: now, LastActive: now}
+	w := &Workspace{ID: nid, Name: name, State: StateCreated, Config: cfg, Owner: owner, OwnerRoot: ownerRoot, ForkOf: id, Created: now, Updated: now, LastActive: now}
 	if r == nil && src.Checkpoint != nil {
 		for _, t := range src.Checkpoint.Tabs {
 			tabs = append(tabs, TabRecord{URL: t.URL, Title: t.Title})
@@ -458,6 +479,17 @@ func (m *Manager) Fork(ctx context.Context, id, name string) (*Workspace, error)
 	m.mu.Unlock()
 	m.Bus.Publish("workspace.forked", nid, "", map[string]any{"from": id})
 	return w, nil
+}
+
+func (m *Manager) Snapshots(id string) int {
+	ents, _ := os.ReadDir(filepath.Join(m.cfg.Home, "checkpoints", id))
+	n := 0
+	for _, e := range ents {
+		if e.IsDir() {
+			n++
+		}
+	}
+	return n
 }
 
 func (m *Manager) Destroy(ctx context.Context, id string, purge bool) error {

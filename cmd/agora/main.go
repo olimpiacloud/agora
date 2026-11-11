@@ -94,6 +94,8 @@ func serve(args []string) {
 	tabIdle := fs.Duration("tab-idle", 15*time.Minute, "close browser tabs and stop launched apps of ended cursors after this long unused (0 = never)")
 	cursorRetention := fs.Duration("cursor-retention", core.DefaultCursorRetention, "delete finished cursors after this long (0 = keep forever)")
 	workspaceRetention := fs.Duration("workspace-retention", core.DefaultWorkspaceRetention, "purge destroyed workspaces (record, profile, home, checkpoints) after this long (0 = keep forever)")
+	agentMaxRuntime := fs.Duration("agent-max-runtime", 0, "fail and stop a launched agent after this long (0 = no limit); a launch may set a shorter launch.max_runtime")
+	maxAgents := fs.Int("max-agents", core.DefaultMaxAgents, "launched agents alive at once, across all workspaces (0 = unlimited)")
 	worktreeRoots := fs.String("worktree-roots", "", "comma-separated absolute directories where cursors may create worktrees (empty = any repository owned by the daemon user)")
 	sandboxDefault := fs.Bool("sandbox-default", true, "sandbox new workspaces unless the admin sets \"sandbox\": false (needs root and an apps user)")
 	fs.Parse(args)
@@ -108,7 +110,7 @@ func serve(args []string) {
 	exe, _ := os.Executable()
 	m, err := core.NewManager(core.Config{
 		Home: *home, AppsUser: *appsUser, XUser: *xUser, ChromeBinary: *chrome,
-		IdleAfter: *idle, SuspendAfter: *suspend, TabIdle: *tabIdle, CursorRetention: *cursorRetention, WorkspaceRetention: *workspaceRetention,
+		IdleAfter: *idle, SuspendAfter: *suspend, TabIdle: *tabIdle, CursorRetention: *cursorRetention, WorkspaceRetention: *workspaceRetention, MaxAgents: *maxAgents, AgentMaxRuntime: *agentMaxRuntime,
 		RTC:         stream.RTCOptions{UDPPort: *rtcPort, IncludeLoop: *rtcLoop, Interfaces: ifaces},
 		AgoraBinary: exe, ListenURL: "http://" + *listen, SandboxDefault: *sandboxDefault,
 		WorktreeRoots: strings.FieldsFunc(*worktreeRoots, func(r rune) bool { return r == ',' }),

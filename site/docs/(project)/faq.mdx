@@ -25,7 +25,7 @@ sidebar:
     No. Agora needs Linux with Xvfb. Use a Linux server or VM and connect to it over an authenticated tunnel.
   </AccordionItem>
   <AccordionItem title="Is there a GPU?">
-    No. Xvfb has no GPU, so Chromium rasterizes in software. That is fine for most sites; heavy WebGL will be slow.
+    No. Xvfb has no GPU, so Chromium rasterizes in software. By default Chromium offers no WebGL there: `getContext('webgl')` returns nothing. A workspace created by the admin with `"webgl": "software"` in its config gets WebGL through a CPU renderer (SwiftShader), also inside the sandbox, so pages with 3D content can be tested with the normal browser tools.
   </AccordionItem>
   <AccordionItem title="What happens to logins when a workspace is suspended?">
     They survive. The browser profile lives on disk by name, so cookies and storage stay. Open pages are reloaded from their URLs on resume; memory is not checkpointed.
