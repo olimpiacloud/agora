@@ -3,11 +3,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { idleWorkspace, orphanWorkspaces, type AgoraWorkspace } from "./cleanup";
+import { removeTokenFile, writeTokenFile } from "./tokenfile";
 
 const URL_BASE = process.env.AGORA_URL || "http://127.0.0.1:7788";
 const HOME = process.env.AGORA_HOME || "/var/lib/agora";
 const STATE_DIR = join(homedir(), ".agora-paseo");
 const STATE_FILE = join(STATE_DIR, "state.json");
+const TOKEN_DIR = join(STATE_DIR, "tokens");
 
 export const AGORA_BIN = process.env.AGORA_BIN || (existsSync("/usr/local/bin/agora") ? "/usr/local/bin/agora" : "agora");
 
@@ -154,11 +156,16 @@ async function ensureAgentCursor(agentId: string, title: string | null, workspac
   return rec;
 }
 
+export function agentTokenFile(agentId: string, token: string): string {
+  return writeTokenFile(TOKEN_DIR, agentId, token);
+}
+
 export function releaseAgentCursor(agentId: string): Promise<void> {
   return serialize(`agent:${agentId}`, () => dropAgentCursor(agentId));
 }
 
 async function dropAgentCursor(agentId: string): Promise<void> {
+  removeTokenFile(TOKEN_DIR, agentId);
   const known = loadState().agents[agentId];
   if (!known) return;
   try {

@@ -73,6 +73,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Cursors only get worktrees of repositories owned by the daemon user, inside `--worktree-roots` when set.
 - The installer writes the agents' token to a `0600` file and registers it as `AGORA_TOKEN_FILE` instead of passing it in argv and storing it in agent configs (existing inline entries are migrated), and aborts instead of building `main` when no release is found. The uninstaller removes that file as its owner.
 - Read-only tab actions no longer claim a tab, and claims are atomic, so a cursor that only looked at a tab cannot close it when it ends.
+- The Paseo plugin gives each agent's MCP server its cursor token through a `0600` file (`AGORA_TOKEN_FILE`) instead of an inline `AGORA_TOKEN`, which Paseo passed on the agent's command line where every local user could read it.
 
 ### Fixed
 
