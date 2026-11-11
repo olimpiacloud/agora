@@ -320,17 +320,16 @@ func TestShutdownWaitsForLaunchExitWrites(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	m.mu.Lock()
-	m.launches[id] = &launchProc{cmd: cmd}
-	m.mu.Unlock()
+	if !m.registerLaunch(id, &launchProc{cmd: cmd}) {
+		t.Fatal("launch not tracked before shutdown")
+	}
 	go func() {
+		defer m.agents.Done()
 		cmd.Wait()
 		m.mu.Lock()
 		delete(m.launches, id)
 		m.mu.Unlock()
-		time.Sleep(200 * time.Millisecond)
-		m.Bus.Publish("agent.exited", "", id, nil)
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(400 * time.Millisecond)
 		m.Fail(id, "agent exited")
 	}()
 	m.Shutdown()

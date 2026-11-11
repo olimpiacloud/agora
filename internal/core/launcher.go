@@ -302,19 +302,16 @@ func (m *Manager) launchAgent(id, tok string) error {
 		return err
 	}
 	lp := &launchProc{cmd: cmd}
-	m.mu.Lock()
-	m.launches[id] = lp
-	if cc := m.cursors[id]; cc != nil {
-		cc.LaunchPid = cmd.Process.Pid
-		m.saveCursor(cc)
-	}
-	m.mu.Unlock()
-	if m.setCursorStatus(id, CursorRunning, "", false) != nil {
+	tracked := m.registerLaunch(id, lp)
+	if !tracked || m.setCursorStatus(id, CursorRunning, "", false) != nil {
 		lp.kill()
 	} else {
 		m.Bus.Publish("agent.launched", c.Workspace, id, map[string]any{"adapter": c.Launch.Adapter, "pid": cmd.Process.Pid})
 	}
 	go func() {
+		if tracked {
+			defer m.agents.Done()
+		}
 		err := cmd.Wait()
 		if logf != nil {
 			logf.Close()
@@ -365,6 +362,21 @@ func (m *Manager) launchAgent(id, tok string) error {
 		}
 	}()
 	return nil
+}
+
+func (m *Manager) registerLaunch(id string, lp *launchProc) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.launches[id] = lp
+	if cc := m.cursors[id]; cc != nil {
+		cc.LaunchPid = lp.cmd.Process.Pid
+		m.saveCursor(cc)
+	}
+	if m.ctx.Err() != nil {
+		return false
+	}
+	m.agents.Add(1)
+	return true
 }
 
 func lastLines(s string, n int) string {
