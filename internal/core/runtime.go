@@ -28,6 +28,8 @@ type Proc struct {
 	cmd     *exec.Cmd
 	done    chan struct{}
 	Exit    *int `json:"exit,omitempty"`
+	termAt  time.Time
+	killed  bool
 }
 
 type seatLease struct {
@@ -64,6 +66,7 @@ type Runtime struct {
 	restored   bool
 	lastObs    map[string]string
 	offsets    map[string][3]int
+	opening    int
 }
 
 func (m *Manager) runtime(id string) *Runtime {
@@ -74,6 +77,10 @@ func (m *Manager) runtime(id string) *Runtime {
 
 func (r *Runtime) touch() {
 	r.mu.Lock()
+	if r.closing {
+		r.mu.Unlock()
+		return
+	}
 	r.activity = time.Now()
 	wasIdle := r.idle
 	r.idle = false
@@ -116,6 +123,7 @@ func (m *Manager) ensureRuntimeLocked(ctx context.Context, id string, display bo
 	}
 	r := m.rt[id]
 	cfg := w.Config
+	ckpt := w.Checkpoint
 	m.mu.Unlock()
 	if r == nil {
 		r = &Runtime{m: m, id: id, seats: map[string]*seatLease{}, procs: map[int]*Proc{}, viewers: map[string]*Viewer{}, activity: time.Now(), started: time.Now(), tabOwner: map[string]string{}, offsets: map[string][3]int{}}
@@ -125,12 +133,12 @@ func (m *Manager) ensureRuntimeLocked(ctx context.Context, id string, display bo
 		if m.cg != nil {
 			m.cg.Ensure(id, cfg.Budget)
 		}
+		if ckpt != nil {
+			r.lastTabs = ckpt.Tabs
+		}
 		m.mu.Lock()
 		m.rt[id] = r
 		m.mu.Unlock()
-		if w.Checkpoint != nil {
-			r.lastTabs = w.Checkpoint.Tabs
-		}
 	}
 	if err := r.thaw(); err != nil {
 		return nil, err
@@ -164,6 +172,11 @@ func (m *Manager) ensureRuntimeLocked(ctx context.Context, id string, display bo
 			}
 		}
 	}
+	r.mu.Lock()
+	if r.suspending {
+		r.activity = time.Now()
+	}
+	r.mu.Unlock()
 	m.setState(id, StateActive, "runtime")
 	return r, nil
 }
@@ -340,12 +353,12 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 	r.brMu.Lock()
 	defer r.brMu.Unlock()
 	if r.browser != nil {
-		select {
-		case <-r.browser.Exited():
-			r.browser = nil
-		default:
+		if !browserExited(r.browser) {
 			return r.browser, nil
 		}
+		b := r.browser
+		r.browser = nil
+		r.noteBrowserExit(b)
 	}
 	r.mu.Lock()
 	closing := r.closing
@@ -382,7 +395,9 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 	if sw == 0 {
 		sw, sh = m.cfg.Width, m.cfg.Height
 	}
+	r.mu.Lock()
 	restore := r.lastTabs
+	r.mu.Unlock()
 	if len(restore) == 0 && len(cfg.AutostartURLs) > 0 {
 		for _, u := range cfg.AutostartURLs {
 			if browser.AllowedURL(u) != nil {
@@ -400,29 +415,7 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 			return nil, err
 		}
 	}
-	onEvent := func(kind string, data map[string]any) {
-		cur := ""
-		if t, ok := data["target"].(string); ok {
-			r.mu.Lock()
-			cur = r.tabOwner[t]
-			r.mu.Unlock()
-		}
-		if kind == "browser.challenge.detected" && cur != "" {
-			m.setCursorStatus(cur, CursorNeedHuman, fmt.Sprintf("%v challenge on %v", data["kind"], data["url"]), false)
-		}
-		if kind == "browser.tab.created" {
-			if op, _ := data["opener"].(string); op != "" {
-				r.mu.Lock()
-				if o := r.tabOwner[op]; o != "" {
-					r.tabOwner[data["target"].(string)] = o
-					cur = o
-				}
-				r.mu.Unlock()
-			}
-		}
-		m.Bus.Publish(kind, r.id, cur, data)
-	}
-	b, err := browser.Launch(ctx, browser.LaunchOptions{Wrap: wrap, CgroupFD: cgfd, Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: cfg.BrowserArgs, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log"), OnEvent: onEvent})
+	b, err := browser.Launch(ctx, browser.LaunchOptions{Wrap: wrap, CgroupFD: cgfd, Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: cfg.BrowserArgs, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log"), OnEvent: r.onBrowserEvent})
 	if err != nil {
 		return nil, err
 	}
@@ -437,6 +430,35 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 		go r.restoreTabs(b, restore)
 	}
 	return b, nil
+}
+
+func (r *Runtime) onBrowserEvent(kind string, data map[string]any) {
+	t, _ := data["target"].(string)
+	cur := ""
+	if t != "" {
+		r.mu.Lock()
+		cur = r.tabOwner[t]
+		r.mu.Unlock()
+	}
+	if kind == "browser.challenge.detected" && cur != "" {
+		r.m.setCursorStatus(cur, CursorNeedHuman, fmt.Sprintf("%v challenge on %v", data["kind"], data["url"]), false)
+	}
+	if kind == "browser.tab.created" {
+		if op, _ := data["opener"].(string); op != "" {
+			r.mu.Lock()
+			if o := r.tabOwner[op]; o != "" {
+				r.tabOwner[t] = o
+				cur = o
+			}
+			r.mu.Unlock()
+		}
+	}
+	if kind == "browser.tab.closed" && t != "" {
+		r.mu.Lock()
+		delete(r.lastObs, t)
+		r.mu.Unlock()
+	}
+	r.m.Bus.Publish(kind, r.id, cur, data)
 }
 
 func (r *Runtime) sandboxWrap(extra ...string) ([]string, error) {
@@ -501,9 +523,14 @@ func (r *Runtime) restoreTabs(b *browser.Browser, tabs []TabRecord) {
 			}
 		}
 	}
-	r.mu.Lock()
-	r.lastTabs = nil
-	r.mu.Unlock()
+	r.brMu.Lock()
+	current := r.browser == b
+	r.brMu.Unlock()
+	if restored > 0 && current {
+		r.mu.Lock()
+		r.lastTabs = nil
+		r.mu.Unlock()
+	}
 }
 
 func (r *Runtime) watchBrowser(b *browser.Browser, profile string, lease *profileLease) {
@@ -518,12 +545,17 @@ func (r *Runtime) watchBrowser(b *browser.Browser, profile string, lease *profil
 	if !current {
 		return
 	}
-	r.brCrashes++
-	tabs := r.tabRecordsFrom(b)
+	r.noteBrowserExit(b)
+}
+
+func (r *Runtime) noteBrowserExit(b *browser.Browser) {
+	tabs := r.cachedTabRecords(b)
 	r.mu.Lock()
 	r.lastTabs = tabs
+	r.brCrashes++
+	n := r.brCrashes
 	r.mu.Unlock()
-	r.m.Bus.Publish("browser.crashed", r.id, "", map[string]any{"tabs": len(tabs), "crashes": r.brCrashes, "note": "next browser call relaunches with the persistent profile and restores tabs"})
+	r.m.Bus.Publish("browser.crashed", r.id, "", map[string]any{"tabs": len(tabs), "crashes": n, "note": "next browser call relaunches with the persistent profile and restores tabs"})
 }
 
 func (r *Runtime) tabRecordsFrom(b *browser.Browser) []TabRecord {
@@ -534,6 +566,15 @@ func (r *Runtime) tabRecordsFrom(b *browser.Browser) []TabRecord {
 }
 
 var liveTabRecords = (*Runtime).tabRecordsFrom
+
+var browserExited = func(b *browser.Browser) bool {
+	select {
+	case <-b.Exited():
+		return true
+	default:
+		return false
+	}
+}
 
 func (r *Runtime) currentTabs() []TabRecord {
 	r.mu.Lock()

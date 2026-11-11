@@ -93,6 +93,7 @@ func serve(args []string) {
 	suspend := fs.Duration("suspend-after", 30*time.Minute, "suspend workspaces after this long without activity or viewers (0 = never)")
 	tabIdle := fs.Duration("tab-idle", 15*time.Minute, "close browser tabs and stop launched apps of ended cursors after this long unused (0 = never)")
 	cursorRetention := fs.Duration("cursor-retention", core.DefaultCursorRetention, "delete finished cursors after this long (0 = keep forever)")
+	workspaceRetention := fs.Duration("workspace-retention", core.DefaultWorkspaceRetention, "purge destroyed workspaces (record, profile, home, checkpoints) after this long (0 = keep forever)")
 	worktreeRoots := fs.String("worktree-roots", "", "comma-separated absolute directories where cursors may create worktrees (empty = any repository owned by the daemon user)")
 	sandboxDefault := fs.Bool("sandbox-default", true, "sandbox new workspaces unless the admin sets \"sandbox\": false (needs root and an apps user)")
 	fs.Parse(args)
@@ -107,7 +108,7 @@ func serve(args []string) {
 	exe, _ := os.Executable()
 	m, err := core.NewManager(core.Config{
 		Home: *home, AppsUser: *appsUser, XUser: *xUser, ChromeBinary: *chrome,
-		IdleAfter: *idle, SuspendAfter: *suspend, TabIdle: *tabIdle, CursorRetention: *cursorRetention,
+		IdleAfter: *idle, SuspendAfter: *suspend, TabIdle: *tabIdle, CursorRetention: *cursorRetention, WorkspaceRetention: *workspaceRetention,
 		RTC:         stream.RTCOptions{UDPPort: *rtcPort, IncludeLoop: *rtcLoop, Interfaces: ifaces},
 		AgoraBinary: exe, ListenURL: "http://" + *listen, SandboxDefault: *sandboxDefault,
 		WorktreeRoots: strings.FieldsFunc(*worktreeRoots, func(r rune) bool { return r == ',' }),

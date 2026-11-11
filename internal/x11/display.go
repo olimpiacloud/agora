@@ -46,24 +46,26 @@ type DisplayOptions struct {
 }
 
 type Display struct {
-	Num      int
-	Width    int
-	Height   int
-	AuthFile string
-	cookie   string
-	xuid     int
-	xgid     int
-	owner    int
-	proc     *exec.Cmd
-	conn     *xgb.Conn
-	root     xproto.Window
-	screen   *xproto.ScreenInfo
-	mu       sync.Mutex
-	sizeMu   sync.Mutex
-	randr    bool
-	exited   chan struct{}
-	exitErr  error
-	keymap   *keymap
+	Num       int
+	Width     int
+	Height    int
+	MaxWidth  int
+	MaxHeight int
+	AuthFile  string
+	cookie    string
+	xuid      int
+	xgid      int
+	owner     int
+	proc      *exec.Cmd
+	conn      *xgb.Conn
+	root      xproto.Window
+	screen    *xproto.ScreenInfo
+	mu        sync.Mutex
+	sizeMu    sync.Mutex
+	randr     bool
+	exited    chan struct{}
+	exitErr   error
+	keymap    *keymap
 }
 
 func socketPath(n int) string { return fmt.Sprintf("/tmp/.X11-unix/X%d", n) }
@@ -215,7 +217,7 @@ func StartDisplay(ctx context.Context, o DisplayOptions) (*Display, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	d := &Display{Num: num, Width: o.Width, Height: o.Height, AuthFile: auth, cookie: hex.EncodeToString(raw), xuid: o.XUid, xgid: o.XGid, owner: owner, proc: cmd, exited: make(chan struct{})}
+	d := &Display{Num: num, Width: o.Width, Height: o.Height, MaxWidth: maxW, MaxHeight: maxH, AuthFile: auth, cookie: hex.EncodeToString(raw), xuid: o.XUid, xgid: o.XGid, owner: owner, proc: cmd, exited: make(chan struct{})}
 	go func() {
 		d.exitErr = cmd.Wait()
 		if logf != nil {

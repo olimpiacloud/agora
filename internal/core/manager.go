@@ -20,26 +20,30 @@ import (
 )
 
 type Config struct {
-	Home            string
-	AppsUser        string
-	XUser           string
-	ChromeBinary    string
-	Width           int
-	Height          int
-	MaxSeats        int
-	SeatIdle        time.Duration
-	IdleAfter       time.Duration
-	SuspendAfter    time.Duration
-	TabIdle         time.Duration
-	CursorRetention time.Duration
-	RTC             stream.RTCOptions
-	AgoraBinary     string
-	ListenURL       string
-	WorktreeRoots   []string
-	SandboxDefault  bool
+	Home               string
+	AppsUser           string
+	XUser              string
+	ChromeBinary       string
+	Width              int
+	Height             int
+	MaxSeats           int
+	SeatIdle           time.Duration
+	IdleAfter          time.Duration
+	SuspendAfter       time.Duration
+	TabIdle            time.Duration
+	CursorRetention    time.Duration
+	WorkspaceRetention time.Duration
+	AppKillGrace       time.Duration
+	RTC                stream.RTCOptions
+	AgoraBinary        string
+	ListenURL          string
+	WorktreeRoots      []string
+	SandboxDefault     bool
 }
 
 const DefaultCursorRetention = 7 * 24 * time.Hour
+
+const DefaultWorkspaceRetention = 7 * 24 * time.Hour
 
 var (
 	ErrNotFound  = errors.New("not found")
@@ -74,6 +78,8 @@ type Manager struct {
 	usage     map[string]*WorkspaceUsage
 	profiles  map[string]*profileLease
 	portsHeld map[int]bool
+	expiring  map[string]bool
+	wtPending map[string]int
 	shots     shotStore
 	started   time.Time
 	ctx       context.Context
@@ -95,6 +101,9 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 	if cfg.IdleAfter == 0 {
 		cfg.IdleAfter = 5 * time.Minute
+	}
+	if cfg.AppKillGrace == 0 {
+		cfg.AppKillGrace = 10 * time.Second
 	}
 	var roots []string
 	for _, root := range cfg.WorktreeRoots {

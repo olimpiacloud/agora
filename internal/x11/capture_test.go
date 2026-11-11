@@ -130,3 +130,29 @@ func TestDialRefusesForeignSocket(t *testing.T) {
 	}
 	c.Close()
 }
+
+func TestDisplayRemembersItsFramebuffer(t *testing.T) {
+	requireXvfb(t)
+	d, err := StartDisplay(context.Background(), DisplayOptions{Width: 2000, Height: 1300, RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if d.MaxWidth != 2000 || d.MaxHeight != 1300 {
+		t.Fatalf("framebuffer %dx%d, want 2000x1300", d.MaxWidth, d.MaxHeight)
+	}
+	if err := d.SetSize(1280, 800); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetSize(2000, 1300); err != nil {
+		t.Fatal(err)
+	}
+	small, err := StartDisplay(context.Background(), DisplayOptions{Width: 640, Height: 480, RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer small.Close()
+	if small.MaxWidth != 1920 || small.MaxHeight != 1200 {
+		t.Fatalf("framebuffer %dx%d, want 1920x1200", small.MaxWidth, small.MaxHeight)
+	}
+}

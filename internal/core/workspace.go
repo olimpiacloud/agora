@@ -468,6 +468,9 @@ func (m *Manager) Destroy(ctx context.Context, id string, purge bool) error {
 	if err != nil {
 		return err
 	}
+	if w.State == StateDestroyed && !purge {
+		return nil
+	}
 	if r := m.runtime(id); r != nil {
 		r.shutdown(ctx)
 		m.mu.Lock()
@@ -526,9 +529,16 @@ func (m *Manager) Destroy(ctx context.Context, id string, purge bool) error {
 	return nil
 }
 
+func resizeAllowed(w, h, maxW, maxH int) error {
+	if w < 320 || h < 240 || w > maxW || h > maxH {
+		return fmt.Errorf("size must be between 320x240 and %dx%d", maxW, maxH)
+	}
+	return nil
+}
+
 func (m *Manager) Resize(ctx context.Context, id string, w, h int) error {
-	if w < 320 || h < 240 || w > 1920 || h > 1200 {
-		return fmt.Errorf("size must be between 320x240 and 1920x1200")
+	if err := resizeAllowed(w, h, 3840, 2160); err != nil {
+		return err
 	}
 	r, err := m.ensureRuntime(ctx, id, true)
 	if err != nil {
@@ -539,6 +549,9 @@ func (m *Manager) Resize(ctx context.Context, id string, w, h int) error {
 	r.mu.Unlock()
 	if d == nil {
 		return ErrState
+	}
+	if err := resizeAllowed(w, h, d.MaxWidth, d.MaxHeight); err != nil {
+		return err
 	}
 	if err := d.SetSize(w, h); err != nil {
 		return err

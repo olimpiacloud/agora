@@ -60,10 +60,11 @@ func (m *Manager) OpenTab(ctx context.Context, ws, cursorID string, req OpenTabR
 	if err != nil {
 		return nil, err
 	}
-	if maxTabs > 0 && len(b.Targets()) >= maxTabs {
+	if !r.beginOpen(len(b.Targets()), maxTabs) {
 		return nil, fmt.Errorf("workspace tab limit reached (%d)", maxTabs)
 	}
 	tab, err := b.NewTab(ctx, browser.NewTabOptions{URL: req.URL, NewWindow: !req.SameWindow, Isolated: req.Isolated})
+	r.endOpen()
 	if err != nil {
 		return nil, err
 	}
@@ -477,6 +478,22 @@ func (m *Manager) BrowserRestart(ctx context.Context, ws string) error {
 	m.Bus.Publish("browser.stopped", ws, "", map[string]any{"tabs": len(tabs)})
 	_, err := r.Browser(ctx)
 	return err
+}
+
+func (r *Runtime) beginOpen(open, limit int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if limit > 0 && open+r.opening >= limit {
+		return false
+	}
+	r.opening++
+	return true
+}
+
+func (r *Runtime) endOpen() {
+	r.mu.Lock()
+	r.opening--
+	r.mu.Unlock()
 }
 
 func (r *Runtime) observeDiff(target, cur string) string {

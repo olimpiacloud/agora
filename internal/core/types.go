@@ -206,6 +206,7 @@ type Worktree struct {
 	Base      string    `json:"base"`
 	Cursor    string    `json:"cursor,omitempty"`
 	Workspace string    `json:"workspace,omitempty"`
+	Root      string    `json:"root,omitempty"`
 	PortBase  int       `json:"port_base"`
 	Ports     int       `json:"ports"`
 	Created   time.Time `json:"created"`

@@ -515,3 +515,73 @@ func TestEndedCursorAppsWaitForReaper(t *testing.T) {
 		t.Fatal("deleting one cursor stopped the app of another")
 	}
 }
+
+func TestQueuedSuspendYieldsToANewCaller(t *testing.T) {
+	m := newTestManager(t)
+	ctx := context.Background()
+	id, r := newTestRuntime(t, m)
+	setActivity(r, time.Now().Add(-time.Hour))
+	if !r.claimSuspend() {
+		t.Fatal("suspend not claimed")
+	}
+	got, err := m.ensureRuntime(ctx, id, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != r {
+		t.Fatal("caller got a different runtime")
+	}
+	m.suspendIfIdle(ctx, id, r, time.Minute, "idle")
+	if m.runtime(id) != r {
+		t.Fatal("queued suspend tore down the caller's runtime")
+	}
+	if s := wsState(t, m, id); s != StateActive {
+		t.Fatalf("state %s, want active", s)
+	}
+}
+
+func TestRestoreTabsKeepsTheListWhenNothingWasRestored(t *testing.T) {
+	m := newTestManager(t)
+	_, r := newTestRuntime(t, m)
+	b := &browser.Browser{}
+	r.brMu.Lock()
+	r.browser = b
+	r.brMu.Unlock()
+	t.Cleanup(func() {
+		r.brMu.Lock()
+		r.browser = nil
+		r.brMu.Unlock()
+	})
+	r.mu.Lock()
+	r.lastTabs = []TabRecord{{URL: "about:blank"}}
+	r.mu.Unlock()
+	r.restoreTabs(b, []TabRecord{{URL: "about:blank"}})
+	r.mu.Lock()
+	n := len(r.lastTabs)
+	r.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("restore list has %d entries after a restore that restored nothing", n)
+	}
+}
+
+func TestBrowserCallRecordsACrashedBrowser(t *testing.T) {
+	m := newTestManager(t)
+	id, r := newTestRuntime(t, m)
+	orig := browserExited
+	browserExited = func(*browser.Browser) bool { return true }
+	t.Cleanup(func() {
+		browserExited = orig
+		r.brMu.Lock()
+		r.browser = nil
+		r.brMu.Unlock()
+	})
+	r.brMu.Lock()
+	r.browser = &browser.Browser{}
+	r.brMu.Unlock()
+	if _, err := r.Browser(context.Background()); err == nil {
+		t.Fatal("relaunch without a display succeeded")
+	}
+	if n := len(m.Bus.Recent(Filter{Workspace: id, Types: []string{"browser.crashed"}}, 5)); n != 1 {
+		t.Fatalf("%d browser.crashed events", n)
+	}
+}

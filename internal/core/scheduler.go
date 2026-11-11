@@ -42,6 +42,7 @@ func (m *Manager) schedule() {
 		m.lifecycleTick()
 		if n%30 == 0 {
 			m.reapCursors()
+			m.pruneWorkspaces(m.cfg.WorkspaceRetention)
 		}
 		if n%5 == 0 {
 			m.usageTick()
@@ -60,7 +61,13 @@ func (m *Manager) lifecycleTick() {
 	var expired []string
 	for id, w := range m.ws {
 		if w.Config.TTL.Duration > 0 && w.State != StateDestroyed && now.Sub(w.Created) > w.Config.TTL.Duration {
-			expired = append(expired, id)
+			if !m.expiring[id] {
+				if m.expiring == nil {
+					m.expiring = map[string]bool{}
+				}
+				m.expiring[id] = true
+				expired = append(expired, id)
+			}
 			continue
 		}
 		if r := m.rt[id]; r != nil {
@@ -70,7 +77,12 @@ func (m *Manager) lifecycleTick() {
 	m.mu.Unlock()
 	for _, id := range expired {
 		m.Bus.Publish("workspace.expired", id, "", nil)
-		go m.Destroy(context.Background(), id, false)
+		go func(id string) {
+			m.Destroy(context.Background(), id, false)
+			m.mu.Lock()
+			delete(m.expiring, id)
+			m.mu.Unlock()
+		}(id)
 	}
 	for _, it := range items {
 		r := it.r
@@ -173,12 +185,14 @@ func (m *Manager) reapApps(id string, r *Runtime) {
 		pid     int
 		owner   string
 		started time.Time
+		termAt  time.Time
+		killed  bool
 	}
 	var apps []app
 	r.mu.Lock()
 	for pid, p := range r.procs {
 		if p.App.Owner != "" {
-			apps = append(apps, app{pid, p.App.Owner, p.Started})
+			apps = append(apps, app{pid, p.App.Owner, p.Started, p.termAt, p.killed})
 		}
 	}
 	r.mu.Unlock()
@@ -186,8 +200,22 @@ func (m *Manager) reapApps(id string, r *Runtime) {
 		if time.Since(a.started) < m.cfg.TabIdle || m.ownerActive(a.owner) {
 			continue
 		}
-		syscall.Kill(-a.pid, syscall.SIGTERM)
-		m.Bus.Publish("scheduler.app_stopped", id, a.owner, map[string]any{"pid": a.pid, "reason": "owner ended"})
+		if a.termAt.IsZero() {
+			syscall.Kill(-a.pid, syscall.SIGTERM)
+			r.mu.Lock()
+			if p := r.procs[a.pid]; p != nil {
+				p.termAt = time.Now()
+			}
+			r.mu.Unlock()
+			m.Bus.Publish("scheduler.app_stopped", id, a.owner, map[string]any{"pid": a.pid, "reason": "owner ended"})
+		} else if !a.killed && time.Since(a.termAt) > m.cfg.AppKillGrace {
+			syscall.Kill(-a.pid, syscall.SIGKILL)
+			r.mu.Lock()
+			if p := r.procs[a.pid]; p != nil {
+				p.killed = true
+			}
+			r.mu.Unlock()
+		}
 	}
 }
 
@@ -332,6 +360,23 @@ func (m *Manager) pruneCursors(retention time.Duration) {
 	}
 }
 
+func (m *Manager) pruneWorkspaces(retention time.Duration) {
+	if retention <= 0 {
+		return
+	}
+	var old []string
+	m.mu.Lock()
+	for id, w := range m.ws {
+		if w.State == StateDestroyed && time.Since(w.Updated) > retention {
+			old = append(old, id)
+		}
+	}
+	m.mu.Unlock()
+	for _, id := range old {
+		m.Destroy(context.Background(), id, true)
+	}
+}
+
 func (m *Manager) Asleep(ws string) bool {
 	if r := m.runtime(ws); r != nil {
 		r.mu.Lock()
@@ -391,8 +436,12 @@ func (m *Manager) usageTick() {
 		u := m.measureLight(id, r)
 		m.mu.Lock()
 		if prev := m.usage[id]; prev != nil && prev.Detailed && time.Since(prev.Time) < time.Minute {
-			prev.CPU, prev.CgroupMB, prev.RSSMB, prev.Procs = u.CPU, u.CgroupMB, u.RSSMB, u.Procs
-			u = prev
+			cp := *prev
+			cp.CPU, cp.CgroupMB, cp.RSSMB, cp.Procs = u.CPU, u.CgroupMB, u.RSSMB, u.Procs
+			u = &cp
+			if m.rt[id] == r {
+				m.usage[id] = u
+			}
 		} else if m.rt[id] == r {
 			m.usage[id] = u
 		}
