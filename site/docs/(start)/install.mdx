@@ -88,6 +88,8 @@ agora serve --listen 127.0.0.1:7788 --home ~/.agora
 | `--rtc-interfaces` | all | Comma-separated interfaces for WebRTC candidates. |
 | `--rtc-loopback` | `true` | Offer loopback ICE candidates. |
 | `--idle-after` | `5m` | Mark a workspace idle after this long without activity. |
-| `--suspend-after` | `0` | Suspend idle workspaces after this long (`0` means never by default). |
+| `--suspend-after` | `30m` | Suspend a workspace after this long without agent activity or human input, even if someone is watching (`0` keeps workspaces running). |
+| `--tab-idle` | `15m` | Close browser tabs unused for this long and stop apps of cursors that already ended (`0` never closes them). |
+| `--cursor-retention` | `168h` | Delete finished cursors with no live descendants after this long (`0` keeps them forever). |
 
 Next: the [quickstart](/quickstart).
