@@ -38,6 +38,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - The Paseo plugin wakes live views at most every 100 ms per workspace.
 - CI fails when the committed `web/dist` does not match `web/src`.
 - CI and `make check` run the Go unit tests with the race detector (`make race` runs only that).
+- CI runs the sandbox, X-user and ownership tests as root, with the `agora` and `agora-x` users, and fails if any of them is skipped.
 - Snapshots stop collecting at the element cap and compute names only for the elements they return, and tabs no longer enable the CDP `Runtime` domain.
 - MCP coordinates are mapped from the last screenshot only until `browser_snapshot boxes=true`, `desktop_windows` or a resize; tool descriptions say which coordinate space applies. `browser_eval` results over 64 KB are truncated in MCP.
 - Tab actions on a tab with an open JavaScript dialog fail at once with the dialog text instead of waiting for the timeout, and an action that opens a dialog returns it.

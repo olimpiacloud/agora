@@ -34,7 +34,7 @@ bin/agora serve --listen 127.0.0.1:7799 --home /tmp/agora-dev
 AGORA_URL=http://127.0.0.1:7799 AGORA_TOKEN=$(cat /tmp/agora-dev/admin.token) bin/agora api GET /v1/system
 ```
 
-`gofmt -l cmd internal e2e web` must print nothing. CI runs vet, gofmt, the unit tests with the race detector, the e2e suite, the dashboard build and the plugin typecheck.
+`gofmt -l cmd internal e2e web` must print nothing. CI runs vet, gofmt, the unit tests with the race detector, the e2e suite, the dashboard build and the plugin typecheck. A separate job runs the tests that need root (the sandbox, the X user and the ownership checks) and fails if any of them is skipped.
 
 `e2e/` covers the acceptance criteria: persistent sessions, five subagents, concurrent multi-cursor input, CAPTCHA and human takeover, freeze and suspend, streaming without viewers and reconnection, plus upload, download, dialogs and drag. If you change behavior, add or adjust a test there.
 

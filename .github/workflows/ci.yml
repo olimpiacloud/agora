@@ -58,6 +58,57 @@ jobs:
           google-chrome --version
       - run: go test ./e2e/ -count=1 -timeout 25m -v
 
+  privileged:
+    name: privileged
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install Xvfb, x264 and Chrome
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libx264-dev libva-dev pkg-config
+          if ! command -v google-chrome >/dev/null; then
+            curl -fsSL -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo apt-get install -y -qq /tmp/chrome.deb
+          fi
+          google-chrome --version
+      - name: Create the agora and agora-x users
+        run: |
+          sudo useradd --system --create-home --home-dir /var/lib/agora-apps --shell /usr/sbin/nologin agora
+          sudo useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin agora-x
+      - name: Privilege-separation unit tests as root
+        run: |
+          set -o pipefail
+          sudo env "PATH=$PATH" go test -v -count=1 \
+            -run 'TestPrepareWSDir|TestWorktreeRefusesReposNotOwnedByDaemon|TestXUserXvfbAttachesShm|TestBrowserSemantic|TestHelperDropsPrivileges' \
+            ./internal/core/ ./internal/x11/ ./internal/browser/ ./internal/sandbox/ 2>&1 | tee privileged-unit.log
+      - name: Sandbox e2e tests as root
+        run: |
+          set -o pipefail
+          sudo env "PATH=$PATH" go test -v -count=1 -timeout 20m \
+            -run 'TestSandboxedWorkspace|TestWorkspacesAreSandboxedByDefault' \
+            ./e2e/ 2>&1 | tee privileged-e2e.log
+      - name: None of them may skip
+        run: |
+          for t in TestPrepareWSDir TestWorktreeRefusesReposNotOwnedByDaemon TestXUserXvfbAttachesShm TestBrowserSemantic TestHelperDropsPrivileges TestSandboxedWorkspace TestWorkspacesAreSandboxedByDefault; do
+            if ! grep -q -- "--- PASS: $t " privileged-unit.log privileged-e2e.log; then
+              echo "::error::$t did not pass (skipped, renamed or failed)"
+              exit 1
+            fi
+          done
+          if grep -- '--- SKIP' privileged-unit.log privileged-e2e.log; then
+            echo "::error::a privileged test was skipped"
+            exit 1
+          fi
+
   web:
     name: web
     runs-on: ubuntu-24.04
