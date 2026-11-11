@@ -79,9 +79,8 @@ func TestSessionFlowOnTodaysAPI(t *testing.T) {
 	if code, out := e.req(parent, "GET", "/v1/cursors/self", nil); code != 200 || out["status"] != "pending" {
 		t.Fatalf("gap changed: a standing cursor that never acts used to stay pending, the state reapCursors cancels after 24h; got %d %v", code, out)
 	}
-	code, out = e.req(parent, "POST", "/v1/cursors", map[string]any{"name": "fake", "labels": map[string]any{"paseo_agent": "x"}})
-	if code != 201 || out["cursor"].(map[string]any)["labels"].(map[string]any)["paseo_agent"] != "x" {
-		t.Fatalf("gap changed: any cursor used to be able to give a child the paseo_agent label that exempts it from reapCursors; got %d %v", code, out)
+	if code, out := e.req(parent, "POST", "/v1/cursors", map[string]any{"name": "fake", "labels": map[string]any{"paseo_agent": "x"}}); code != 403 {
+		t.Fatalf("a cursor must not give a child the reserved paseo_agent label; got %d %v", code, out)
 	}
 
 	for i := 2; i <= 5; i++ {
