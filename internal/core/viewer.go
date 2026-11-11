@@ -351,6 +351,7 @@ func (m *Manager) resumeNeedsHuman(ws string) {
 }
 
 func (m *Manager) RequestHuman(ws, cursorID, reason string) error {
+	reason = clip(reason, maxDetailRunes)
 	if cursorID != "" {
 		if err := m.setCursorStatus(cursorID, CursorNeedHuman, reason, false); err != nil {
 			return err

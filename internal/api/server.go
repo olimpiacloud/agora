@@ -67,13 +67,25 @@ func writeErr(w http.ResponseWriter, err error) {
 	writeJSON(w, code, map[string]any{"error": err.Error()})
 }
 
+const (
+	maxBody       = 8 << 20
+	maxCursorBody = 512 << 10
+)
+
 func decode(r *http.Request, vs ...any) error {
+	return decodeLimit(r, maxBody, vs...)
+}
+
+func decodeLimit(r *http.Request, limit int64, vs ...any) error {
 	if r.Body == nil {
 		return nil
 	}
-	b, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	b, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
 		return err
+	}
+	if int64(len(b)) > limit {
+		return fmt.Errorf("request body is limited to %d bytes", limit)
 	}
 	if len(strings.TrimSpace(string(b))) == 0 {
 		return nil
@@ -197,7 +209,7 @@ func (s *Server) routes() {
 				Sandbox *bool `json:"sandbox"`
 			} `json:"config"`
 		}
-		if err := decode(r, &req, &opt); err != nil {
+		if err := decodeLimit(r, maxCursorBody, &req, &opt); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -446,7 +458,7 @@ func (s *Server) routes() {
 			Topic string `json:"topic"`
 			Text  string `json:"text"`
 		}
-		if err := decode(r, &req); err != nil {
+		if err := decodeLimit(r, maxCursorBody, &req); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -508,7 +520,7 @@ func (s *Server) routes() {
 			All       *bool    `json:"all"`
 			TimeoutMs int      `json:"timeout_ms"`
 		}
-		if err := decode(r, &req); err != nil {
+		if err := decodeLimit(r, maxCursorBody, &req); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -685,7 +697,7 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 
 func (s *Server) createCursor(w http.ResponseWriter, r *http.Request, p *Principal) {
 	var req core.CreateCursorReq
-	if err := decode(r, &req); err != nil {
+	if err := decodeLimit(r, maxCursorBody, &req); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -767,7 +779,7 @@ func (s *Server) cursorOp(w http.ResponseWriter, r *http.Request, p *Principal) 
 		TimeoutMs int               `json:"timeout_ms"`
 		core.TransferReq
 	}
-	if err := decode(r, &body); err != nil {
+	if err := decodeLimit(r, maxCursorBody, &body); err != nil {
 		writeErr(w, err)
 		return
 	}

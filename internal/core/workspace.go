@@ -27,6 +27,12 @@ type CreateWorkspaceReq struct {
 }
 
 func (m *Manager) CreateWorkspace(ctx context.Context, req CreateWorkspaceReq) (*Workspace, error) {
+	if len(req.Name) > maxNameBytes {
+		return nil, fmt.Errorf("name is limited to %d bytes", maxNameBytes)
+	}
+	if err := checkLabels(req.Labels); err != nil {
+		return nil, err
+	}
 	id := NewID("ws")
 	if req.Name == "" {
 		req.Name = id

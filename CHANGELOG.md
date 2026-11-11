@@ -73,6 +73,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Cursors only get worktrees of repositories owned by the daemon user, inside `--worktree-roots` when set.
 - The installer writes the agents' token to a `0600` file and registers it as `AGORA_TOKEN_FILE` instead of passing it in argv and storing it in agent configs (existing inline entries are migrated), and aborts instead of building `main` when no release is found. The uninstaller removes that file as its owner.
 - Read-only tab actions no longer claim a tab, and claims are atomic, so a cursor that only looked at a tab cannot close it when it ends.
+- Cursor progress messages, status details, errors and human-request reasons are cut to 2000 characters; results over 256 KB, message bodies over 64 KB, goals and prompts over 64 KB, names over 200 bytes and more than 32 labels are refused; cursor, board and workspace-creation requests are limited to 512 KB. A cursor could previously make the daemon keep gigabytes in memory.
 
 ### Fixed
 
