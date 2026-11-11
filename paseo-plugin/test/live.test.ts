@@ -106,10 +106,32 @@ describe("live input over the viewer socket", () => {
 
   test("reuses the hub the frame poll uses and reports its viewer id", async () => {
     const sock = FakeSocket.all[0];
-    const r = await pollLive({ workspace: "ws_a", tier: "full", maxWidth: 1440, after: 0, metaAfter: 0 });
+    setTimeout(() => sock.frame(), 5);
+    const r = await pollLive({ workspace: "ws_a", tier: "full", maxWidth: 1440, after: 0 });
     expect(FakeSocket.all.length).toBe(1);
     expect(r.viewer).toBe("jpeg_1");
+    expect(r.frame).not.toBeNull();
+    expect(r.cursors).toBeNull();
     await sendLiveInput({ workspace: "ws_a", tier: "full", maxWidth: 1440, msgs: [{ t: "release" }] });
     expect(JSON.parse(sock.sent.at(-1)!)).toEqual({ t: "release" });
+  });
+
+  test("cursor events wake meta polls but not frame-only polls", async () => {
+    const sock = FakeSocket.all[0];
+    const meta = await pollLive({ workspace: "ws_a", tier: "full", metaOnly: true, after: 0, metaAfter: 0 });
+    let frameDone = false;
+    const frame = pollLive({ workspace: "ws_a", tier: "full", maxWidth: 1440, after: 1 }).then((r) => {
+      frameDone = true;
+      return r;
+    });
+    const next = pollLive({ workspace: "ws_a", tier: "full", metaOnly: true, after: 0, metaAfter: meta.metaSeq });
+    sock.message(JSON.stringify({ type: "event", event: { type: "cursor.pointer", cursor: "cur_1", data: { x: 99, y: 98 } } }));
+    const woke = await next;
+    expect(woke.cursors?.[0]).toMatchObject({ id: "cur_1", x: 99, y: 98 });
+    expect(frameDone).toBe(false);
+    sock.frame();
+    const f = await frame;
+    expect(f.cursors).toBeNull();
+    expect(f.seq).toBe(2);
   });
 });

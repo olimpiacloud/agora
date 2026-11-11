@@ -72,7 +72,6 @@ function bumpMeta(workspace: string) {
       metaWake.delete(workspace);
       const cur = metas.get(workspace);
       if (!cur) return;
-      for (const h of cur.hubs) wake(h);
       for (const w of cur.waiters) w();
       cur.waiters.clear();
     }, 100),
@@ -272,16 +271,20 @@ export async function pollLive(input: RpcInput<typeof live>) {
   if (input.metaOnly) return pollMeta(input);
   const { h: hub, m, cursor, tier, maxWidth } = hubFor(input);
   await ensureOpen(hub, cursor, tier, maxWidth);
-  const fresh = () => hub.seq > input.after || m.seq > input.metaAfter;
+  const metaAfter = input.metaAfter;
+  const withMeta = metaAfter !== undefined;
+  const fresh = () => hub.seq > input.after || (withMeta && m.seq > metaAfter);
   if (!fresh()) {
     await new Promise<void>((resolve) => {
       const done = () => {
         clearTimeout(t);
         hub.waiters.delete(done);
+        m.waiters.delete(done);
         resolve();
       };
       const t = setTimeout(done, 8000);
       hub.waiters.add(done);
+      if (withMeta) m.waiters.add(done);
     });
   }
   hub.lastPoll = Date.now();
@@ -293,8 +296,8 @@ export async function pollLive(input: RpcInput<typeof live>) {
     status: hub.status,
     viewer: hub.viewer,
     metaSeq: m.seq,
-    cursors: m.seq > input.metaAfter ? m.cursors : null,
-    locked: m.locked,
+    cursors: withMeta && m.seq > metaAfter ? m.cursors : null,
+    locked: withMeta ? m.locked : null,
   };
 }
 
@@ -331,7 +334,8 @@ export function sendLiveInput(input: RpcInput<typeof liveInput>): Promise<{ ok: 
 async function pollMeta(input: RpcInput<typeof live>) {
   const m = meta(input.workspace);
   m.lastUse = Date.now();
-  if (m.seq <= input.metaAfter) {
+  const metaAfter = input.metaAfter ?? 0;
+  if (m.seq <= metaAfter) {
     await new Promise<void>((resolve) => {
       const done = () => {
         clearTimeout(t);
@@ -350,7 +354,7 @@ async function pollMeta(input: RpcInput<typeof live>) {
     status: null,
     viewer: null,
     metaSeq: m.seq,
-    cursors: m.seq > input.metaAfter ? m.cursors : null,
+    cursors: m.seq > metaAfter ? m.cursors : null,
     locked: m.locked,
   };
 }

@@ -15,10 +15,10 @@ type LiveState = { frame: Frame | null; region: Region | null; cursors: Cur[]; l
 
 const EMPTY: LiveState = { frame: null, region: null, cursors: [], locked: null, status: "connecting", viewer: null };
 
-export function useLive(opts: { workspace: string | null; cursor?: string; tier: "card" | "tile" | "full"; maxWidth?: number; metaOnly?: boolean; enabled: boolean }) {
+export function useLive(opts: { workspace: string | null; cursor?: string; tier: "card" | "tile" | "full"; maxWidth?: number; meta?: boolean; enabled: boolean }) {
   const poll = useRpc(live);
   const [s, setS] = useState<LiveState>(EMPTY);
-  const { workspace, cursor, tier, maxWidth, metaOnly, enabled } = opts;
+  const { workspace, cursor, tier, maxWidth, meta, enabled } = opts;
   useEffect(() => {
     if (!workspace || !enabled) return;
     let stop = false;
@@ -28,7 +28,7 @@ export function useLive(opts: { workspace: string | null; cursor?: string; tier:
     const loop = async () => {
       while (!stop) {
         try {
-          const r = await poll({ workspace, cursor, tier, maxWidth, metaOnly, after, metaAfter });
+          const r = await poll({ workspace, cursor, tier, maxWidth, after, metaAfter: meta ? metaAfter : undefined });
           if (stop) return;
           fails = 0;
           after = r.seq;
@@ -37,7 +37,7 @@ export function useLive(opts: { workspace: string | null; cursor?: string; tier:
             frame: r.frame ? { w: r.frame.w, h: r.frame.h, uri: `data:image/jpeg;base64,${r.frame.b64}` } : p.frame,
             region: r.region.w ? r.region : p.region,
             cursors: r.cursors ?? p.cursors,
-            locked: r.locked,
+            locked: meta ? r.locked : p.locked,
             status: r.status,
             viewer: r.viewer,
           }));
@@ -53,7 +53,44 @@ export function useLive(opts: { workspace: string | null; cursor?: string; tier:
     return () => {
       stop = true;
     };
-  }, [workspace, cursor, tier, maxWidth, metaOnly, enabled]);
+  }, [workspace, cursor, tier, maxWidth, meta, enabled]);
+  return s;
+}
+
+type MetaState = { cursors: Cur[]; locked: string | null; status: string | null };
+
+const NO_META: MetaState = { cursors: [], locked: null, status: null };
+
+export function useCursors(workspace: string | null, enabled: boolean) {
+  const poll = useRpc(live);
+  const [s, setS] = useState<MetaState>(NO_META);
+  useEffect(() => {
+    setS(NO_META);
+    if (!workspace || !enabled) return;
+    let stop = false;
+    let metaAfter = 0;
+    let fails = 0;
+    const loop = async () => {
+      while (!stop) {
+        try {
+          const r = await poll({ workspace, tier: "full", metaOnly: true, after: 0, metaAfter });
+          if (stop) return;
+          fails = 0;
+          metaAfter = r.metaSeq;
+          setS((p) => (r.cursors || r.locked !== p.locked || p.status ? { cursors: r.cursors ?? p.cursors, locked: r.locked, status: null } : p));
+        } catch (e) {
+          if (stop) return;
+          fails++;
+          setS((p) => ({ ...p, status: e instanceof Error ? e.message : String(e) }));
+          await new Promise<void>((res) => setTimeout(res, Math.min(10000, 1000 * fails)));
+        }
+      }
+    };
+    void loop();
+    return () => {
+      stop = true;
+    };
+  }, [workspace, enabled]);
   return s;
 }
 

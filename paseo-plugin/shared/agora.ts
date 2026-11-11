@@ -81,7 +81,7 @@ export const live = defineRpc({
     maxWidth: z.number().optional(),
     metaOnly: z.boolean().optional(),
     after: z.number(),
-    metaAfter: z.number(),
+    metaAfter: z.number().optional(),
   }),
   output: z.object({
     seq: z.number(),

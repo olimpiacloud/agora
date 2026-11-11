@@ -33,7 +33,7 @@ export function makeLiveCard(client: PluginClientContext) {
     const agoraWs = wsq.data?.id ?? null;
     const newest = useIsNewestCard(agoraWs, call || shot || String(timestamp.getTime()), timestamp.getTime());
     const streaming = newest && !paused;
-    const lv = useLive({ workspace: agoraWs, tier: "card", enabled: streaming });
+    const lv = useLive({ workspace: agoraWs, tier: "card", meta: true, enabled: streaming });
     const sq = useQuery({
       queryKey: ["agora-shot", shot],
       queryFn: () => fetchShot({ id: shot! }),
