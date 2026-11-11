@@ -20,7 +20,7 @@ sudo apt install build-essential pkg-config libx264-dev libva-dev xvfb
 ```
 make build                # bin/agora with version, commit and build date
 make vet
-make check              # quick check: gofmt, vet, Go unit tests and TypeScript typechecks; needs no X or Chrome (only the cgo build deps)
+make check              # quick check: gofmt, vet, Go unit tests and TypeScript typechecks and tests; needs no X or Chrome (only the cgo build deps)
 go test ./internal/... -count=1
 go test ./e2e/ -count=1   # starts real Xvfb and Chrome in-process
 make web                  # rebuilds web/dist, which the binary embeds
