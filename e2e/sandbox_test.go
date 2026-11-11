@@ -34,7 +34,7 @@ func TestSandboxedWorkspace(t *testing.T) {
 	h.waitEval(h.admin, ws, tg, "document.readyState", "complete", 20*time.Second)
 
 	home := filepath.Join(h.home, "workspaces", ws, "home")
-	script := `id -u > r_id; ls -A /root > r_root 2>&1; ls -A ` + h.home + ` > r_state 2>&1; (echo x > /usr/agora-x) 2> r_usr; ls /proc | grep -c '^[0-9]' > r_procs; ls -A /dev | tr '\n' ' ' > r_dev; awk '$2=="/"{print $4}' /proc/mounts > r_rootopts; (exec 3<>/dev/ptmx && echo ok) > r_ptmx 2>&1; head -c 4 /dev/urandom | wc -c > r_urandom; touch r_done`
+	script := `id -u > r_id; ls -A /root > r_root 2>&1; ls -A ` + h.home + ` > r_state 2>&1; (echo x > /usr/agora-x) 2> r_usr; ls /proc | grep -c '^[0-9]' > r_procs; ls -A /dev | tr '\n' ' ' > r_dev; awk '$2=="/"{print $4}' /proc/mounts > r_rootopts; (exec 3<>/dev/ptmx && echo ok) > r_ptmx 2>&1; head -c 4 /dev/urandom | wc -c > r_urandom; grep -E '^(CapBnd|NoNewPrivs):' /proc/self/status | tr -s '\t ' ' ' > r_caps; touch r_done`
 	h.do(h.admin, "POST", "/v1/workspaces/"+ws+"/apps", map[string]any{"command": "sh", "args": []string{"-c", script}})
 	deadline := time.Now().Add(15 * time.Second)
 	for {
@@ -78,6 +78,9 @@ func TestSandboxedWorkspace(t *testing.T) {
 	if got := read("r_urandom"); got != "4" {
 		t.Errorf("/dev/urandom unreadable in sandbox: %q", got)
 	}
+	if got := read("r_caps"); !strings.Contains(got, "CapBnd: 0000000000000000") || !strings.Contains(got, "NoNewPrivs: 1") {
+		t.Errorf("sandboxed app keeps privileges: %q", got)
+	}
 
 	renderers := 0
 	ents, _ := os.ReadDir("/proc")
@@ -94,6 +97,22 @@ func TestSandboxedWorkspace(t *testing.T) {
 	}
 	if renderers == 0 {
 		t.Error("no renderer process found for the sandboxed workspace")
+	}
+	browsers := 0
+	for _, e := range ents {
+		cmd, err := os.ReadFile(filepath.Join("/proc", e.Name(), "cmdline"))
+		c := string(cmd)
+		if err != nil || !strings.Contains(c, "--remote-debugging-pipe") || !strings.Contains(c, ws) || strings.Contains(c, "--type=") || strings.Contains(c, sandbox.Cmd) {
+			continue
+		}
+		browsers++
+		st, _ := os.ReadFile(filepath.Join("/proc", e.Name(), "status"))
+		if !strings.Contains(string(st), "CapBnd:\t0000000000000000") || !strings.Contains(string(st), "NoNewPrivs:\t1") {
+			t.Errorf("browser %s keeps privileges in the sandbox", e.Name())
+		}
+	}
+	if browsers == 0 {
+		t.Error("no browser process found for the sandboxed workspace")
 	}
 	want := "0"
 	if xu, err := user.Lookup("agora-x"); err == nil {

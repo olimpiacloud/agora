@@ -40,6 +40,8 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - The dashboard no longer refetches cursors, workspaces and tabs on every pointer move.
 - The Paseo plugin wakes live views at most every 100 ms per workspace.
 - CI fails when the committed `web/dist` does not match `web/src`.
+- CI and `make check` run the Go unit tests with the race detector (`make race` runs only that).
+- CI runs the sandbox, X-user and ownership tests as root, with the `agora` and `agora-x` users, and fails if any of them is skipped.
 - Snapshots stop collecting at the element cap and compute names only for the elements they return, and tabs no longer enable the CDP `Runtime` domain.
 - MCP coordinates are mapped from the last screenshot only until `browser_snapshot boxes=true`, `desktop_windows` or a resize; tool descriptions say which coordinate space applies. `browser_eval` results over 64 KB are truncated in MCP.
 - Tab actions on a tab with an open JavaScript dialog fail at once with the dialog text instead of waiting for the timeout, and an action that opens a dialog returns it.
@@ -85,6 +87,8 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - `agora serve --max-agents` (16 by default, `0` removes the limit): the daemon refuses to launch another agent while that many launched agents are alive, so one cursor can no longer fan out an unbounded number of agent processes. A subagent's `budget.max_cursors` can no longer exceed its parent's.
 - The limit of 5 live workspaces per cursor tree now counts forks and the workspaces of deleted cursors. A workspace forked by a cursor belongs to that cursor (it could not use its own fork before). Cursors cannot set `suspend_after` above the daemon default, negative `idle_after`, `suspend_after` and `ttl` are refused, and a cursor cannot add a profile snapshot to a workspace that already has 3.
 - Label keys starting with `paseo_` can only be set with the admin token. A cursor could mark its own cursors and workspaces with the labels the Paseo plugin uses to recognise its agents and workspaces.
+- Built with Go 1.27.4, which fixes a `net/http` server crash (GO-2026-6859).
+- The sandbox helper now empties the capability bounding set and sets `no_new_privs` before it starts a workspace's Chrome or apps, as `docs/SANDBOX.md` already described.
 
 ### Fixed
 

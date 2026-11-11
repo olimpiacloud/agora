@@ -67,6 +67,7 @@ type Runtime struct {
 	lastObs    map[string]string
 	offsets    map[string][3]int
 	opening    int
+	netns      *exec.Cmd
 }
 
 func (m *Manager) runtime(id string) *Runtime {
@@ -473,12 +474,29 @@ func (r *Runtime) sandboxWrap(extra ...string) ([]string, error) {
 		self, _ = os.Executable()
 	}
 	binds := append([]string{m.wsDir(r.id)}, extra...)
+	netns := ""
 	r.mu.Lock()
 	if r.display != nil {
 		binds = append(binds, r.display.Socket())
 	}
+	if os.Getenv("AGORA_EXPERIMENTAL_NETNS") == "1" {
+		if r.netns == nil {
+			if r.closing {
+				r.mu.Unlock()
+				return nil, fmt.Errorf("%w: workspace is stopping", ErrState)
+			}
+			h := exec.Command("sleep", "infinity")
+			h.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL, Cloneflags: syscall.CLONE_NEWNET}
+			if err := h.Start(); err != nil {
+				r.mu.Unlock()
+				return nil, fmt.Errorf("network namespace: %w", err)
+			}
+			r.netns = h
+		}
+		netns = fmt.Sprintf("/proc/%d/ns/net", r.netns.Process.Pid)
+	}
 	r.mu.Unlock()
-	return sandbox.Wrap(self, sandbox.Spec{Uid: m.uid, Gid: m.gid, Binds: binds, Hide: []string{m.cfg.Home}}), nil
+	return sandbox.Wrap(self, sandbox.Spec{Uid: m.uid, Gid: m.gid, Binds: binds, Hide: []string{m.cfg.Home}, NetNS: netns}), nil
 }
 
 func (r *Runtime) restoreTabs(b *browser.Browser, tabs []TabRecord) {
@@ -799,7 +817,13 @@ func (r *Runtime) shutdown(ctx context.Context) {
 	r.mu.Lock()
 	eng, clip, core, wm, d := r.engine, r.clip, r.core, r.wm, r.display
 	r.engine, r.clip, r.core, r.wm, r.display = nil, nil, nil, nil, nil
+	holder := r.netns
+	r.netns = nil
 	r.mu.Unlock()
+	if holder != nil {
+		holder.Process.Kill()
+		holder.Wait()
+	}
 	if eng != nil {
 		eng.Close()
 	}
