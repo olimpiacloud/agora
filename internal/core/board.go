@@ -45,6 +45,7 @@ type BoardView struct {
 	Seq    int64        `json:"seq"`
 	Posts  []BoardPost  `json:"posts"`
 	Claims []BoardClaim `json:"claims"`
+	More   bool         `json:"more,omitempty"`
 }
 
 var boardKinds = map[string]bool{"note": true, "finding": true, "claim": true, "release": true, "done": true}
@@ -139,12 +140,15 @@ func (m *Manager) BoardRead(ws string, since int64, limit int) *BoardView {
 		return v
 	}
 	for _, p := range b.posts {
-		if p.Seq > since {
-			v.Posts = append(v.Posts, p)
+		if p.Seq <= since {
+			continue
 		}
-	}
-	if len(v.Posts) > limit {
-		v.Posts = v.Posts[len(v.Posts)-limit:]
+		if len(v.Posts) == limit {
+			v.More = true
+			v.Seq = v.Posts[len(v.Posts)-1].Seq
+			break
+		}
+		v.Posts = append(v.Posts, p)
 	}
 	for t, c := range b.claims {
 		if m.staleClaim(c) {

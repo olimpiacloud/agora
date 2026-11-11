@@ -32,10 +32,15 @@ func (l *launchProc) kill() {
 	})
 }
 
+const maxResultLine = 4 << 20
+
 type tailBuf struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-	f   *os.File
+	mu   sync.Mutex
+	buf  bytes.Buffer
+	line []byte
+	last []byte
+	over bool
+	f    *os.File
 }
 
 func (t *tailBuf) Write(p []byte) (int, error) {
@@ -52,6 +57,28 @@ func (t *tailBuf) Write(p []byte) (int, error) {
 		t.buf.Reset()
 		t.buf.Write(nb)
 	}
+	for rest := p; len(rest) > 0; {
+		seg, after, nl := bytes.Cut(rest, []byte{'\n'})
+		rest = after
+		if !t.over {
+			if len(t.line)+len(seg) > maxResultLine {
+				t.over = true
+				t.line = nil
+			} else {
+				t.line = append(t.line, seg...)
+			}
+		}
+		if !nl {
+			break
+		}
+		if t.over {
+			t.last = nil
+		} else if len(bytes.TrimSpace(t.line)) > 0 {
+			t.last = append(t.last[:0], t.line...)
+		}
+		t.line = t.line[:0]
+		t.over = false
+	}
 	return len(p), nil
 }
 
@@ -59,6 +86,28 @@ func (t *tailBuf) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.buf.String()
+}
+
+func (t *tailBuf) Output() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s := strings.TrimSpace(t.buf.String())
+	full := t.last
+	if len(bytes.TrimSpace(t.line)) > 0 {
+		full = t.line
+	}
+	if t.over {
+		full = nil
+	}
+	f := strings.TrimSpace(string(full))
+	if f == "" || strings.HasSuffix(s, f) {
+		return s
+	}
+	i := strings.LastIndexByte(s, '\n')
+	if !strings.HasSuffix(f, s[i+1:]) {
+		return s
+	}
+	return s[:i+1] + f
 }
 
 const DefaultLeanModel = "sonnet"
@@ -282,7 +331,7 @@ func (m *Manager) launchAgent(id, tok string) error {
 				code = -1
 			}
 		}
-		out := strings.TrimSpace(stdout.String())
+		out := stdout.Output()
 		u, text := parseClaudeResult(out)
 		if u == nil {
 			u, text = parseCodexResult(out)

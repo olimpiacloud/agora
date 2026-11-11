@@ -46,6 +46,9 @@ func (m *Manager) OpenTab(ctx context.Context, ws, cursorID string, req OpenTabR
 	if c != nil && c.Workspace != ws {
 		return nil, fmt.Errorf("%w: cursor belongs to workspace %s", ErrForbidden, c.Workspace)
 	}
+	if err := browser.AllowedURL(req.URL); err != nil {
+		return nil, err
+	}
 	m.mu.Lock()
 	w := m.ws[ws]
 	maxTabs := 0
@@ -183,6 +186,8 @@ type TabAction struct {
 	Boxes     bool     `json:"boxes,omitempty"`
 }
 
+var dialogSafe = map[string]bool{"dialog": true, "info": true, "close": true}
+
 var readOnlyTab = map[string]bool{"snapshot": true, "screenshot": true, "info": true, "challenge": true, "wait": true, "audit": true}
 
 func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabAction) (map[string]any, error) {
@@ -205,6 +210,11 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 	r, tab, err := m.tabFor(ctx, ws, c, target)
 	if err != nil {
 		return nil, err
+	}
+	ctx, cancel := tab.DialogContext(ctx)
+	defer cancel()
+	if d := tab.Dialog(); d != nil && !dialogSafe[a.Action] {
+		return nil, fmt.Errorf("dialog open (%v: %q); use browser_action dialog to accept or dismiss", d["type"], fmt.Sprint(d["message"]))
 	}
 	timeout := time.Duration(a.TimeoutMs) * time.Millisecond
 	res := map[string]any{"ok": true}
@@ -334,10 +344,10 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 	default:
 		return nil, fmt.Errorf("unknown tab action %q", a.Action)
 	}
-	if err != nil {
+	if err != nil && (!errors.Is(context.Cause(ctx), browser.ErrDialogOpen) || tab.Dialog() == nil) {
 		return nil, err
 	}
-	if a.Observe && !readOnlyTab[a.Action] && a.Action != "close" {
+	if err == nil && a.Observe && !readOnlyTab[a.Action] && a.Action != "close" {
 		tab.Settle(ctx)
 		if s, e := tab.Observe(ctx, 900); e == nil {
 			res["observation"] = r.observeDiff(target, s.Compact(false))
@@ -345,6 +355,11 @@ func (m *Manager) TabDo(ctx context.Context, ws, cursorID, target string, a TabA
 				res["challenge"] = ch
 			}
 		}
+	}
+	if d := tab.Dialog(); d != nil && a.Action != "info" {
+		delete(res, "observation")
+		res["dialog"] = d
+		res["note"] = "a JavaScript dialog is open; use browser_action dialog to accept or dismiss it"
 	}
 	if !readOnlyTab[a.Action] && c != nil {
 		sx, sy := -1, -1
