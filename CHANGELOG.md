@@ -12,6 +12,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Lean Claude Code subagents default to the `sonnet` model when `launch.model` is not set.
 - Codex subagents get the lean tool profile and the lean prompt, and their token usage is recorded in `cursor.usage`.
 - The Paseo plugin deletes an agent's cursor when Paseo closes or archives the agent, and gives Codex agents the lean tool descriptions.
+- Agent cursors in the web viewer and the Paseo plugin glide between reported positions with spline interpolation ([perfect-cursors](https://github.com/steveruizok/perfect-cursors)) instead of a linear CSS transition or a jump.
 
 ### Security
 

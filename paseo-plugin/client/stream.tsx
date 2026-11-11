@@ -4,6 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { Image, type LayoutChangeEvent, Pressable, Text, View } from "react-native";
 import type { z } from "zod";
 import { live, type liveCursor } from "../shared/agora";
+import { useSmoothPoint } from "./smooth";
 
 export type Cur = z.output<typeof liveCursor>;
 export type Region = { x: number; y: number; w: number; h: number; sw: number; sh: number };
@@ -137,6 +138,43 @@ function Arrow({ color, outline }: { color: string; outline: string }) {
   );
 }
 
+function CursorMark({ theme, cursor: c, region, scale, width, height, dim, small }: { theme: PluginTheme; cursor: Cur; region: Region; scale: number; width: number; height: number; dim: boolean; small?: boolean }) {
+  const [x, y] = useSmoothPoint(c.x, c.y);
+  const lx = (x - region.x) * scale;
+  const ly = (y - region.y) * scale;
+  if (lx < -2 || ly < -2 || lx > width + 2 || ly > height + 2) return null;
+  const busy = c.status !== "idle" && c.status !== "pending" && c.status !== "done";
+  return (
+    <View pointerEvents="none" style={{ position: "absolute", left: lx, top: ly, opacity: dim ? 0.75 : 1 }}>
+      <Arrow color={c.color} outline={theme.colors.surface0} />
+      <View
+        style={{
+          position: "absolute",
+          left: 12,
+          top: 14,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 4,
+          paddingHorizontal: 5,
+          paddingVertical: 1,
+          borderRadius: 4,
+          backgroundColor: c.color,
+          maxWidth: small ? 140 : 220,
+        }}
+      >
+        <Text numberOfLines={1} style={{ color: "#ffffff", fontSize: small ? 10 : 11, fontWeight: "600", flexShrink: 1 }}>
+          {c.name}
+        </Text>
+        {busy && !small && (
+          <Text numberOfLines={1} style={{ color: "#ffffff", fontSize: 10, opacity: 0.85 }}>
+            {c.status.replace("_", " ")}
+          </Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
 export function DesktopView({
   theme,
   frame,
@@ -183,40 +221,7 @@ export function DesktopView({
         cursors.map((c) => {
           if (!c.x && !c.y) return null;
           if (!showOthers && c.id !== highlight) return null;
-          const lx = (c.x - region.x) * scale;
-          const ly = (c.y - region.y) * scale;
-          if (lx < -2 || ly < -2 || lx > boxW + 2 || ly > rh * scale + 2) return null;
-          const dim = highlight && c.id !== highlight;
-          const busy = c.status !== "idle" && c.status !== "pending" && c.status !== "done";
-          return (
-            <View key={c.id} pointerEvents="none" style={{ position: "absolute", left: lx, top: ly, opacity: dim ? 0.75 : 1 }}>
-              <Arrow color={c.color} outline={theme.colors.surface0} />
-              <View
-                style={{
-                  position: "absolute",
-                  left: 12,
-                  top: 14,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 4,
-                  paddingHorizontal: 5,
-                  paddingVertical: 1,
-                  borderRadius: 4,
-                  backgroundColor: c.color,
-                  maxWidth: small ? 140 : 220,
-                }}
-              >
-                <Text numberOfLines={1} style={{ color: "#ffffff", fontSize: small ? 10 : 11, fontWeight: "600", flexShrink: 1 }}>
-                  {c.name}
-                </Text>
-                {busy && !small && (
-                  <Text numberOfLines={1} style={{ color: "#ffffff", fontSize: 10, opacity: 0.85 }}>
-                    {c.status.replace("_", " ")}
-                  </Text>
-                )}
-              </View>
-            </View>
-          );
+          return <CursorMark key={c.id} theme={theme} cursor={c} region={region} scale={scale} width={boxW} height={rh * scale} dim={!!highlight && c.id !== highlight} small={small} />;
         })}
     </View>
   );

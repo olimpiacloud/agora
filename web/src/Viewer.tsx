@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { getToken, mintViewer, type Cursor, type Lock } from './api'
+import { useSmoothPoint } from './smooth'
 import { DesktopSession, keyName, type Mode, type Transport } from './transport'
 
 interface Overlay {
@@ -248,22 +249,28 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
         <canvas ref={canvas} />
         <video ref={video} muted playsInline autoPlay />
         {Object.values(overlays).map((o) => (
-          <div
-            key={o.id}
-            className={'agent-cursor' + (Date.now() - o.t < 600 ? ' active' : '')}
-            style={{ left: g.ox + o.x * g.scale, top: g.oy + o.y * g.scale, ['--c' as string]: o.color }}
-          >
-            <svg width="18" height="22" viewBox="0 0 18 22">
-              <path d="M1 1 L1 17 L5.5 12.8 L8.6 20 L11.4 18.8 L8.4 11.8 L14.5 11.8 Z" fill="var(--c)" stroke="#0b0d10" strokeWidth="1.4" strokeLinejoin="round" />
-            </svg>
-            <span>
-              {o.name}
-              {o.status ? ` · ${o.status}` : ''}
-            </span>
-          </div>
+          <AgentCursor key={o.id} o={o} g={g} />
         ))}
         {status && <div className="status">{status}</div>}
       </div>
+    </div>
+  )
+}
+
+function AgentCursor({ o, g }: { o: Overlay; g: { scale: number; ox: number; oy: number } }) {
+  const [x, y] = useSmoothPoint(o.x, o.y)
+  return (
+    <div
+      className={'agent-cursor' + (Date.now() - o.t < 600 ? ' active' : '')}
+      style={{ left: g.ox + x * g.scale, top: g.oy + y * g.scale, ['--c' as string]: o.color }}
+    >
+      <svg width="18" height="22" viewBox="0 0 18 22">
+        <path d="M1 1 L1 17 L5.5 12.8 L8.6 20 L11.4 18.8 L8.4 11.8 L14.5 11.8 Z" fill="var(--c)" stroke="#0b0d10" strokeWidth="1.4" strokeLinejoin="round" />
+      </svg>
+      <span>
+        {o.name}
+        {o.status ? ` · ${o.status}` : ''}
+      </span>
     </div>
   )
 }
