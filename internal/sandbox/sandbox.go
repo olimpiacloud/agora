@@ -1,10 +1,13 @@
 package sandbox
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -52,6 +55,19 @@ func Wrap(self string, s Spec) []string {
 
 func Attr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL, Cloneflags: syscall.CLONE_NEWNS | syscall.CLONE_NEWPID | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS}
+}
+
+func Probe(self string, uid, gid int) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	argv := append(Wrap(self, Spec{Uid: uid, Gid: gid}), "true")
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.SysProcAttr = Attr()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("sandbox probe: %w: %s", err, bytes.TrimSpace(out))
+	}
+	return nil
 }
 
 func WaitSignals(pid int, timeout time.Duration) {

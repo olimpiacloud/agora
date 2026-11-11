@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/olimpiacloud/agora/internal/sandbox"
 )
 
 func TestA_SessionPersistence(t *testing.T) {
@@ -157,7 +158,7 @@ func TestB_FiveSubagents(t *testing.T) {
 		}
 	}
 	after := countProcs(t, "Xvfb .*"+h.home)
-	browsers := countProcs(t, "remote-debugging-pipe --user-data-dir="+h.home)
+	browsers := countProcs(t, "remote-debugging-pipe --user-data-dir="+h.home) - countProcs(t, sandbox.Cmd+" .*remote-debugging-pipe --user-data-dir="+h.home)
 	t.Logf("5 subagents done in %v; Xvfb processes before=%d after=%d; browser instances for this home=%d", el, before, after, browsers)
 	if after != before || browsers != 1 {
 		t.Fatalf("expected no new desktops and one browser, got xvfb %d->%d browsers %d", before, after, browsers)
@@ -191,10 +192,9 @@ func TestC_MulticursorDesktop(t *testing.T) {
 	ws := h.workspace("multi")
 	aID, a := h.cursor(h.admin, map[string]any{"name": "A", "workspace": ws})
 	_, b := h.cursor(h.admin, map[string]any{"name": "B", "workspace": ws})
-	files := []string{"/tmp/" + ws + "-a.txt", "/tmp/" + ws + "-b.txt"}
+	home := filepath.Join(h.home, "workspaces", ws, "home")
+	files := []string{filepath.Join(home, "a.txt"), filepath.Join(home, "b.txt")}
 	for _, f := range files {
-		os.Remove(f)
-		defer os.Remove(f)
 		h.do(h.admin, "POST", "/v1/workspaces/"+ws+"/apps", map[string]any{"command": "xterm", "args": []string{"-e", "sh", "-c", "cat > " + f}})
 	}
 	var wins []map[string]any

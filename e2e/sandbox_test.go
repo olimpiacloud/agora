@@ -96,3 +96,39 @@ func TestSandboxedWorkspace(t *testing.T) {
 		t.Error("no renderer process found for the sandboxed workspace")
 	}
 }
+
+func TestWorkspacesAreSandboxedByDefault(t *testing.T) {
+	if os.Getuid() != 0 {
+		t.Skip("sandbox needs root")
+	}
+	if _, err := user.Lookup("agora"); err != nil {
+		t.Skip("apps user agora missing")
+	}
+	h := newH(t)
+	ws := h.workspace("dflt")
+	if cfg := h.do(h.admin, "GET", "/v1/workspaces/"+ws, nil)["config"].(map[string]any); cfg["sandbox"] != true {
+		t.Fatalf("workspace created without \"sandbox\" is not sandboxed: %v", cfg)
+	}
+	tg := h.tab(h.admin, ws, h.site.URL+"/")
+	h.waitEval(h.admin, ws, tg, "document.readyState", "complete", 20*time.Second)
+	self, _ := os.Readlink("/proc/self/ns/pid")
+	found := false
+	ents, _ := os.ReadDir("/proc")
+	for _, e := range ents {
+		cmd, err := os.ReadFile(filepath.Join("/proc", e.Name(), "cmdline"))
+		if err != nil || !strings.Contains(string(cmd), "--type=renderer") || !strings.Contains(string(cmd), ws) {
+			continue
+		}
+		found = true
+		if ns, _ := os.Readlink(filepath.Join("/proc", e.Name(), "ns", "pid")); ns == self {
+			t.Errorf("renderer %s shares the daemon's pid namespace", e.Name())
+		}
+	}
+	if !found {
+		t.Error("no renderer process found for the workspace")
+	}
+	off := h.do(h.admin, "POST", "/v1/workspaces", map[string]any{"name": "nosb", "config": map[string]any{"sandbox": false}})
+	if cfg := off["config"].(map[string]any); cfg["sandbox"] == true {
+		t.Fatalf("admin could not opt out of the sandbox: %v", cfg)
+	}
+}

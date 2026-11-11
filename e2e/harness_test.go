@@ -52,7 +52,7 @@ func newHWith(t *testing.T, tune func(*core.Config)) *H {
 	if os.Getuid() == 0 {
 		appsUser = "agora"
 	}
-	cfg := core.Config{Home: home, AppsUser: appsUser, IdleAfter: time.Hour, RTC: stream.RTCOptions{IncludeLoop: true}}
+	cfg := core.Config{Home: home, AppsUser: appsUser, IdleAfter: time.Hour, RTC: stream.RTCOptions{IncludeLoop: true}, SandboxDefault: true}
 	if tune != nil {
 		tune(&cfg)
 	}

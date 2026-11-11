@@ -21,6 +21,7 @@ import (
 type env struct {
 	t     *testing.T
 	m     *core.Manager
+	api   *Server
 	srv   *httptest.Server
 	admin string
 }
@@ -39,13 +40,14 @@ func newEnv(t *testing.T, opts ...func(*core.Config)) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(New(m, auth, nil))
+	api := New(m, auth, nil)
+	srv := httptest.NewServer(api)
 	t.Cleanup(func() {
 		srv.Close()
 		m.Shutdown()
 	})
 	tok, _ := os.ReadFile(filepath.Join(home, "admin.token"))
-	return &env{t: t, m: m, srv: srv, admin: strings.TrimSpace(string(tok))}
+	return &env{t: t, m: m, api: api, srv: srv, admin: strings.TrimSpace(string(tok))}
 }
 
 func (e *env) req(tok, method, path string, body any) (int, map[string]any) {
@@ -592,6 +594,73 @@ func TestSurfaceLocksFollowPermissions(t *testing.T) {
 	e.req(e.admin, "POST", "/v1/workspaces/"+ws+"/release", map[string]any{"surface": "workspace"})
 	if code, out := e.reqAs(desk, "POST", "/v1/workspaces/"+ws+"/acquire", map[string]any{"surface": "tab:t2"}); code != 200 {
 		t.Fatalf("admin acting as cursor locking a tab: %d %v", code, out)
+	}
+}
+
+func TestSandboxedDecision(t *testing.T) {
+	yes, no := true, false
+	cases := []struct {
+		name     string
+		explicit *bool
+		admin    bool
+		def      bool
+		want     bool
+	}{
+		{"admin false, default on", &no, true, true, false},
+		{"cursor false, default on", &no, false, true, true},
+		{"admin absent, default on", nil, true, true, true},
+		{"cursor absent, default on", nil, false, true, true},
+		{"admin absent, default off", nil, true, false, false},
+		{"cursor absent, default off", nil, false, false, false},
+		{"cursor true, default off", &yes, false, false, true},
+		{"cursor false, default off", &no, false, false, false},
+	}
+	for _, c := range cases {
+		if got := sandboxed(c.explicit, c.admin, c.def); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestWorkspaceSandboxDefault(t *testing.T) {
+	for _, def := range []bool{true, false} {
+		e := newEnv(t)
+		e.api.sandboxDefault = func() bool { return def }
+		create := func(tok string, cfg map[string]any) bool {
+			t.Helper()
+			body := map[string]any{}
+			if cfg != nil {
+				body["config"] = cfg
+			}
+			code, out := e.req(tok, "POST", "/v1/workspaces", body)
+			if code != 201 {
+				t.Fatalf("create: %d %v", code, out)
+			}
+			return out["config"].(map[string]any)["sandbox"] == true
+		}
+		_, out := e.req(e.admin, "POST", "/v1/workspaces", map[string]any{"config": map[string]any{"sandbox": false}})
+		if out["config"].(map[string]any)["sandbox"] == true {
+			t.Fatalf("default %v: admin could not opt out", def)
+		}
+		_, tok := e.cursor(e.admin, map[string]any{"workspace": out["id"], "permissions": []string{"workspace"}})
+		checks := []struct {
+			name string
+			tok  string
+			cfg  map[string]any
+			want bool
+		}{
+			{"admin absent", e.admin, nil, def},
+			{"admin true", e.admin, map[string]any{"sandbox": true}, true},
+			{"admin false", e.admin, map[string]any{"sandbox": false}, false},
+			{"cursor absent", tok, map[string]any{}, def},
+			{"cursor false", tok, map[string]any{"sandbox": false}, def},
+			{"cursor true", tok, map[string]any{"sandbox": true}, true},
+		}
+		for _, c := range checks {
+			if got := create(c.tok, c.cfg); got != c.want {
+				t.Errorf("default %v, %s: sandbox %v, want %v", def, c.name, got, c.want)
+			}
+		}
 	}
 }
 

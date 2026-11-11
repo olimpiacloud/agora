@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/olimpiacloud/agora/internal/sandbox"
 	"github.com/olimpiacloud/agora/internal/stream"
 )
 
@@ -33,6 +35,7 @@ type Config struct {
 	AgoraBinary     string
 	ListenURL       string
 	WorktreeRoots   []string
+	SandboxDefault  bool
 }
 
 const DefaultCursorRetention = 7 * 24 * time.Hour
@@ -51,6 +54,7 @@ type Manager struct {
 	cg        *Cgroups
 	rtc       *stream.RTC
 	uid, gid  int
+	sandboxed bool
 	mu        sync.Mutex
 	ws        map[string]*Workspace
 	rt        map[string]*Runtime
@@ -125,6 +129,13 @@ func NewManager(cfg Config) (*Manager, error) {
 		m.uid, _ = strconv.Atoi(u.Uid)
 		m.gid, _ = strconv.Atoi(u.Gid)
 	}
+	if cfg.SandboxDefault {
+		if err := m.probeSandbox(); err != nil {
+			log.Printf("new workspaces are not sandboxed by default: %v", err)
+		} else {
+			m.sandboxed = true
+		}
+	}
 	m.cg = DetectCgroups()
 	rtc, err := stream.NewRTC(cfg.RTC)
 	if err != nil {
@@ -167,6 +178,19 @@ func (m *Manager) Config() Config { return m.cfg }
 func (m *Manager) RTC() *stream.RTC { return m.rtc }
 
 func (m *Manager) Cgroups() bool { return m.cg != nil }
+
+func (m *Manager) SandboxDefault() bool { return m.sandboxed }
+
+func (m *Manager) probeSandbox() error {
+	if m.uid == 0 {
+		return errors.New("the sandbox needs the daemon to run as root with an apps user")
+	}
+	self := m.cfg.AgoraBinary
+	if self == "" {
+		self, _ = os.Executable()
+	}
+	return sandbox.Probe(self, m.uid, m.gid)
+}
 
 func (m *Manager) Shutdown() {
 	m.cancel()

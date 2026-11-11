@@ -18,17 +18,18 @@ import (
 )
 
 type Server struct {
-	m    *core.Manager
-	auth *Auth
-	mux  *http.ServeMux
-	ui   fs.FS
-	wsMu sync.Mutex
+	m              *core.Manager
+	auth           *Auth
+	mux            *http.ServeMux
+	ui             fs.FS
+	wsMu           sync.Mutex
+	sandboxDefault func() bool
 }
 
 type ctxKey struct{}
 
 func New(m *core.Manager, auth *Auth, ui fs.FS) *Server {
-	s := &Server{m: m, auth: auth, mux: http.NewServeMux(), ui: ui}
+	s := &Server{m: m, auth: auth, mux: http.NewServeMux(), ui: ui, sandboxDefault: m.SandboxDefault}
 	s.routes()
 	return s
 }
@@ -66,7 +67,7 @@ func writeErr(w http.ResponseWriter, err error) {
 	writeJSON(w, code, map[string]any{"error": err.Error()})
 }
 
-func decode(r *http.Request, v any) error {
+func decode(r *http.Request, vs ...any) error {
 	if r.Body == nil {
 		return nil
 	}
@@ -77,7 +78,12 @@ func decode(r *http.Request, v any) error {
 	if len(strings.TrimSpace(string(b))) == 0 {
 		return nil
 	}
-	return json.Unmarshal(b, v)
+	for _, v := range vs {
+		if err := json.Unmarshal(b, v); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func principal(r *http.Request) *Principal {
@@ -186,10 +192,16 @@ func (s *Server) routes() {
 			return
 		}
 		var req core.CreateWorkspaceReq
-		if err := decode(r, &req); err != nil {
+		var opt struct {
+			Config struct {
+				Sandbox *bool `json:"sandbox"`
+			} `json:"config"`
+		}
+		if err := decode(r, &req, &opt); err != nil {
 			writeErr(w, err)
 			return
 		}
+		req.Config.Sandbox = sandboxed(opt.Config.Sandbox, !p.limited(), s.sandboxDefault())
 		if p.Cursor != nil {
 			req.Owner = p.Cursor.ID
 		}
@@ -880,6 +892,13 @@ func (s *Server) createCursorWorkspace(ctx context.Context, c *core.Cursor, req 
 		return ws, err
 	}
 	return s.m.GetWorkspace(ws.ID)
+}
+
+func sandboxed(explicit *bool, admin, def bool) bool {
+	if explicit != nil && (admin || !def) {
+		return *explicit
+	}
+	return def
 }
 
 func inheritLimits(cfg *core.WorkspaceConfig, parent core.WorkspaceConfig) {

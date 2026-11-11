@@ -83,6 +83,7 @@ agora serve --listen 127.0.0.1:7788 --home ~/.agora
 | `--listen` | `127.0.0.1:7788` | HTTP address. Non-loopback addresses are refused unless `AGORA_ALLOW_PUBLIC=1`. |
 | `--home` | `/var/lib/agora` or `~/.agora` | State directory (also `AGORA_HOME`). |
 | `--apps-user` | `agora` | Unprivileged user for apps and browsers when running as root. |
+| `--sandbox-default` | `true` | Create new workspaces [sandboxed](/security#sandboxed-workspaces). Only the admin can opt out, with `"sandbox": false` in the workspace config. Needs root and an apps user; otherwise Agora logs why at startup and creates them without the sandbox. |
 | `--chrome` | auto-detected | Chrome or Chromium binary. |
 | `--rtc-port` | `0` | Single UDP port for WebRTC (`0` picks ephemeral ports). |
 | `--rtc-interfaces` | all | Comma-separated interfaces for WebRTC candidates. |
