@@ -97,7 +97,7 @@ function Dashboard({ path, go }: { path: string; go: (p: string) => void }) {
     let pending = false
     const unsub = subscribe({}, (e) => {
       setEvents((ev) => [e, ...ev].slice(0, 300))
-      if (!pending && !e.type.startsWith('cursor.action')) {
+      if (!pending && !e.type.startsWith('cursor.action') && e.type !== 'cursor.pointer' && e.type !== 'stream.stats') {
         pending = true
         setTimeout(() => {
           pending = false
@@ -221,6 +221,12 @@ function WorkspaceList({ wss, go, refresh }: { wss: Workspace[]; go: (p: string)
 
 const statusClass = (s: string) => (['done'].includes(s) ? 'ok' : ['failed', 'cancelled'].includes(s) ? 'bad' : ['needs_human', 'blocked'].includes(s) ? 'warn' : s === 'paused' ? 'muted' : 'run')
 
+const affectsTabs = (e: AgoraEvent) => {
+  if (e.type === 'cursor.action') return String(e.data?.action ?? '').startsWith('tab.')
+  if (e.type === 'cursor.pointer') return false
+  return e.type.startsWith('browser.tab') || e.type.startsWith('cursor.') || e.type === 'scheduler.tab_closed' || e.type === 'scheduler.browser_stopped'
+}
+
 function WorkspaceView({ ws, id, cursors, events, refresh, go }: { ws?: Workspace; id: string; cursors: Cursor[]; events: AgoraEvent[]; refresh: () => void; go: (p: string) => void }) {
   const [vt, setVt] = useState('')
   const [tabs, setTabs] = useState<Tab[]>([])
@@ -231,9 +237,10 @@ function WorkspaceView({ ws, id, cursors, events, refresh, go }: { ws?: Workspac
     setVt('')
     mintViewer(id).then(setVt).catch(() => {})
   }, [id])
+  const tabSeq = events.find(affectsTabs)?.seq
   useEffect(() => {
     api<Tab[]>('GET', `/v1/workspaces/${id}/tabs`).then(setTabs).catch(() => {})
-  }, [id, events.length])
+  }, [id, tabSeq])
   const op = async (o: string, body?: unknown) => {
     try {
       const r = await api<{ id?: string }>('POST', `/v1/workspaces/${id}/${o}`, body ?? {})

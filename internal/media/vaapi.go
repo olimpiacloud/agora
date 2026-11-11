@@ -121,7 +121,7 @@ typedef struct {
 	VAImage rimg;
 	int rgb_dirty;
 	int w, h, mbw, mbh;
-	int fps, kbps, minqp;
+	int fps, kbps, bufkbps, minqp;
 	int rc_dirty;
 	uint32_t frame_num;
 	uint32_t poc;
@@ -368,7 +368,7 @@ static int venc_open(const char *dev, int w, int h, int fps, int kbps, int minqp
 	e->rgb = VA_INVALID_SURFACE;
 	e->w = w; e->h = h;
 	e->mbw = (w + 15) / 16; e->mbh = (h + 15) / 16;
-	e->fps = fps; e->kbps = kbps; e->minqp = minqp;
+	e->fps = fps; e->kbps = kbps; e->bufkbps = kbps; e->minqp = minqp;
 	e->fd = open(dev, O_RDWR | O_CLOEXEC);
 	if (e->fd < 0) { venc_close(e); return -1; }
 	e->dpy = vaGetDisplayDRM(e->fd);
@@ -505,8 +505,8 @@ static int venc_encode(venc *e, int idr, uint8_t *out, int cap, int *key) {
 		if (add_misc(e, VAEncMiscParameterTypeRateControl, &rc, sizeof(rc), ids, &n)) goto out;
 		VAEncMiscParameterHRD hrd;
 		memset(&hrd, 0, sizeof(hrd));
-		hrd.buffer_size = e->kbps * 1000;
-		hrd.initial_buffer_fullness = e->kbps * 500;
+		hrd.buffer_size = e->bufkbps * 1000;
+		hrd.initial_buffer_fullness = e->bufkbps * 500;
 		if (add_misc(e, VAEncMiscParameterTypeHRD, &hrd, sizeof(hrd), ids, &n)) goto out;
 		VAEncMiscParameterFrameRate fr;
 		memset(&fr, 0, sizeof(fr));
@@ -655,15 +655,14 @@ func minQP(crf int) int {
 
 func (x *VAAPIEncoder) Name() string { return "vaapi" }
 
-func (x *VAAPIEncoder) Size() (int, int) { return x.w, x.h }
-
-func (x *VAAPIEncoder) Reconfigure(crf, maxKbps int) error {
+func (x *VAAPIEncoder) Reconfigure(crf, maxKbps, bufKbps int) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if x.e == nil {
 		return errors.New("closed")
 	}
 	x.e.kbps = C.int(maxKbps)
+	x.e.bufkbps = C.int(bufKbps)
 	x.e.minqp = C.int(minQP(crf))
 	x.e.rc_dirty = 1
 	return nil
@@ -698,9 +697,12 @@ func (x *VAAPIEncoder) Encode(bgrx []byte, stride, srcW, srcH int, ptsMs int64, 
 	if err != nil {
 		return nil, false, err
 	}
-	BGRXToNV12(bgrx, stride, srcW, srcH, y, ys, uv, uvs, x.w, x.h)
+	cerr := BGRXToNV12(bgrx, stride, srcW, srcH, y, ys, uv, uvs, x.w, x.h)
 	if C.venc_unmap(x.e, 0, 0, C.int(x.w), C.int(x.h)) != 0 {
 		return nil, false, errors.New("vaapi: upload failed")
+	}
+	if cerr != nil {
+		return nil, false, cerr
 	}
 	return x.encode(idr)
 }
@@ -720,15 +722,21 @@ func (x *VAAPIEncoder) EncodeRect(src []byte, stride, rx, ry, rw, rh int, ptsMs 
 		if err != nil {
 			return nil, false, err
 		}
-		BGRXRectToNV12(src, stride, rx, ry, rw, rh, y, ys, uv, uvs)
+		cerr := BGRXRectToNV12(src, stride, rx, ry, rw, rh, y, ys, uv, uvs)
 		if C.venc_unmap(x.e, C.int(rx), C.int(ry), C.int(rw), C.int(rh)) != 0 {
 			return nil, false, errors.New("vaapi: upload failed")
+		}
+		if cerr != nil {
+			return nil, false, cerr
 		}
 	}
 	return x.encode(idr)
 }
 
 func (x *VAAPIEncoder) copyRGB(src []byte, stride, rx, ry, rw, rh int) error {
+	if !fits(src, stride, rw, rh) {
+		return ErrShortFrame
+	}
 	var p *C.uint8_t
 	var cs C.int
 	if C.venc_map_rgb(x.e, &p, &cs) != 0 {

@@ -17,20 +17,23 @@ import (
 )
 
 type Config struct {
-	Home         string
-	AppsUser     string
-	ChromeBinary string
-	Width        int
-	Height       int
-	MaxSeats     int
-	SeatIdle     time.Duration
-	IdleAfter    time.Duration
-	SuspendAfter time.Duration
-	TabIdle      time.Duration
-	RTC          stream.RTCOptions
-	AgoraBinary  string
-	ListenURL    string
+	Home            string
+	AppsUser        string
+	ChromeBinary    string
+	Width           int
+	Height          int
+	MaxSeats        int
+	SeatIdle        time.Duration
+	IdleAfter       time.Duration
+	SuspendAfter    time.Duration
+	TabIdle         time.Duration
+	CursorRetention time.Duration
+	RTC             stream.RTCOptions
+	AgoraBinary     string
+	ListenURL       string
 }
+
+const DefaultCursorRetention = 7 * 24 * time.Hour
 
 var (
 	ErrNotFound  = errors.New("not found")
@@ -59,6 +62,8 @@ type Manager struct {
 	launches  map[string]*launchProc
 	cpuPrev   map[string]cpuSample
 	usage     map[string]*WorkspaceUsage
+	profiles  map[string]*profileLease
+	portsHeld map[int]bool
 	started   time.Time
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -93,7 +98,10 @@ func NewManager(cfg Config) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	m := &Manager{cfg: cfg, store: st, Bus: NewBus(filepath.Join(cfg.Home, "events"), 4096), ws: map[string]*Workspace{}, rt: map[string]*Runtime{}, wsLocks: map[string]*sync.Mutex{}, cursors: map[string]*Cursor{}, tokens: map[string]string{}, worktrees: map[string]*Worktree{}, mail: map[string][]Message{}, launches: map[string]*launchProc{}, cpuPrev: map[string]cpuSample{}, usage: map[string]*WorkspaceUsage{}, started: time.Now()}
+	m := &Manager{cfg: cfg, store: st, Bus: NewBus(filepath.Join(cfg.Home, "events"), 4096), ws: map[string]*Workspace{}, rt: map[string]*Runtime{}, wsLocks: map[string]*sync.Mutex{}, cursors: map[string]*Cursor{}, tokens: map[string]string{}, worktrees: map[string]*Worktree{}, mail: map[string][]Message{}, launches: map[string]*launchProc{}, cpuPrev: map[string]cpuSample{}, usage: map[string]*WorkspaceUsage{}, profiles: map[string]*profileLease{}, portsHeld: map[int]bool{}, started: time.Now()}
+	st.onError = func(kind, id string, err error) {
+		m.Bus.Publish("store.error", "", "", map[string]any{"kind": kind, "id": id, "error": err.Error()})
+	}
 	m.Arb = NewArbiter(func(ws string, l Lock, by string) {
 		m.Bus.Publish("control.lost", ws, l.Holder, map[string]any{"surface": l.Surface, "by": by})
 	})
@@ -144,8 +152,6 @@ func NewManager(cfg Config) (*Manager, error) {
 
 func (m *Manager) Config() Config { return m.cfg }
 
-func (m *Manager) AppsCred() (int, int) { return m.uid, m.gid }
-
 func (m *Manager) RTC() *stream.RTC { return m.rtc }
 
 func (m *Manager) Cgroups() bool { return m.cg != nil }
@@ -167,11 +173,45 @@ func (m *Manager) Shutdown() {
 		}(id)
 	}
 	wg.Wait()
+	exited, unsub := m.Bus.Subscribe(Filter{Types: []string{"agent.exited"}}, 64)
+	defer unsub()
 	m.mu.Lock()
-	for _, l := range m.launches {
+	waiting := map[string]bool{}
+	for id, l := range m.launches {
 		l.kill()
+		waiting[id] = false
 	}
 	m.mu.Unlock()
+	m.waitLaunches(waiting, exited, 7*time.Second)
+	m.store.Flush()
+}
+
+func (m *Manager) waitLaunches(waiting map[string]bool, exited <-chan *Event, timeout time.Duration) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		m.mu.Lock()
+		for id, done := range waiting {
+			if c := m.cursors[id]; done && (c == nil || c.Status.Terminal()) {
+				delete(waiting, id)
+			}
+		}
+		m.mu.Unlock()
+		if len(waiting) == 0 {
+			return
+		}
+		select {
+		case e := <-exited:
+			if _, ok := waiting[e.Cursor]; ok {
+				waiting[e.Cursor] = true
+			}
+		case <-tick.C:
+		case <-deadline.C:
+			return
+		}
+	}
 }
 
 func (m *Manager) wsLock(id string) *sync.Mutex {
@@ -225,6 +265,6 @@ func (m *Manager) wsDir(id string) string {
 
 func (m *Manager) chownApps(p string) {
 	if m.uid != 0 {
-		os.Chown(p, m.uid, m.gid)
+		os.Lchown(p, m.uid, m.gid)
 	}
 }

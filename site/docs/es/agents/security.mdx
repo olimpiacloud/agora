@@ -30,11 +30,16 @@ agora api POST /v1/cursors "{\"name\":\"reader\",\"workspace\":\"$WS\",\"permiss
 
 | Permiso | Qué permite |
 | --- | --- |
-| `browser` | Abrir pestañas y operar sobre ellas. |
-| `desktop` | Input de mouse y teclado en el escritorio, a través del puesto de input propio del cursor. |
-| `process` | Lanzar programas (`desktop_launch`) y crear git worktrees. Los programas corren como el usuario de apps sin privilegios. |
+| `browser` | Abrir pestañas, operar sobre ellas y listarlas. |
+| `desktop` | Input de mouse y teclado en el escritorio, a través del puesto de input propio del cursor, más capturas, ventanas, el portapapeles y el stream en vivo. |
+| `process` | Lanzar, listar y frenar programas (`desktop_launch`) y crear git worktrees. Los programas corren como el usuario de apps sin privilegios. |
 | `spawn` | Crear subagentes con `cursor_spawn`. |
-| `workspace` | Crear workspaces, y `suspend`, `freeze`, `fork` y tomar o devolver el control. |
+| `message` | Mandar mensajes con `cursor_message` y publicar en el tablero compartido. |
+| `workspace` | Crear workspaces, y `suspend`, `freeze`, `checkpoint`, `fork`, `resize`, `layout`, `browser-restart` y tomar o devolver el control. |
+
+El token de admin nunca queda limitado por permisos, tampoco cuando actúa como un cursor con `X-Agora-Cursor`.
+
+Un workspace creado por un cursor hereda los límites del workspace del cursor: queda con sandbox si ese lo tiene, y sus presupuestos `memory_mb`, `cpu_percent`, `max_cursors` y `max_tabs` no pueden superar los de ese workspace. Un árbol de cursores puede tener como máximo 5 workspaces vivos.
 
 Los permisos solo se achican a medida que bajás por el árbol. Un hijo recibe la intersección entre lo que pide y lo que tiene su padre, así que un agente nunca le puede dar a un subagente más de lo que tiene él. Los presupuestos también limitan el árbol: `max_cursors` limita los hijos directos y `max_depth` limita la profundidad (nunca más de 8 niveles).
 
@@ -58,7 +63,7 @@ El aislamiento entre cursores del mismo workspace es lógico: dueños de pestañ
 - **Los archivos de root.** Cuando el daemon corre como root, los navegadores y las apps corren como el usuario sin privilegios `agora`.
 - **El input durante una toma de control humana.** Mientras una persona tiene el control, el input del agente se rechaza con `409 Conflict`.
 
-Los agentes que Agora lanza con `cursor_spawn` corren como el usuario del daemon, porque necesitan sus credenciales. Con el perfil `lean` por defecto, Claude Code corre sin herramientas integradas, así que el agente actúa solo a través de las herramientas de Agora.
+Los agentes que Agora lanza con `cursor_spawn` corren como el usuario del daemon, porque necesitan sus credenciales. Con el perfil `lean` por defecto, Claude Code corre sin herramientas integradas, así que el agente actúa solo a través de las herramientas de Agora. Codex conserva su shell integrada en cualquier perfil, así que solo el admin puede lanzar subagentes `codex`; los cursores solo pueden crear subagentes `claude`.
 
 ## Traspaso a una persona [#human-handoff]
 

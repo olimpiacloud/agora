@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -164,28 +165,21 @@ func (m *Manager) checkpointLocked(ctx context.Context, id, reason string, snaps
 	cp := &Checkpoint{ID: NewID("ckpt"), Time: time.Now().UTC(), Reason: reason, Layout: w.Config.Layout, Width: w.Config.Width, Height: w.Config.Height, Apps: []AppSpec{}, Tabs: []TabRecord{}}
 	r := m.runtime(id)
 	if r != nil {
-		r.brMu.Lock()
-		b := r.browser
-		r.brMu.Unlock()
-		if b != nil {
-			cp.Tabs = r.tabRecordsFrom(b)
-		} else {
-			r.mu.Lock()
-			cp.Tabs = append(cp.Tabs, r.lastTabs...)
-			r.mu.Unlock()
-		}
+		cp.Tabs = r.currentTabs()
 		r.mu.Lock()
 		for _, p := range r.procs {
 			if p.App.Restore {
 				cp.Apps = append(cp.Apps, p.App)
 			}
 		}
-		if r.display != nil {
-			if ws, err := r.display.Windows(); err == nil {
+		frozen := r.frozen
+		d := r.display
+		r.mu.Unlock()
+		if d != nil && !frozen {
+			if ws, err := d.Windows(); err == nil {
 				cp.Windows = len(ws)
 			}
 		}
-		r.mu.Unlock()
 		if snapshot {
 			dst := filepath.Join(m.cfg.Home, "checkpoints", id, cp.ID)
 			if err := m.snapshotProfile(r, w.Config.Profile, dst); err != nil {
@@ -211,8 +205,55 @@ func (m *Manager) checkpointLocked(ctx context.Context, id, reason string, snaps
 	os.MkdirAll(filepath.Join(m.cfg.Home, "checkpoints", id), 0700)
 	b, _ := json.MarshalIndent(cp, "", "  ")
 	os.WriteFile(filepath.Join(m.cfg.Home, "checkpoints", id, cp.ID+".json"), b, 0600)
+	pruneCheckpoints(filepath.Join(m.cfg.Home, "checkpoints", id), keepCheckpoints)
 	m.Bus.Publish("workspace.checkpoint", id, "", map[string]any{"checkpoint": cp.ID, "tabs": len(cp.Tabs), "apps": len(cp.Apps), "snapshot": cp.Snapshot != "", "reason": reason})
 	return cp, nil
+}
+
+const keepCheckpoints = 20
+
+func pruneCheckpoints(dir string, keep int) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	snap := map[string]bool{}
+	for _, e := range ents {
+		if e.IsDir() {
+			snap[e.Name()] = true
+		}
+	}
+	var files []os.DirEntry
+	for _, e := range ents {
+		name, ok := strings.CutSuffix(e.Name(), ".json")
+		if ok && !e.IsDir() && !snap[name] {
+			files = append(files, e)
+		}
+	}
+	if len(files) <= keep {
+		return
+	}
+	type ckpt struct {
+		name string
+		t    time.Time
+	}
+	all := make([]ckpt, 0, len(files))
+	for _, e := range files {
+		c := ckpt{name: e.Name()}
+		var v struct {
+			Time time.Time `json:"time"`
+		}
+		if b, err := os.ReadFile(filepath.Join(dir, e.Name())); err == nil && json.Unmarshal(b, &v) == nil && !v.Time.IsZero() {
+			c.t = v.Time
+		} else if fi, err := e.Info(); err == nil {
+			c.t = fi.ModTime()
+		}
+		all = append(all, c)
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].t.After(all[j].t) })
+	for _, c := range all[keep:] {
+		os.Remove(filepath.Join(dir, c.name))
+	}
 }
 
 func (m *Manager) snapshotProfile(r *Runtime, profile, dst string) error {
@@ -221,7 +262,13 @@ func (m *Manager) snapshotProfile(r *Runtime, profile, dst string) error {
 		return nil
 	}
 	var pids []int
+	frozen := false
 	if r != nil {
+		r.mu.Lock()
+		frozen = r.frozen
+		r.mu.Unlock()
+	}
+	if r != nil && !frozen {
 		r.brMu.Lock()
 		if r.browser != nil {
 			pids = Descendants([]int{r.browser.Pid()})
@@ -250,22 +297,54 @@ func (m *Manager) Suspend(ctx context.Context, id, reason string) error {
 	return m.suspendLocked(ctx, id, reason)
 }
 
+func (m *Manager) suspendIfIdle(ctx context.Context, id string, r *Runtime, threshold time.Duration, reason string) error {
+	defer func() {
+		r.mu.Lock()
+		r.suspending = false
+		r.mu.Unlock()
+	}()
+	l := m.wsLock(id)
+	l.Lock()
+	defer l.Unlock()
+	if m.runtime(id) != r {
+		return nil
+	}
+	r.mu.Lock()
+	recent := time.Since(r.activity) < threshold
+	r.mu.Unlock()
+	if recent {
+		return nil
+	}
+	return m.suspendLocked(ctx, id, reason)
+}
+
+func (r *Runtime) claimSuspend() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.suspending || r.closing {
+		return false
+	}
+	r.suspending = true
+	return true
+}
+
 func (m *Manager) suspendLocked(ctx context.Context, id, reason string) error {
+	w, err := m.GetWorkspace(id)
+	if err != nil {
+		return err
+	}
+	if w.State == StateDestroyed {
+		return fmt.Errorf("%w: workspace is destroyed", ErrState)
+	}
 	r := m.runtime(id)
 	if r == nil {
-		w, err := m.GetWorkspace(id)
-		if err != nil {
-			return err
-		}
 		if w.State == StateCreated {
 			return nil
 		}
 		m.setState(id, StateSuspended, reason)
 		return nil
 	}
-	if r.frozen {
-		r.thaw()
-	}
+	r.thaw()
 	if _, err := m.checkpointLocked(ctx, id, "suspend:"+reason, false); err != nil {
 		return err
 	}
@@ -273,11 +352,13 @@ func (m *Manager) suspendLocked(ctx context.Context, id, reason string) error {
 	m.mu.Lock()
 	delete(m.rt, id)
 	delete(m.usage, id)
+	delete(m.cpuPrev, id)
 	m.mu.Unlock()
 	if m.cg != nil {
 		m.cg.Remove(id)
 	}
 	m.setState(id, StateSuspended, reason)
+	m.Bus.CloseLog(id)
 	return nil
 }
 
@@ -297,6 +378,26 @@ func (m *Manager) Freeze(ctx context.Context, id string) error {
 	if r == nil {
 		return ErrState
 	}
+	return m.freezeLocked(id, r)
+}
+
+func (m *Manager) freezeIfIdle(id string, r *Runtime, threshold time.Duration) error {
+	l := m.wsLock(id)
+	l.Lock()
+	defer l.Unlock()
+	if m.runtime(id) != r {
+		return nil
+	}
+	r.mu.Lock()
+	skip := r.closing || !r.idle || time.Since(r.activity) < threshold
+	r.mu.Unlock()
+	if skip {
+		return nil
+	}
+	return m.freezeLocked(id, r)
+}
+
+func (m *Manager) freezeLocked(id string, r *Runtime) error {
 	if err := r.freeze(); err != nil {
 		return err
 	}
@@ -317,8 +418,18 @@ func (m *Manager) Fork(ctx context.Context, id, name string) (*Workspace, error)
 	nid := NewID("ws")
 	cfg := src.Config
 	cfg.Profile = nid
+	l := m.wsLock(id)
+	l.Lock()
 	r := m.runtime(id)
-	if err := m.snapshotProfile(r, src.Config.Profile, m.profileDir(nid)); err != nil {
+	var tabs []TabRecord
+	if r != nil {
+		for _, t := range r.currentTabs() {
+			tabs = append(tabs, TabRecord{URL: t.URL, Title: t.Title})
+		}
+	}
+	err = m.snapshotProfile(r, src.Config.Profile, m.profileDir(nid))
+	l.Unlock()
+	if err != nil {
 		return nil, err
 	}
 	m.chownApps(m.profileDir(nid))
@@ -332,17 +443,7 @@ func (m *Manager) Fork(ctx context.Context, id, name string) (*Workspace, error)
 	}
 	now := time.Now().UTC()
 	w := &Workspace{ID: nid, Name: name, State: StateCreated, Config: cfg, Owner: src.Owner, ForkOf: id, Created: now, Updated: now, LastActive: now}
-	var tabs []TabRecord
-	if r != nil {
-		r.brMu.Lock()
-		b := r.browser
-		r.brMu.Unlock()
-		if b != nil {
-			for _, t := range r.tabRecordsFrom(b) {
-				tabs = append(tabs, TabRecord{URL: t.URL, Title: t.Title})
-			}
-		}
-	} else if src.Checkpoint != nil {
+	if r == nil && src.Checkpoint != nil {
 		for _, t := range src.Checkpoint.Tabs {
 			tabs = append(tabs, TabRecord{URL: t.URL, Title: t.Title})
 		}
@@ -370,6 +471,7 @@ func (m *Manager) Destroy(ctx context.Context, id string, purge bool) error {
 		r.shutdown(ctx)
 		m.mu.Lock()
 		delete(m.rt, id)
+		delete(m.cpuPrev, id)
 		m.mu.Unlock()
 		if m.cg != nil {
 			m.cg.Remove(id)
@@ -402,8 +504,6 @@ func (m *Manager) Destroy(ctx context.Context, id string, purge bool) error {
 		}
 		os.RemoveAll(m.wsDir(id))
 		os.RemoveAll(filepath.Join(m.cfg.Home, "checkpoints", id))
-		m.Bus.CloseLog(id)
-		os.Remove(filepath.Join(m.cfg.Home, "events", id+".jsonl"))
 		m.mu.Lock()
 		delete(m.ws, id)
 		delete(m.usage, id)
@@ -416,6 +516,11 @@ func (m *Manager) Destroy(ctx context.Context, id string, purge bool) error {
 		m.mu.Unlock()
 	}
 	m.Bus.Publish("workspace.destroyed", id, "", map[string]any{"purged": purge})
+	if purge {
+		m.Bus.RemoveLog(id)
+	} else {
+		m.Bus.CloseLog(id)
+	}
 	return nil
 }
 
@@ -460,10 +565,13 @@ func (m *Manager) SetLayout(ctx context.Context, id, layout string) error {
 	if err != nil {
 		return err
 	}
-	if r.wm == nil {
+	r.mu.Lock()
+	wm := r.wm
+	r.mu.Unlock()
+	if wm == nil {
 		return ErrState
 	}
-	r.wm.SetLayout(x11Layout(layout))
+	wm.SetLayout(x11Layout(layout))
 	m.mu.Lock()
 	if ws := m.ws[id]; ws != nil {
 		ws.Config.Layout = layout
@@ -473,7 +581,17 @@ func (m *Manager) SetLayout(ctx context.Context, id, layout string) error {
 	return nil
 }
 
+func checkAppID(id string) error {
+	if id != "" && !nameRe.MatchString(id) {
+		return fmt.Errorf("invalid app id %q", id)
+	}
+	return nil
+}
+
 func (m *Manager) LaunchApp(ctx context.Context, id string, spec AppSpec) (*Proc, error) {
+	if err := checkAppID(spec.ID); err != nil {
+		return nil, err
+	}
 	r, err := m.ensureRuntime(ctx, id, true)
 	if err != nil {
 		return nil, err
@@ -483,8 +601,17 @@ func (m *Manager) LaunchApp(ctx context.Context, id string, spec AppSpec) (*Proc
 }
 
 func (r *Runtime) launch(spec AppSpec) (*Proc, error) {
+	if err := checkAppID(spec.ID); err != nil {
+		return nil, err
+	}
 	if spec.ID == "" {
 		spec.ID = NewID("app")
+	}
+	r.mu.Lock()
+	closing := r.closing
+	r.mu.Unlock()
+	if closing {
+		return nil, fmt.Errorf("%w: workspace is stopping", ErrState)
 	}
 	cmd := exec.Command(spec.Command, spec.Args...)
 	attr := &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
@@ -510,7 +637,7 @@ func (r *Runtime) launch(spec AppSpec) (*Proc, error) {
 		attr.CgroupFD = cgfd
 	}
 	cmd.SysProcAttr = attr
-	logf, _ := os.OpenFile(filepath.Join(r.m.wsDir(r.id), "run", spec.ID+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	logf, _ := os.OpenFile(filepath.Join(r.m.wsDir(r.id), "run", spec.ID+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND|syscall.O_NOFOLLOW, 0600)
 	cmd.Stdout = logf
 	cmd.Stderr = logf
 	if err := cmd.Start(); err != nil {
@@ -521,9 +648,20 @@ func (r *Runtime) launch(spec AppSpec) (*Proc, error) {
 	}
 	p := &Proc{Pid: cmd.Process.Pid, App: spec, Started: time.Now(), cmd: cmd, done: make(chan struct{})}
 	r.mu.Lock()
+	if r.closing {
+		r.mu.Unlock()
+		syscall.Kill(-p.Pid, syscall.SIGKILL)
+		cmd.Process.Kill()
+		cmd.Wait()
+		if logf != nil {
+			logf.Close()
+		}
+		return nil, fmt.Errorf("%w: workspace is stopping", ErrState)
+	}
 	r.procs[p.Pid] = p
 	r.mu.Unlock()
 	r.m.Bus.Publish("process.started", r.id, spec.Owner, map[string]any{"pid": p.Pid, "command": spec.Command, "app": spec.ID})
+	started := *p
 	go func() {
 		err := cmd.Wait()
 		if logf != nil {
@@ -537,14 +675,16 @@ func (r *Runtime) launch(spec AppSpec) (*Proc, error) {
 				code = -1
 			}
 		}
+		r.mu.Lock()
 		p.Exit = &code
+		r.mu.Unlock()
 		close(p.done)
 		r.mu.Lock()
 		delete(r.procs, p.Pid)
 		r.mu.Unlock()
 		r.m.Bus.Publish("process.exited", r.id, spec.Owner, map[string]any{"pid": p.Pid, "command": spec.Command, "code": code, "app": spec.ID})
 	}()
-	return p, nil
+	return &started, nil
 }
 
 func (m *Manager) Processes(id string) []Proc {
@@ -573,4 +713,18 @@ func (m *Manager) KillProcess(id string, pid int) error {
 		return ErrNotFound
 	}
 	return syscall.Kill(-pid, syscall.SIGTERM)
+}
+
+func (m *Manager) ProcessOwner(id string, pid int) (string, error) {
+	r := m.runtime(id)
+	if r == nil {
+		return "", ErrNotFound
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p := r.procs[pid]
+	if p == nil {
+		return "", ErrNotFound
+	}
+	return p.App.Owner, nil
 }

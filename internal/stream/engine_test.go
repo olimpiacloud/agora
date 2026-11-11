@@ -2,6 +2,7 @@ package stream
 
 import (
 	"errors"
+	"os/exec"
 
 	"context"
 	"github.com/olimpiacloud/agora/internal/media"
@@ -9,8 +10,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jezek/xgb/xproto"
 	"github.com/olimpiacloud/agora/internal/x11"
 )
+
+func painter(t *testing.T, d *x11.Display) func() {
+	c, err := d.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(c.Close)
+	n := uint32(0)
+	return func() {
+		n++
+		xproto.ChangeWindowAttributes(c, d.Root(), xproto.CwBackPixel, []uint32{n * 0x10203})
+		xproto.ClearArea(c, false, d.Root(), 0, 0, 0, 0)
+		xproto.GetInputFocus(c).Reply()
+	}
+}
 
 type countSink struct{ n atomic.Int64 }
 
@@ -20,6 +37,7 @@ func (s *countSink) Push(f *Frame) bool { s.n.Add(1); return true }
 func (s *countSink) Close()             {}
 
 func TestEngineStopsWhenDisplayExits(t *testing.T) {
+	requireXvfb(t)
 	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 640, Height: 480, RunDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -51,6 +69,7 @@ func (s *refuseSink) ID() string         { return "slow" }
 func (s *refuseSink) Push(f *Frame) bool { s.n.Add(1); return false }
 
 func TestSlowSinkKeyframesRateLimited(t *testing.T) {
+	requireXvfb(t)
 	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 640, Height: 480, RunDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -61,9 +80,10 @@ func TestSlowSinkKeyframesRateLimited(t *testing.T) {
 	fast := &countSink{}
 	e.AddSink(fast)
 	e.AddSink(&refuseSink{})
+	paint := painter(t, d)
 	start := time.Now()
 	for time.Since(start) < 3*time.Second {
-		e.Damage()
+		paint()
 		e.RequestKeyframe()
 		time.Sleep(15 * time.Millisecond)
 	}
@@ -77,6 +97,7 @@ func TestSlowSinkKeyframesRateLimited(t *testing.T) {
 }
 
 func TestEngineRestartsAfterEncoderError(t *testing.T) {
+	requireXvfb(t)
 	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 640, Height: 480, RunDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -104,5 +125,216 @@ func TestEngineRestartsAfterEncoderError(t *testing.T) {
 	}
 	if st := e.Stats(); st.Starts < 2 {
 		t.Fatalf("starts = %d", st.Starts)
+	}
+}
+
+func TestStaticScreenEncodesNothing(t *testing.T) {
+	requireXvfb(t)
+	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 640, Height: 480, RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	e := NewEngine(d)
+	defer e.Close()
+	s := &countSink{}
+	e.AddSink(s)
+	for i := 0; i < 100 && s.n.Load() == 0; i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if s.n.Load() == 0 {
+		t.Fatal("no first frame")
+	}
+	time.Sleep(200 * time.Millisecond)
+	base := s.n.Load()
+	for i := 0; i < 50; i++ {
+		e.Damage()
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := s.n.Load() - base; got > 1 {
+		t.Fatalf("%d frames encoded for a static screen", got)
+	}
+	base = s.n.Load()
+	e.keyReq.Store(true)
+	e.poke()
+	for i := 0; i < 100 && s.n.Load() == base; i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if s.n.Load() == base {
+		t.Fatal("forced keyframe produced no frame")
+	}
+	base = s.n.Load()
+	paint := painter(t, d)
+	for i := 0; i < 100 && s.n.Load() == base; i++ {
+		paint()
+		time.Sleep(20 * time.Millisecond)
+	}
+	if s.n.Load() == base {
+		t.Fatal("damage produced no frame")
+	}
+}
+
+type deadSink struct {
+	countSink
+	dead atomic.Bool
+}
+
+func (s *deadSink) ID() string { return "dead" }
+func (s *deadSink) Push(f *Frame) bool {
+	s.n.Add(1)
+	s.dead.Store(true)
+	return false
+}
+func (s *deadSink) Dead() bool { return s.dead.Load() }
+
+func TestDeadSinkDoesNotForceKeyframes(t *testing.T) {
+	requireXvfb(t)
+	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 640, Height: 480, RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	e := NewEngine(d)
+	defer e.Close()
+	e.AddSink(&countSink{})
+	dead := &deadSink{}
+	e.AddSink(dead)
+	paint := painter(t, d)
+	start := time.Now()
+	for time.Since(start) < 2500*time.Millisecond {
+		paint()
+		time.Sleep(15 * time.Millisecond)
+	}
+	st := e.Stats()
+	if dead.n.Load() > 2 {
+		t.Fatalf("dead sink got %d frames", dead.n.Load())
+	}
+	if st.Frames < 20 {
+		t.Fatalf("only %d frames", st.Frames)
+	}
+	if st.Keyframes > 2 {
+		t.Fatalf("%d keyframes in %d frames: a dead sink must not force keyframes", st.Keyframes, st.Frames)
+	}
+}
+
+func TestEngineSurvivesResize(t *testing.T) {
+	requireXvfb(t)
+	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 800, Height: 600, RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	e := NewEngine(d)
+	defer e.Close()
+	s := &countSink{}
+	e.AddSink(s)
+	paint := painter(t, d)
+	sizes := [][2]int{{800, 600}, {640, 480}, {1024, 700}, {400, 300}}
+	start := time.Now()
+	for i := 0; time.Since(start) < 2*time.Second; i++ {
+		paint()
+		if i%5 == 0 {
+			sz := sizes[(i/5)%len(sizes)]
+			if err := d.SetSize(sz[0], sz[1]); err != nil {
+				t.Fatal(err)
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	base := s.n.Load()
+	for i := 0; i < 100 && s.n.Load() == base; i++ {
+		paint()
+		time.Sleep(20 * time.Millisecond)
+	}
+	if s.n.Load() == base {
+		t.Fatal("engine stopped producing frames after resizes")
+	}
+	if st := e.Stats(); st.Starts != 1 {
+		t.Fatalf("engine restarted %d times", st.Starts-1)
+	}
+}
+
+func requireXvfb(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("Xvfb"); err != nil {
+		t.Skip("Xvfb missing")
+	}
+}
+
+func TestSlowSinkGetsKeyframeOnStillScreen(t *testing.T) {
+	requireXvfb(t)
+	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 640, Height: 480, RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	e := NewEngine(d)
+	defer e.Close()
+	release := make(chan struct{})
+	keys := make(chan time.Time, 64)
+	q := NewQueueSink("slow", Interactive, 1, func(f *Frame) error {
+		<-release
+		if f.Key {
+			keys <- time.Now()
+		}
+		return nil
+	})
+	e.AddSink(q)
+	paint := painter(t, d)
+	deadline := time.Now().Add(5 * time.Second)
+	for e.Stats().Keyframes < 2 && time.Now().Before(deadline) {
+		paint()
+		time.Sleep(15 * time.Millisecond)
+	}
+	if e.Stats().Keyframes < 2 {
+		t.Fatal("the overflowing sink never got a keyframe answer")
+	}
+	time.Sleep(100 * time.Millisecond)
+	if q.Dropped.Load() == 0 {
+		t.Fatal("no frame dropped")
+	}
+	released := time.Now()
+	close(release)
+	for {
+		select {
+		case at := <-keys:
+			if at.After(released) && !q.needKey.Load() {
+				return
+			}
+		case <-time.After(time.Until(released.Add(3 * time.Second))):
+			t.Fatal("slow sink never got a keyframe after the screen went still")
+		}
+	}
+}
+
+type countDeadSink struct {
+	countSink
+	checks atomic.Int64
+}
+
+func (s *countDeadSink) ID() string { return "dead" }
+func (s *countDeadSink) Dead() bool { s.checks.Add(1); return true }
+
+func TestEngineIdlesWithOnlyDeadSinks(t *testing.T) {
+	requireXvfb(t)
+	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 640, Height: 480, RunDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	e := NewEngine(d)
+	defer e.Close()
+	s := &countDeadSink{}
+	e.AddSink(s)
+	time.Sleep(200 * time.Millisecond)
+	e.RequestKeyframe()
+	time.Sleep(50 * time.Millisecond)
+	base := s.checks.Load()
+	time.Sleep(200 * time.Millisecond)
+	if n := s.checks.Load() - base; n > 5 {
+		t.Fatalf("engine loop ran %d times in 200ms with only dead sinks", n)
+	}
+	if s.n.Load() != 0 {
+		t.Fatalf("dead sink got %d frames", s.n.Load())
 	}
 }

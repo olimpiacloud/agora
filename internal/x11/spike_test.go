@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jezek/xgb/xproto"
 )
 
 func TestMPXConcurrentTyping(t *testing.T) {
@@ -15,6 +17,7 @@ func TestMPXConcurrentTyping(t *testing.T) {
 		t.Skip("xterm missing")
 	}
 	dir := t.TempDir()
+	requireXvfb(t)
 	d, err := StartDisplay(context.Background(), DisplayOptions{Width: 1280, Height: 800, RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -87,3 +90,12 @@ func TestMPXConcurrentTyping(t *testing.T) {
 	bx, by := sb.Position()
 	t.Logf("pointers A=(%d,%d) B=(%d,%d)", ax, ay, bx, by)
 }
+
+func requireXvfb(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("Xvfb"); err != nil {
+		t.Skip("Xvfb missing")
+	}
+}
+
+func xprotoWin(id uint32) xproto.Window { return xproto.Window(id) }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -443,14 +444,15 @@ func TestUploadDownloadDialogDnD(t *testing.T) {
 	ws := h.workspace("compat")
 	_, c := h.cursor(h.admin, map[string]any{"name": "compat", "workspace": ws})
 	tab := h.tab(c, ws, h.site.URL+"/upload")
-	f := "/tmp/agora-upload-" + ws + ".txt"
-	os.WriteFile(f, []byte("hello upload"), 0644)
+	f := filepath.Join(h.home, "workspaces", ws, "home", "Downloads", "agora-upload.txt")
+	if err := os.WriteFile(f, []byte("hello upload"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	os.Chmod(f, 0644)
-	defer os.Remove(f)
 	h.act(c, ws, tab, map[string]any{"action": "snapshot"})
 	h.act(c, ws, tab, map[string]any{"action": "upload", "ref": "e1", "files": []string{f}})
 	h.act(c, ws, tab, map[string]any{"action": "click", "ref": "e2"})
-	h.waitEval(c, ws, tab, "document.title", "Uploaded:"+strings.TrimPrefix(f, "/tmp/"), 10*time.Second)
+	h.waitEval(c, ws, tab, "document.title", "Uploaded:"+filepath.Base(f), 10*time.Second)
 	h.act(c, ws, tab, map[string]any{"action": "navigate", "url": h.site.URL + "/upload"})
 	h.act(c, ws, tab, map[string]any{"action": "snapshot"})
 	h.act(c, ws, tab, map[string]any{"action": "click", "ref": "e3"})

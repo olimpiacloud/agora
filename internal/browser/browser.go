@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/olimpiacloud/agora/internal/safefs"
 	"github.com/olimpiacloud/agora/internal/sandbox"
 )
 
@@ -31,6 +34,7 @@ type LaunchOptions struct {
 	StartURLs   []string
 	CgroupFD    int
 	Wrap        []string
+	OnEvent     func(kind string, data map[string]any)
 }
 
 type TargetInfo struct {
@@ -44,16 +48,37 @@ type TargetInfo struct {
 }
 
 type Browser struct {
-	opts     LaunchOptions
-	cmd      *exec.Cmd
-	cdp      *CDP
-	mu       sync.Mutex
-	targets  map[string]*TargetInfo
-	tabs     map[string]*Tab
-	contexts map[string]bool
-	exited   chan struct{}
-	OnEvent  func(kind string, data map[string]any)
-	started  time.Time
+	opts      LaunchOptions
+	cmd       *exec.Cmd
+	cdp       *CDP
+	mu        sync.Mutex
+	targets   map[string]*TargetInfo
+	tabs      map[string]*Tab
+	sessions  map[string]*Tab
+	attaching map[string]chan struct{}
+	contexts  map[string]bool
+	exited    chan struct{}
+	started   time.Time
+}
+
+func AllowedURL(u string) error {
+	if u == "" || strings.EqualFold(u, "about:blank") {
+		return nil
+	}
+	p, err := url.Parse(u)
+	if err != nil {
+		return fmt.Errorf("invalid URL %q: %w", u, err)
+	}
+	switch p.Scheme {
+	case "http", "https":
+		if p.Host == "" {
+			return fmt.Errorf("invalid URL %q: missing host", u)
+		}
+		return nil
+	case "data":
+		return nil
+	}
+	return fmt.Errorf("URL %q not allowed: only http, https, data and about:blank", u)
 }
 
 func DefaultBinary() string {
@@ -79,7 +104,7 @@ func Launch(ctx context.Context, o LaunchOptions) (*Browser, error) {
 		return nil, err
 	}
 	if o.Uid != 0 {
-		os.Chown(o.UserDataDir, int(o.Uid), int(o.Gid))
+		os.Lchown(o.UserDataDir, int(o.Uid), int(o.Gid))
 	}
 	disableTranslate(o.UserDataDir, o.Uid, o.Gid)
 	if lock, err := os.Readlink(filepath.Join(o.UserDataDir, "SingletonLock")); err == nil {
@@ -151,7 +176,7 @@ func Launch(ctx context.Context, o LaunchOptions) (*Browser, error) {
 	}
 	cmd.SysProcAttr = attr
 	if o.LogPath != "" {
-		if f, err := os.OpenFile(o.LogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); err == nil {
+		if f, err := os.OpenFile(o.LogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND|syscall.O_NOFOLLOW, 0600); err == nil {
 			cmd.Stdout = f
 			cmd.Stderr = f
 			defer f.Close()
@@ -165,7 +190,8 @@ func Launch(ctx context.Context, o LaunchOptions) (*Browser, error) {
 		ourR.Close()
 		return nil, err
 	}
-	b := &Browser{opts: o, cmd: cmd, cdp: NewCDP(ourR, ourW), targets: map[string]*TargetInfo{}, tabs: map[string]*Tab{}, contexts: map[string]bool{}, exited: make(chan struct{}), started: time.Now()}
+	b := newBrowser(o, NewCDP(ourR, ourW))
+	b.cmd = cmd
 	go func() {
 		cmd.Wait()
 		ourW.Close()
@@ -203,9 +229,13 @@ func Launch(ctx context.Context, o LaunchOptions) (*Browser, error) {
 	return b, nil
 }
 
+func newBrowser(o LaunchOptions, c *CDP) *Browser {
+	return &Browser{opts: o, cdp: c, targets: map[string]*TargetInfo{}, tabs: map[string]*Tab{}, sessions: map[string]*Tab{}, attaching: map[string]chan struct{}{}, contexts: map[string]bool{}, exited: make(chan struct{}), started: time.Now()}
+}
+
 func (b *Browser) emit(kind string, data map[string]any) {
-	if b.OnEvent != nil {
-		b.OnEvent(kind, data)
+	if b.opts.OnEvent != nil {
+		b.opts.OnEvent(kind, data)
 	}
 }
 
@@ -246,6 +276,9 @@ func (b *Browser) onEvent(ev Event) {
 		delete(b.targets, p.TargetID)
 		tab := b.tabs[p.TargetID]
 		delete(b.tabs, p.TargetID)
+		if tab != nil {
+			delete(b.sessions, tab.SessionID)
+		}
 		b.mu.Unlock()
 		if tab != nil {
 			tab.closeLocal()
@@ -266,12 +299,7 @@ func (b *Browser) onEvent(ev Event) {
 	default:
 		if ev.SessionID != "" {
 			b.mu.Lock()
-			var tab *Tab
-			for _, t := range b.tabs {
-				if t.SessionID == ev.SessionID {
-					tab = t
-				}
-			}
+			tab := b.sessions[ev.SessionID]
 			b.mu.Unlock()
 			if tab != nil {
 				tab.onEvent(ev)
@@ -359,15 +387,30 @@ func (b *Browser) DisposeContext(ctx context.Context, id string) error {
 }
 
 func (b *Browser) NewTab(ctx context.Context, o NewTabOptions) (*Tab, error) {
+	if err := AllowedURL(o.URL); err != nil {
+		return nil, err
+	}
 	if o.URL == "" {
 		o.URL = "about:blank"
 	}
+	created := false
 	if o.Isolated && o.ContextID == "" {
 		id, err := b.CreateContext(ctx)
 		if err != nil {
 			return nil, err
 		}
 		o.ContextID = id
+		created = true
+	}
+	cleanup := func(targetID string) {
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if targetID != "" {
+			b.cdp.Call(cctx, "", "Target.closeTarget", map[string]any{"targetId": targetID}, nil)
+		}
+		if created {
+			b.DisposeContext(cctx, o.ContextID)
+		}
 	}
 	p := map[string]any{"url": o.URL, "newWindow": o.NewWindow, "background": o.Background}
 	if o.ContextID != "" {
@@ -377,14 +420,14 @@ func (b *Browser) NewTab(ctx context.Context, o NewTabOptions) (*Tab, error) {
 		TargetID string `json:"targetId"`
 	}
 	if err := b.cdp.Call(ctx, "", "Target.createTarget", p, &r); err != nil {
+		cleanup("")
 		return nil, err
 	}
-	t, err := b.Attach(ctx, r.TargetID)
+	t, err := b.attach(ctx, r.TargetID, o.ContextID, o.Isolated)
 	if err != nil {
+		cleanup(r.TargetID)
 		return nil, err
 	}
-	t.ContextID = o.ContextID
-	t.ownsContext = o.Isolated
 	return t, nil
 }
 
@@ -405,29 +448,64 @@ func (b *Browser) Tabs() []*Tab {
 }
 
 func (b *Browser) Attach(ctx context.Context, targetID string) (*Tab, error) {
-	b.mu.Lock()
-	if t := b.tabs[targetID]; t != nil {
+	return b.attach(ctx, targetID, "", false)
+}
+
+func (b *Browser) attach(ctx context.Context, targetID, contextID string, ownsContext bool) (*Tab, error) {
+	for {
+		b.mu.Lock()
+		if t := b.tabs[targetID]; t != nil {
+			b.mu.Unlock()
+			return t, nil
+		}
+		wait := b.attaching[targetID]
+		if wait == nil {
+			done := make(chan struct{})
+			b.attaching[targetID] = done
+			b.mu.Unlock()
+			t, err := b.attachSession(ctx, targetID, contextID, ownsContext)
+			b.mu.Lock()
+			delete(b.attaching, targetID)
+			if err == nil {
+				if ti := b.targets[targetID]; ti != nil {
+					t.mu.Lock()
+					t.URL, t.Title = ti.URL, ti.Title
+					t.mu.Unlock()
+				}
+				b.tabs[targetID] = t
+			}
+			b.mu.Unlock()
+			close(done)
+			return t, err
+		}
 		b.mu.Unlock()
-		return t, nil
+		select {
+		case <-wait:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
-	b.mu.Unlock()
+}
+
+func (b *Browser) attachSession(ctx context.Context, targetID, contextID string, ownsContext bool) (*Tab, error) {
 	var r struct {
 		SessionID string `json:"sessionId"`
 	}
 	if err := b.cdp.Call(ctx, "", "Target.attachToTarget", map[string]any{"targetId": targetID, "flatten": true}, &r); err != nil {
 		return nil, err
 	}
-	t := &Tab{TargetID: targetID, SessionID: r.SessionID, b: b, lastUsed: time.Now(), loadCh: make(chan struct{}, 1)}
+	t := &Tab{TargetID: targetID, SessionID: r.SessionID, ContextID: contextID, ownsContext: ownsContext, b: b, lastUsed: time.Now(), loadCh: make(chan struct{}, 1)}
 	b.mu.Lock()
-	if ti := b.targets[targetID]; ti != nil {
-		t.URL, t.Title = ti.URL, ti.Title
-	}
-	b.tabs[targetID] = t
+	b.sessions[r.SessionID] = t
 	b.mu.Unlock()
-	for _, m := range []string{"Page.enable", "Runtime.enable"} {
-		if err := b.cdp.Call(ctx, r.SessionID, m, nil, nil); err != nil {
-			return nil, err
-		}
+	if err := b.cdp.Call(ctx, r.SessionID, "Page.enable", nil, nil); err != nil {
+		b.mu.Lock()
+		delete(b.sessions, r.SessionID)
+		b.mu.Unlock()
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		b.cdp.Call(cctx, "", "Target.detachFromTarget", map[string]any{"sessionId": r.SessionID}, nil)
+		cancel()
+		return nil, err
 	}
 	b.cdp.Call(ctx, r.SessionID, "Page.setInterceptFileChooserDialog", map[string]any{"enabled": true}, nil)
 	return t, nil
@@ -456,11 +534,6 @@ func (b *Browser) Kill() {
 	}
 }
 
-var challengeMarkers = []string{
-	"google.com/recaptcha", "recaptcha.net/recaptcha", "hcaptcha.com", "challenges.cloudflare.com",
-	"arkoselabs.com", "funcaptcha.com", "geo.captcha-delivery.com", "captcha",
-}
-
 func (b *Browser) checkChallenge(targetID string) {
 	t := b.Tab(targetID)
 	if t == nil {
@@ -477,12 +550,14 @@ func (b *Browser) checkChallenge(targetID string) {
 }
 
 func disableTranslate(dir string, uid, gid uint32) {
-	p := filepath.Join(dir, "Default", "Preferences")
+	p := filepath.Join("Default", "Preferences")
 	prefs := map[string]any{}
-	if b, err := os.ReadFile(p); err == nil {
+	if b, err := safefs.ReadFileBeneath(dir, p); err == nil {
 		if json.Unmarshal(b, &prefs) != nil {
 			return
 		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return
 	}
 	tr, _ := prefs["translate"].(map[string]any)
 	if tr == nil {
@@ -497,9 +572,14 @@ func disableTranslate(dir string, uid, gid uint32) {
 	if err != nil {
 		return
 	}
-	os.MkdirAll(filepath.Dir(p), 0700)
-	if os.WriteFile(p, b, 0600) == nil && uid != 0 {
-		os.Chown(filepath.Dir(p), int(uid), int(gid))
-		os.Chown(p, int(uid), int(gid))
+	owner, group := -1, -1
+	if uid != 0 {
+		owner, group = int(uid), int(gid)
+	}
+	if safefs.MkdirBeneath(dir, "Default", 0700) != nil {
+		return
+	}
+	if safefs.WriteFileBeneath(dir, p, b, 0600, owner, group) == nil {
+		safefs.ChownBeneath(dir, "Default", owner, group)
 	}
 }

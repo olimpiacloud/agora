@@ -132,6 +132,9 @@ func (e *Engine) loopEnded(stop chan struct{}) {
 }
 
 func (e *Engine) AddSink(s Sink) {
+	if k, ok := s.(interface{ SetKeyRequest(func()) }); ok {
+		k.SetKeyRequest(e.RequestKeyframe)
+	}
 	e.mu.Lock()
 	e.sinks[s.ID()] = s
 	start := !e.running
@@ -219,6 +222,9 @@ func (e *Engine) snapshotSinks() ([]Sink, Mode) {
 	out := make([]Sink, 0, len(e.sinks))
 	mode := Observation
 	for _, s := range e.sinks {
+		if d, ok := s.(interface{ Dead() bool }); ok && d.Dead() {
+			continue
+		}
 		out = append(out, s)
 		if s.Mode() == Interactive {
 			mode = Interactive
@@ -226,6 +232,10 @@ func (e *Engine) snapshotSinks() ([]Sink, Mode) {
 	}
 	e.mode = mode
 	return out, mode
+}
+
+func scaledKbps(kbps, encFps, fps int) int {
+	return kbps * encFps / fps
 }
 
 func params(m Mode, active bool) (fps, crf, kbps int) {
@@ -260,7 +270,8 @@ func (e *Engine) loop(stop, done chan struct{}) {
 	}()
 	var frame *x11.Frame
 	var curMode Mode
-	needFull := true
+	var encFps, curFps int
+	refreshFull := true
 	start := time.Now()
 	last := time.Time{}
 	fpsWin := time.Now()
@@ -268,6 +279,7 @@ func (e *Engine) loop(stop, done chan struct{}) {
 	var glass time.Time
 	var lastKey time.Time
 	failures := 0
+	var retry <-chan time.Time
 	for {
 		var keyTimer <-chan time.Time
 		if e.softKey.Load() {
@@ -284,9 +296,13 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			}
 		case <-e.wake:
 		case <-keyTimer:
+		case <-retry:
 		}
+		retry = nil
 		sinks, mode := e.snapshotSinks()
 		if len(sinks) == 0 {
+			e.softKey.Store(false)
+			glass = time.Time{}
 			continue
 		}
 		fps, crf, kbps := params(mode, e.recentInput())
@@ -300,7 +316,7 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			case <-time.After(wait):
 			}
 		}
-		w, h := e.d.Width, e.d.Height
+		w, h := e.d.Size()
 		if enc == nil || w&^1 != e.w || h&^1 != e.h {
 			if enc != nil {
 				enc.Close()
@@ -314,11 +330,13 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			e.w, e.h = w&^1, h&^1
 			e.mu.Unlock()
 			curMode = mode
+			encFps, curFps = fps, fps
 			e.keyReq.Store(true)
-			needFull = true
-		} else if mode != curMode {
-			enc.Reconfigure(crf, kbps)
+			refreshFull = true
+		} else if mode != curMode || fps != curFps {
+			enc.Reconfigure(crf, scaledKbps(kbps, encFps, fps), kbps)
 			curMode = mode
+			curFps = fps
 		}
 		t0 := time.Now()
 		key := e.keyReq.Swap(false)
@@ -329,17 +347,29 @@ func (e *Engine) loop(stop, done chan struct{}) {
 		pts := now.Sub(start).Milliseconds()
 		var data []byte
 		var isKey bool
-		rx, ry, rw, rh, ok := dw.AckRegion()
+		rx, ry, rw, rh, ok, aerr := dw.AckRegion()
+		if aerr != nil {
+			refreshFull = true
+		}
 		ew, eh := e.w, e.h
 		var t1 time.Time
-		if needFull || !ok {
+		if !ok && !key && !refreshFull {
+			glass = time.Time{}
+			continue
+		}
+		if refreshFull || !ok {
 			frame, err = cp.Grab(0, 0, ew, eh, frame)
 			if err != nil {
+				refreshFull = true
+				if key {
+					e.keyReq.Store(true)
+				}
+				retry = time.After(minGap)
 				continue
 			}
 			t1 = time.Now()
-			data, isKey, err = enc.Encode(frame.Pix, frame.Stride, frame.Width, frame.Height, pts, key || needFull)
-			needFull = false
+			data, isKey, err = enc.Encode(frame.Pix, frame.Stride, frame.Width, frame.Height, pts, key)
+			refreshFull = false
 		} else {
 			x0, y0 := rx&^1, ry&^1
 			x1, y1 := (rx+rw+1)&^1, (ry+rh+1)&^1
@@ -358,7 +388,12 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			}
 			if x1 > x0 && y1 > y0 {
 				frame, err = cp.Grab(x0, y0, x1-x0, y1-y0, frame)
-				if err != nil {
+				if err != nil || frame.Width != x1-x0 || frame.Height != y1-y0 {
+					refreshFull = true
+					if key {
+						e.keyReq.Store(true)
+					}
+					retry = time.After(minGap)
 					continue
 				}
 			}
@@ -378,7 +413,7 @@ func (e *Engine) loop(stop, done chan struct{}) {
 			if failures++; failures > 5 {
 				return
 			}
-			needFull = true
+			refreshFull = true
 			e.keyReq.Store(true)
 			e.poke()
 			continue

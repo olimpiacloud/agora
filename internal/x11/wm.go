@@ -23,6 +23,7 @@ type WM struct {
 	clients  []xproto.Window
 	trans    map[xproto.Window]xproto.Window
 	fixed    map[xproto.Window]bool
+	full     map[xproto.Window]bool
 	atoms    map[string]xproto.Atom
 	check    xproto.Window
 	OnChange func()
@@ -43,7 +44,7 @@ func (d *Display) StartWM(layout Layout) (*WM, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := &WM{d: d, c: c, layout: layout, trans: map[xproto.Window]xproto.Window{}, fixed: map[xproto.Window]bool{}, atoms: map[string]xproto.Atom{}}
+	w := &WM{d: d, c: c, layout: layout, trans: map[xproto.Window]xproto.Window{}, fixed: map[xproto.Window]bool{}, full: map[xproto.Window]bool{}, atoms: map[string]xproto.Atom{}}
 	for _, n := range wmAtomNames {
 		w.atoms[n] = atom(c, n)
 	}
@@ -104,7 +105,7 @@ func (w *WM) setProp(win xproto.Window, name string, typ xproto.Atom, v []uint32
 }
 
 func (w *WM) updateGeometryProps() {
-	sw, sh := w.d.Width, w.d.Height
+	sw, sh := w.d.Size()
 	w.setCardProp(w.d.root, "_NET_DESKTOP_GEOMETRY", []uint32{uint32(sw), uint32(sh)})
 	w.setCardProp(w.d.root, "_NET_WORKAREA", []uint32{0, 0, uint32(sw), uint32(sh)})
 }
@@ -161,6 +162,7 @@ func (w *WM) unmanage(win xproto.Window) {
 	w.mu.Lock()
 	delete(w.trans, win)
 	delete(w.fixed, win)
+	delete(w.full, win)
 	for i, c := range w.clients {
 		if c == win {
 			w.clients = append(w.clients[:i], w.clients[i+1:]...)
@@ -201,7 +203,7 @@ func (w *WM) relayout() {
 		trans[k] = v
 	}
 	w.mu.Unlock()
-	sw, sh := w.d.Width, w.d.Height
+	sw, sh := w.d.Size()
 	mask := uint16(xproto.ConfigWindowX | xproto.ConfigWindowY | xproto.ConfigWindowWidth | xproto.ConfigWindowHeight | xproto.ConfigWindowBorderWidth)
 	switch layout {
 	case LayoutMax:
@@ -241,7 +243,8 @@ func (w *WM) centerOver(t, p xproto.Window) {
 	if err != nil {
 		return
 	}
-	px, py, pw, ph := 0, 0, w.d.Width, w.d.Height
+	pw, ph := w.d.Size()
+	px, py := 0, 0
 	if p != 0 {
 		if pg, err := xproto.GetGeometry(w.c, xproto.Drawable(p)).Reply(); err == nil {
 			px, py, pw, ph = int(pg.X), int(pg.Y), int(pg.Width), int(pg.Height)
@@ -374,14 +377,25 @@ func (w *WM) loop() {
 				d := e.Data.Data32
 				fs := xproto.Atom(d[1]) == w.atoms["_NET_WM_STATE_FULLSCREEN"] || xproto.Atom(d[2]) == w.atoms["_NET_WM_STATE_FULLSCREEN"]
 				if fs {
-					on := d[0] == 1 || d[0] == 2
+					w.mu.Lock()
+					was := w.full[e.Window]
+					on := d[0] == 1 || (d[0] == 2 && !was)
+					if on {
+						w.full[e.Window] = true
+					} else {
+						delete(w.full, e.Window)
+					}
+					w.mu.Unlock()
 					if on {
 						w.setAtomProp(e.Window, "_NET_WM_STATE", []uint32{uint32(w.atoms["_NET_WM_STATE_FULLSCREEN"])})
-						w.MoveResize(uint32(e.Window), 0, 0, w.d.Width, w.d.Height)
+						sw, sh := w.d.Size()
+						w.MoveResize(uint32(e.Window), 0, 0, sw, sh)
 						w.Raise(uint32(e.Window))
 					} else {
 						w.setAtomProp(e.Window, "_NET_WM_STATE", []uint32{})
-						w.Release(uint32(e.Window))
+						if was {
+							w.Release(uint32(e.Window))
+						}
 					}
 				}
 			}

@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -337,14 +338,6 @@ func agoraConsumeOpt(ws string, d time.Duration, interact bool) (frames int, byt
 		}
 	}
 	return
-}
-
-func xvfbOf(ws string) int {
-	v := cdo("GET", "/v1/workspaces/"+ws, nil)
-	d, _ := v["display"].(string)
-	out, _ := exec.Command("pgrep", "-f", "Xvfb "+d+" ").Output()
-	p, _ := strconv.Atoi(strings.Fields(string(out) + " 0")[0])
-	return p
 }
 
 func agoraTree() tree {
@@ -707,12 +700,7 @@ func hostInfo() string {
 		}
 	}
 	ver, _ := exec.Command("google-chrome", "--version").Output()
-	return fmt.Sprintf("Host: %s, %d threads; %s; agora %s", cpu, numCPU(), strings.TrimSpace(string(ver)), core.Version)
-}
-
-func numCPU() int {
-	b, _ := os.ReadFile("/proc/cpuinfo")
-	return strings.Count(string(b), "processor\t:")
+	return fmt.Sprintf("Host: %s, %d threads; %s; agora %s", cpu, runtime.NumCPU(), strings.TrimSpace(string(ver)), core.Version)
 }
 
 type cdpConn struct {

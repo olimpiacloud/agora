@@ -11,6 +11,7 @@ import (
 )
 
 func TestCaptureEncode(t *testing.T) {
+	requireXvfb(t)
 	d, err := x11.StartDisplay(context.Background(), x11.DisplayOptions{Width: 1280, Height: 800, RunDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -60,5 +61,36 @@ func TestCaptureEncode(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("window grab %dx%d", wf.Width, wf.Height)
+	}
+}
+
+func requireXvfb(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("Xvfb"); err != nil {
+		t.Skip("Xvfb missing")
+	}
+}
+
+func TestH264ReconfigureMaxAndBuffer(t *testing.T) {
+	enc, err := NewH264(H264Options{Width: 320, Height: 240, FPS: 30, CRF: 23, MaxKbps: 8000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := make([]byte, 320*240*4)
+	if _, key, err := enc.Encode(src, 320*4, 320, 240, 0, true); err != nil || !key {
+		t.Fatalf("first frame key=%v err=%v", key, err)
+	}
+	if err := enc.Reconfigure(23, 16000, 8000); err != nil {
+		t.Fatal(err)
+	}
+	for i := range src {
+		src[i] = byte(i)
+	}
+	if b, key, err := enc.Encode(src, 320*4, 320, 240, 66, false); err != nil || key || len(b) == 0 {
+		t.Fatalf("frame after reconfigure: %d bytes key=%v err=%v", len(b), key, err)
+	}
+	enc.Close()
+	if err := enc.Reconfigure(23, 8000, 8000); err == nil {
+		t.Fatal("reconfigure of a closed encoder succeeded")
 	}
 }

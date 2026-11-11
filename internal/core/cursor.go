@@ -68,6 +68,10 @@ func (m *Manager) CreateCursor(ctx context.Context, req CreateCursorReq) (*Curso
 			req.Permissions = parent.Permissions
 		} else {
 			req.Permissions = intersect(req.Permissions, parent.Permissions)
+			if len(req.Permissions) == 0 {
+				m.mu.Unlock()
+				return nil, "", fmt.Errorf("%w: parent does not hold any of the requested permissions", ErrForbidden)
+			}
 		}
 		if parent.Budget.MaxDepth > 0 {
 			req.Budget.MaxDepth = parent.Budget.MaxDepth - 1
@@ -95,7 +99,7 @@ func (m *Manager) CreateCursor(ctx context.Context, req CreateCursorReq) (*Curso
 			}
 		}
 	}
-	if len(req.Permissions) == 0 {
+	if parent == nil && len(req.Permissions) == 0 {
 		req.Permissions = DefaultPermissions
 	}
 	id := NewID("cur")
@@ -229,6 +233,10 @@ func (m *Manager) ancestorLocked(anc, id string) bool {
 }
 
 func (m *Manager) setCursorStatus(id string, st CursorStatus, detail string, force bool) error {
+	return m.setCursorStatusWith(id, st, detail, force, nil)
+}
+
+func (m *Manager) setCursorStatusWith(id string, st CursorStatus, detail string, force bool, set func(*Cursor)) error {
 	m.mu.Lock()
 	c := m.cursors[id]
 	if c == nil {
@@ -240,6 +248,9 @@ func (m *Manager) setCursorStatus(id string, st CursorStatus, detail string, for
 		return fmt.Errorf("cursor already %s", c.Status)
 	}
 	prev := c.Status
+	if set != nil {
+		set(c)
+	}
 	c.Status = st
 	c.Detail = detail
 	if st.Terminal() && c.Ended == nil {
@@ -288,35 +299,11 @@ func (m *Manager) Report(id, msg string, pct int) error {
 }
 
 func (m *Manager) Complete(id string, result json.RawMessage) error {
-	m.mu.Lock()
-	c := m.cursors[id]
-	if c == nil {
-		m.mu.Unlock()
-		return ErrNotFound
-	}
-	if c.Status.Terminal() {
-		m.mu.Unlock()
-		return fmt.Errorf("cursor already %s", c.Status)
-	}
-	c.Result = result
-	m.mu.Unlock()
-	return m.setCursorStatus(id, CursorDone, "", false)
+	return m.setCursorStatusWith(id, CursorDone, "", false, func(c *Cursor) { c.Result = result })
 }
 
 func (m *Manager) Fail(id, msg string) error {
-	m.mu.Lock()
-	c := m.cursors[id]
-	if c == nil {
-		m.mu.Unlock()
-		return ErrNotFound
-	}
-	if c.Status.Terminal() {
-		m.mu.Unlock()
-		return fmt.Errorf("cursor already %s", c.Status)
-	}
-	c.Error = msg
-	m.mu.Unlock()
-	return m.setCursorStatus(id, CursorFailed, msg, false)
+	return m.setCursorStatusWith(id, CursorFailed, msg, false, func(c *Cursor) { c.Error = msg })
 }
 
 func (m *Manager) CancelCursor(id, reason string, cascade bool) error {
@@ -545,8 +532,4 @@ func (m *Manager) WaitCursors(ctx context.Context, ids []string, all bool, timeo
 			return out, ctx.Err()
 		}
 	}
-}
-
-func (m *Manager) Tree(root string) []*Cursor {
-	return m.ListCursors(CursorQuery{Root: root})
 }

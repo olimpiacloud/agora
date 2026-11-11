@@ -18,7 +18,14 @@ import (
 	"time"
 
 	"github.com/jezek/xgb"
+	"github.com/jezek/xgb/composite"
+	"github.com/jezek/xgb/damage"
+	"github.com/jezek/xgb/randr"
+	"github.com/jezek/xgb/shm"
+	"github.com/jezek/xgb/xfixes"
 	"github.com/jezek/xgb/xproto"
+	"github.com/jezek/xgb/xtest"
+	"github.com/olimpiacloud/agora/internal/safefs"
 )
 
 type DisplayOptions struct {
@@ -46,6 +53,8 @@ type Display struct {
 	root     xproto.Window
 	screen   *xproto.ScreenInfo
 	mu       sync.Mutex
+	sizeMu   sync.Mutex
+	randr    bool
 	exited   chan struct{}
 	exitErr  error
 	keymap   *keymap
@@ -71,7 +80,7 @@ func freeDisplay(min int) (int, *os.File, error) {
 	return 0, nil, errors.New("no free X display")
 }
 
-func writeXauth(path string, num int, cookie []byte) error {
+func writeXauth(path string, num int, cookie []byte, uid, gid int) error {
 	var b bytes.Buffer
 	put := func(v []byte) {
 		binary.Write(&b, binary.BigEndian, uint16(len(v)))
@@ -82,7 +91,21 @@ func writeXauth(path string, num int, cookie []byte) error {
 	put([]byte(strconv.Itoa(num)))
 	put([]byte("MIT-MAGIC-COOKIE-1"))
 	put(cookie)
-	return os.WriteFile(path, b.Bytes(), 0600)
+	os.Remove(path)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.Write(b.Bytes()); err != nil {
+		return err
+	}
+	if uid != 0 {
+		if err := f.Chown(uid, gid); err != nil {
+			return err
+		}
+	}
+	return f.Close()
 }
 
 func StartDisplay(ctx context.Context, o DisplayOptions) (*Display, error) {
@@ -110,7 +133,15 @@ func StartDisplay(ctx context.Context, o DisplayOptions) (*Display, error) {
 	if err := os.MkdirAll(o.RunDir, 0711); err != nil {
 		return nil, err
 	}
-	os.Chmod(o.RunDir, 0711)
+	rd, err := safefs.OpenBeneath(o.RunDir, ".", syscall.O_RDONLY|syscall.O_DIRECTORY, 0)
+	if err != nil {
+		return nil, err
+	}
+	err = rd.Chmod(0711)
+	rd.Close()
+	if err != nil {
+		return nil, err
+	}
 	num, lockf, err := freeDisplay(o.MinNum)
 	if err != nil {
 		return nil, err
@@ -122,11 +153,8 @@ func StartDisplay(ctx context.Context, o DisplayOptions) (*Display, error) {
 	raw := make([]byte, 16)
 	rand.Read(raw)
 	auth := filepath.Join(o.RunDir, fmt.Sprintf("xauth-%d", num))
-	if err := writeXauth(auth, num, raw); err != nil {
+	if err := writeXauth(auth, num, raw, o.AuthUid, o.AuthGid); err != nil {
 		return nil, err
-	}
-	if o.AuthUid != 0 {
-		os.Chown(auth, o.AuthUid, o.AuthGid)
 	}
 	maxW, maxH := o.MaxWidth, o.MaxHeight
 	if maxW < o.Width {
@@ -153,7 +181,7 @@ func StartDisplay(ctx context.Context, o DisplayOptions) (*Display, error) {
 		cmd.SysProcAttr.UseCgroupFD = true
 		cmd.SysProcAttr.CgroupFD = o.CgroupFD
 	}
-	logf, _ := os.Create(filepath.Join(o.RunDir, fmt.Sprintf("xvfb-%d.log", num)))
+	logf, _ := os.OpenFile(filepath.Join(o.RunDir, fmt.Sprintf("xvfb-%d.log", num)), os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0666)
 	cmd.Stdout = logf
 	cmd.Stderr = logf
 	if err := cmd.Start(); err != nil {
@@ -208,6 +236,13 @@ func StartDisplay(ctx context.Context, o DisplayOptions) (*Display, error) {
 }
 
 func (d *Display) Dial() (*xgb.Conn, error) {
+	if err := d.registerExts(); err != nil {
+		return nil, err
+	}
+	return d.dial()
+}
+
+func (d *Display) dial() (*xgb.Conn, error) {
 	nc, err := net.DialTimeout("unix", socketPath(d.Num), time.Second)
 	if err != nil {
 		return nil, err
@@ -257,10 +292,60 @@ func (d *Display) Close() {
 	os.Remove(d.AuthFile)
 }
 
-var extMu sync.Mutex
+var xExts = []struct {
+	name string
+	init func(*xgb.Conn) error
+}{
+	{"MIT-SHM", shm.Init},
+	{"Composite", composite.Init},
+	{"DAMAGE", damage.Init},
+	{"XFIXES", xfixes.Init},
+	{"XTEST", xtest.Init},
+	{"RANDR", randr.Init},
+}
 
-func extInit(f func(*xgb.Conn) error, c *xgb.Conn) error {
+var (
+	extMu    sync.Mutex
+	extsDone bool
+	extReady = map[string]bool{}
+)
+
+func (d *Display) registerExts() error {
 	extMu.Lock()
 	defer extMu.Unlock()
-	return f(c)
+	if extsDone {
+		return nil
+	}
+	c, err := d.dial()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for _, x := range xExts {
+		if x.init(c) == nil {
+			extReady[x.name] = true
+		}
+	}
+	extsDone = true
+	return nil
+}
+
+func extInit(name string, c *xgb.Conn) error {
+	extMu.Lock()
+	ready := extReady[name]
+	extMu.Unlock()
+	if !ready {
+		return fmt.Errorf("X extension %s is not registered", name)
+	}
+	r, err := xproto.QueryExtension(c, uint16(len(name)), name).Reply()
+	if err != nil {
+		return err
+	}
+	if !r.Present {
+		return fmt.Errorf("X extension %s missing", name)
+	}
+	c.ExtLock.Lock()
+	c.Extensions[name] = r.MajorOpcode
+	c.ExtLock.Unlock()
+	return nil
 }

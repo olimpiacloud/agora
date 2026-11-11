@@ -58,13 +58,22 @@ type Bus struct {
 	size   int
 	subs   map[*sub]struct{}
 	logDir string
-	logs   map[string]*os.File
+	logs   map[string]*auditLog
+	maxLog int64
+	gone   map[string]bool
 	quiet  map[string]bool
 }
 
+type auditLog struct {
+	f    *os.File
+	size int64
+}
+
+var auditMaxBytes int64 = 16 << 20
+
 func NewBus(logDir string, size int) *Bus {
 	os.MkdirAll(logDir, 0700)
-	return &Bus{size: size, subs: map[*sub]struct{}{}, logDir: logDir, logs: map[string]*os.File{}, quiet: map[string]bool{"cursor.pointer": true, "stream.stats": true}}
+	return &Bus{size: size, subs: map[*sub]struct{}{}, logDir: logDir, logs: map[string]*auditLog{}, maxLog: auditMaxBytes, gone: map[string]bool{}, quiet: map[string]bool{"cursor.pointer": true, "stream.stats": true}}
 }
 
 func (b *Bus) Publish(typ, ws, cursor string, data map[string]any) *Event {
@@ -95,26 +104,54 @@ func (b *Bus) audit(e *Event) {
 	if key == "" {
 		key = "_system"
 	}
-	f := b.logs[key]
-	if f == nil {
-		var err error
-		f, err = os.OpenFile(filepath.Join(b.logDir, key+".jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if b.gone[key] {
+		return
+	}
+	l := b.logs[key]
+	if l == nil {
+		f, err := os.OpenFile(b.logPath(key), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err != nil {
 			return
 		}
-		b.logs[key] = f
+		l = &auditLog{f: f}
+		if fi, err := f.Stat(); err == nil {
+			l.size = fi.Size()
+		}
+		b.logs[key] = l
 	}
 	line, _ := json.Marshal(e)
-	f.Write(append(line, '\n'))
+	n, _ := l.f.Write(append(line, '\n'))
+	l.size += int64(n)
+	if l.size > b.maxLog {
+		l.f.Close()
+		delete(b.logs, key)
+		os.Rename(b.logPath(key), b.logPath(key)+".1")
+	}
+}
+
+func (b *Bus) logPath(key string) string {
+	return filepath.Join(b.logDir, key+".jsonl")
 }
 
 func (b *Bus) CloseLog(ws string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if f := b.logs[ws]; f != nil {
-		f.Close()
+	if l := b.logs[ws]; l != nil {
+		l.f.Close()
 		delete(b.logs, ws)
 	}
+}
+
+func (b *Bus) RemoveLog(ws string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if l := b.logs[ws]; l != nil {
+		l.f.Close()
+		delete(b.logs, ws)
+	}
+	b.gone[ws] = true
+	os.Remove(b.logPath(ws))
+	os.Remove(b.logPath(ws) + ".1")
 }
 
 func (b *Bus) Subscribe(f Filter, buf int) (<-chan *Event, func()) {

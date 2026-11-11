@@ -98,5 +98,3 @@ func (d *Display) WindowAt(x, y int) uint32 {
 	}
 	return 0
 }
-
-func xprotoWin(id uint32) xproto.Window { return xproto.Window(id) }

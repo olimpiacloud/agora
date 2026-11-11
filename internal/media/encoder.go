@@ -9,8 +9,7 @@ import (
 
 type Encoder interface {
 	Name() string
-	Size() (int, int)
-	Reconfigure(crf, maxKbps int) error
+	Reconfigure(crf, maxKbps, bufKbps int) error
 	Encode(bgrx []byte, stride, srcW, srcH int, ptsMs int64, idr bool) ([]byte, bool, error)
 	EncodeRect(src []byte, stride, rx, ry, rw, rh int, ptsMs int64, idr bool) ([]byte, bool, error)
 	Close()
@@ -48,6 +47,9 @@ func NewEncoder(o H264Options) (Encoder, error) {
 }
 
 func EncoderFailed(e Encoder, err error) {
+	if errors.Is(err, ErrShortFrame) {
+		return
+	}
 	if e.Name() == "vaapi" && EncoderPref() == "auto" && !vaapiBroken.Swap(true) {
 		log.Printf("encoder: %v, falling back to x264", err)
 	}

@@ -67,7 +67,7 @@ func (d *Display) openSeat(name string, ptr, kbd uint16, owned bool) (*Seat, err
 	if err != nil {
 		return nil, err
 	}
-	if err := extInit(xtest.Init, c); err != nil {
+	if err := extInit("XTEST", c); err != nil {
 		c.Close()
 		return nil, err
 	}

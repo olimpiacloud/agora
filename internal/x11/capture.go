@@ -24,7 +24,13 @@ type Frame struct {
 }
 
 func (f *Frame) RGBA() *image.RGBA {
-	img := image.NewRGBA(image.Rect(0, 0, f.Width, f.Height))
+	return f.RGBAInto(nil)
+}
+
+func (f *Frame) RGBAInto(img *image.RGBA) *image.RGBA {
+	if img == nil || img.Rect != image.Rect(0, 0, f.Width, f.Height) {
+		img = image.NewRGBA(image.Rect(0, 0, f.Width, f.Height))
+	}
 	for y := 0; y < f.Height; y++ {
 		src := f.Pix[y*f.Stride : y*f.Stride+f.Width*4]
 		dst := img.Pix[y*img.Stride : y*img.Stride+f.Width*4]
@@ -55,7 +61,7 @@ func (d *Display) NewCapturer() (*Capturer, error) {
 		return nil, err
 	}
 	cp := &Capturer{d: d, c: c}
-	if err := extInit(shm.Init, c); err == nil {
+	if err := extInit("MIT-SHM", c); err == nil {
 		size := 3840 * 2160 * 4
 		id, err := unix.SysvShmGet(unix.IPC_PRIVATE, size, unix.IPC_CREAT|0600)
 		if err == nil {
@@ -127,7 +133,7 @@ func (cp *Capturer) grab(dr xproto.Drawable, x, y, w, h int, dst *Frame) (*Frame
 func (cp *Capturer) Grab(x, y, w, h int, dst *Frame) (*Frame, error) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
-	sw, sh := cp.d.Width, cp.d.Height
+	sw, sh := cp.d.Size()
 	if x < 0 {
 		w += x
 		x = 0
@@ -150,7 +156,8 @@ func (cp *Capturer) Grab(x, y, w, h int, dst *Frame) (*Frame, error) {
 }
 
 func (cp *Capturer) GrabScreen(dst *Frame) (*Frame, error) {
-	return cp.Grab(0, 0, cp.d.Width, cp.d.Height, dst)
+	w, h := cp.d.Size()
+	return cp.Grab(0, 0, w, h, dst)
 }
 
 func (cp *Capturer) GrabWindow(id uint32, dst *Frame) (*Frame, error) {
@@ -158,7 +165,7 @@ func (cp *Capturer) GrabWindow(id uint32, dst *Frame) (*Frame, error) {
 	defer cp.mu.Unlock()
 	w := xproto.Window(id)
 	if !cp.redirect {
-		if err := extInit(composite.Init, cp.c); err != nil {
+		if err := extInit("Composite", cp.c); err != nil {
 			return nil, err
 		}
 		composite.QueryVersion(cp.c, 0, 4).Reply()
@@ -210,7 +217,7 @@ func (d *Display) WatchDamage() (*DamageWatcher, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := extInit(damage.Init, c); err != nil {
+	if err := extInit("DAMAGE", c); err != nil {
 		c.Close()
 		return nil, err
 	}
@@ -218,7 +225,7 @@ func (d *Display) WatchDamage() (*DamageWatcher, error) {
 		c.Close()
 		return nil, err
 	}
-	if err := extInit(xfixes.Init, c); err != nil {
+	if err := extInit("XFIXES", c); err != nil {
 		c.Close()
 		return nil, err
 	}
@@ -262,13 +269,16 @@ func (dw *DamageWatcher) Ack() {
 	damage.Subtract(dw.c, dw.dmg, 0, 0)
 }
 
-func (dw *DamageWatcher) AckRegion() (x, y, w, h int, ok bool) {
+func (dw *DamageWatcher) AckRegion() (x, y, w, h int, ok bool, err error) {
 	damage.Subtract(dw.c, dw.dmg, 0, dw.region)
 	r, err := xfixes.FetchRegion(dw.c, dw.region).Reply()
-	if err != nil || r.Extents.Width == 0 || r.Extents.Height == 0 {
-		return 0, 0, 0, 0, false
+	if err != nil {
+		return 0, 0, 0, 0, false, err
 	}
-	return int(r.Extents.X), int(r.Extents.Y), int(r.Extents.Width), int(r.Extents.Height), true
+	if r.Extents.Width == 0 || r.Extents.Height == 0 {
+		return 0, 0, 0, 0, false, nil
+	}
+	return int(r.Extents.X), int(r.Extents.Y), int(r.Extents.Width), int(r.Extents.Height), true, nil
 }
 
 func (dw *DamageWatcher) Close() {

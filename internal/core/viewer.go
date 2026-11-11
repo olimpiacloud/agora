@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -41,6 +42,10 @@ func (m *Manager) AttachViewer(ctx context.Context, ws, id string, mode stream.M
 	}
 	v := &Viewer{ID: id, Workspace: ws, Control: control, Mode: mode, sink: sink, send: send, r: r, m: m, held: map[uint32]bool{}, buttons: map[int]bool{}}
 	r.mu.Lock()
+	if r.closing || r.engine != eng {
+		r.mu.Unlock()
+		return nil, fmt.Errorf("%w: workspace is stopping", ErrState)
+	}
 	r.viewers[id] = v
 	n := len(r.viewers)
 	r.mu.Unlock()
@@ -84,7 +89,7 @@ func (v *Viewer) sendHello() {
 	w, h := 0, 0
 	v.r.mu.Lock()
 	if v.r.display != nil {
-		w, h = v.r.display.Width, v.r.display.Height
+		w, h = v.r.display.Size()
 	}
 	v.r.mu.Unlock()
 	b, _ := json.Marshal(map[string]any{"type": "hello", "viewer": v.ID, "width": w, "height": h, "cursors": cs, "locks": m.Arb.List(v.Workspace), "control": v.Control})
@@ -185,6 +190,8 @@ func (v *Viewer) Input(raw []byte) {
 		b, _ := json.Marshal(map[string]any{"type": "pong", "s": msg.S})
 		v.emit(b)
 		return
+	case "noop":
+		return
 	case "key_frame":
 		v.r.mu.Lock()
 		eng := v.r.engine
@@ -213,13 +220,32 @@ func (v *Viewer) Input(raw []byte) {
 		eng.Interact()
 	}
 	v.r.mu.Unlock()
+	gone := func() bool {
+		v.mu.Lock()
+		closed := v.closed
+		v.mu.Unlock()
+		v.r.mu.Lock()
+		attached := v.r.viewers[v.ID] == v
+		v.r.mu.Unlock()
+		return closed || !attached
+	}
 	switch msg.T {
 	case "take":
+		if gone() {
+			return
+		}
 		if _, err := m.Arb.Acquire(v.Workspace, "workspace", "human:"+v.ID, PrioHuman, 0, "human takeover"); err == nil {
+			if gone() {
+				m.Arb.Release(v.Workspace, "workspace", "human:"+v.ID)
+				return
+			}
 			m.Bus.Publish("control.taken", v.Workspace, "", map[string]any{"viewer": v.ID})
 		}
 		return
 	case "release":
+		if gone() {
+			return
+		}
 		if m.Arb.Release(v.Workspace, "workspace", "human:"+v.ID) {
 			m.Bus.Publish("control.returned", v.Workspace, "", map[string]any{"viewer": v.ID})
 			m.resumeNeedsHuman(v.Workspace)
@@ -354,6 +380,14 @@ func (m *Manager) ReturnControl(ws, holder string) bool {
 func (m *Manager) AcquireSurface(ws, cursorID, surface string, ttl time.Duration, reason string) (*Lock, error) {
 	if _, err := m.actor(cursorID, ""); err != nil {
 		return nil, err
+	}
+	if cursorID != "" {
+		if ttl <= 0 || ttl > 10*time.Minute {
+			ttl = 10 * time.Minute
+		}
+		if r := []rune(reason); len(r) > 200 {
+			reason = string(r[:200])
+		}
 	}
 	l, err := m.Arb.Acquire(ws, surface, cursorID, PrioAgent, ttl, reason)
 	if err == nil {

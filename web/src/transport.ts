@@ -23,6 +23,8 @@ export class DesktopSession {
   private pc?: RTCPeerConnection
   private input?: RTCDataChannel
   private decoder?: VideoDecoder
+  private failure = ''
+  private decodeErrors = 0
   private closed = false
   private frames = 0
   private bytes = 0
@@ -97,7 +99,8 @@ export class DesktopSession {
       return
     }
     const d = Math.min(8000, 500 * 2 ** this.retry++)
-    this.cb.onStatus(`reconnecting in ${Math.round(d / 1000)}s`)
+    const why = this.failure ? `${this.failure}, ` : ''
+    this.cb.onStatus(`${why}reconnecting in ${Math.round(d / 1000)}s`)
     setTimeout(() => !this.closed && this.start(), d)
   }
 
@@ -134,8 +137,8 @@ export class DesktopSession {
     this.cb.onMessage(m)
   }
 
-  private tick(n: number) {
-    this.frames++
+  private tick(n: number, decoded: boolean) {
+    if (decoded) this.frames++
     this.bytes += n
     const now = performance.now()
     if (now - this.lastStat > 1000) {
@@ -146,6 +149,37 @@ export class DesktopSession {
       this.bytes = 0
       this.lastStat = now
     }
+  }
+
+  private newDecoder(ws: WebSocket, ctx: CanvasRenderingContext2D) {
+    const dec: VideoDecoder = new VideoDecoder({
+      output: (f) => {
+        this.decodeErrors = 0
+        if (this.canvas.width !== f.displayWidth || this.canvas.height !== f.displayHeight) {
+          this.canvas.width = f.displayWidth
+          this.canvas.height = f.displayHeight
+          this.cb.onSize(f.displayWidth, f.displayHeight)
+        }
+        ctx.drawImage(f, 0, 0)
+        f.close()
+      },
+      error: () => {
+        if (this.decoder !== dec) return
+        this.decoder = undefined
+        if (this.closed || this.ws !== ws || ws.readyState >= WebSocket.CLOSING) return
+        if (++this.decodeErrors > 5) {
+          this.failure = 'video decoder keeps failing'
+          this.cb.onStatus(this.failure)
+          ws.close()
+          return
+        }
+        this.newDecoder(ws, ctx)
+        this.needKey = true
+        this.send({ t: 'key_frame' })
+      },
+    })
+    this.decoder = dec
+    dec.configure({ codec: 'avc1.42e02a', optimizeForLatency: true, hardwareAcceleration: 'no-preference' })
   }
 
   private startWS() {
@@ -162,25 +196,12 @@ export class DesktopSession {
     ws.binaryType = 'arraybuffer'
     this.ws = ws
     const ctx = this.canvas.getContext('2d', { alpha: false, desynchronized: true })!
-    this.decoder = new VideoDecoder({
-      output: (f) => {
-        if (this.canvas.width !== f.displayWidth || this.canvas.height !== f.displayHeight) {
-          this.canvas.width = f.displayWidth
-          this.canvas.height = f.displayHeight
-          this.cb.onSize(f.displayWidth, f.displayHeight)
-        }
-        ctx.drawImage(f, 0, 0)
-        f.close()
-      },
-      error: () => {
-        this.needKey = true
-        this.send({ t: 'key_frame' })
-      },
-    })
-    this.decoder.configure({ codec: 'avc1.42e02a', optimizeForLatency: true, hardwareAcceleration: 'no-preference' })
+    this.decodeErrors = 0
+    this.newDecoder(ws, ctx)
     this.needKey = true
     ws.onopen = () => {
       this.retry = 0
+      this.failure = ''
       this.cb.onStatus('')
       this.startPing((m) => this.send(m))
     }
@@ -192,22 +213,26 @@ export class DesktopSession {
       const pts = Number(dv.getBigUint64(1))
       this.stats.width = dv.getUint16(9)
       this.stats.height = dv.getUint16(11)
-      this.tick(buf.length)
-      if (this.needKey && !key) return
-      if (!this.decoder || this.decoder.state === 'closed') return
-      if (this.decoder.decodeQueueSize > 6) {
+      const dec = this.decoder
+      if ((this.needKey && !key) || !dec || dec.state !== 'configured') return this.tick(buf.length, false)
+      if (dec.decodeQueueSize > 6) {
+        this.tick(buf.length, false)
         this.needKey = true
         this.send({ t: 'key_frame' })
         return
       }
+      this.tick(buf.length, true)
       this.needKey = false
-      this.decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: pts * 1000, data: buf.subarray(13) }))
+      dec.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: pts * 1000, data: buf.subarray(13) }))
     }
     ws.onclose = () => {
       clearInterval(this.pingTimer)
-      try {
-        this.decoder?.close()
-      } catch {}
+      if (this.ws === ws) {
+        try {
+          this.decoder?.close()
+        } catch {}
+        this.decoder = undefined
+      }
       if (!this.closed) this.scheduleRetry()
     }
   }
@@ -329,6 +354,7 @@ export class DesktopSession {
     try {
       this.decoder?.close()
     } catch {}
+    this.decoder = undefined
   }
 }
 

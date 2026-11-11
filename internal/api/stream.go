@@ -24,7 +24,7 @@ func (s *Server) viewerAccess(r *http.Request, p *Principal, ws string) (bool, e
 		return p.Viewer.Control, nil
 	}
 	if p.Cursor != nil && p.Cursor.Workspace == ws {
-		return false, nil
+		return false, need(p, "desktop")
 	}
 	return false, core.ErrForbidden
 }
@@ -169,6 +169,7 @@ func (s *Server) streamRTC(w http.ResponseWriter, r *http.Request, p *Principal)
 	go func() {
 		<-sess.Closed()
 		sess.Close()
+		s.m.DetachViewer(ws, id)
 	}()
 	writeJSON(w, 200, map[string]any{"sdp": answer, "viewer": id})
 }

@@ -77,7 +77,6 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
           } else if (e.type === 'human.requested') {
             setNeedHuman({ cursor: e.cursor, reason: (d.reason as string) || 'needs a human' })
           } else if (e.type.startsWith('control.')) {
-            s.send({ t: 'noop' })
             fetch(`/v1/workspaces/${ws}/locks`, { headers: { Authorization: `Bearer ${localStorage.getItem('agora.token') || ''}` } })
               .then((r) => (r.ok ? r.json() : null))
               .then((l) => l && setLocks(l))

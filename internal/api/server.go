@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/olimpiacloud/agora/internal/core"
@@ -20,6 +22,7 @@ type Server struct {
 	auth *Auth
 	mux  *http.ServeMux
 	ui   fs.FS
+	wsMu sync.Mutex
 }
 
 type ctxKey struct{}
@@ -29,8 +32,6 @@ func New(m *core.Manager, auth *Auth, ui fs.FS) *Server {
 	s.routes()
 	return s
 }
-
-func (s *Server) Handler() http.Handler { return s }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -172,8 +173,12 @@ func (s *Server) routes() {
 	}))
 
 	m.HandleFunc("POST /v1/workspaces", s.h(func(w http.ResponseWriter, r *http.Request, p *Principal) {
-		if !p.Admin && (p.Cursor == nil || !p.Cursor.Can("workspace")) {
-			writeErr(w, fmt.Errorf("%w: needs workspace permission", core.ErrForbidden))
+		if !p.Admin && p.Cursor == nil {
+			writeErr(w, core.ErrForbidden)
+			return
+		}
+		if err := need(p, "workspace"); err != nil {
+			writeErr(w, err)
 			return
 		}
 		var req core.CreateWorkspaceReq
@@ -183,12 +188,18 @@ func (s *Server) routes() {
 		}
 		if p.Cursor != nil {
 			req.Owner = p.Cursor.ID
+		}
+		var ws *core.Workspace
+		var err error
+		if p.limited() {
 			if len(req.Config.BrowserArgs) > 0 || req.Config.Profile != "" {
 				writeErr(w, fmt.Errorf("%w: only the admin can set browser_args or profile", core.ErrForbidden))
 				return
 			}
+			ws, err = s.createCursorWorkspace(r.Context(), p.Cursor, req)
+		} else {
+			ws, err = s.m.CreateWorkspace(r.Context(), req)
 		}
-		ws, err := s.m.CreateWorkspace(r.Context(), req)
 		if err != nil {
 			writeErr(w, err)
 			return
@@ -226,6 +237,10 @@ func (s *Server) routes() {
 	}))
 	m.HandleFunc("POST /v1/workspaces/{id}/{op}", s.ws(s.workspaceOp))
 	m.HandleFunc("GET /v1/workspaces/{id}/windows", s.ws(func(w http.ResponseWriter, r *http.Request, p *Principal, id string) {
+		if err := need(p, "desktop"); err != nil {
+			writeErr(w, err)
+			return
+		}
 		ws, err := s.m.Windows(r.Context(), id)
 		if err != nil {
 			writeErr(w, err)
@@ -247,6 +262,10 @@ func (s *Server) routes() {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	}))
 	m.HandleFunc("GET /v1/workspaces/{id}/screenshot", s.ws(func(w http.ResponseWriter, r *http.Request, p *Principal, id string) {
+		if err := need(p, "desktop"); err != nil {
+			writeErr(w, err)
+			return
+		}
 		q := r.URL.Query()
 		atoi := func(k string) int { v, _ := strconv.Atoi(q.Get(k)); return v }
 		win, _ := strconv.ParseUint(q.Get("window"), 10, 32)
@@ -268,6 +287,10 @@ func (s *Server) routes() {
 			writeErr(w, core.ErrNotFound)
 			return
 		}
+		if p.limited() && !p.Cursor.Can("desktop") && !p.Cursor.Can("browser") {
+			writeErr(w, fmt.Errorf("%w: needs desktop or browser permission", core.ErrForbidden))
+			return
+		}
 		w.Header().Set("Content-Type", sh.Mime)
 		w.Header().Set("Cache-Control", "private, max-age=86400")
 		w.Write(sh.Data)
@@ -286,8 +309,8 @@ func (s *Server) routes() {
 		writeJSON(w, 200, res)
 	}))
 	m.HandleFunc("POST /v1/workspaces/{id}/apps", s.ws(func(w http.ResponseWriter, r *http.Request, p *Principal, id string) {
-		if p.Cursor != nil && !p.Cursor.Can("process") {
-			writeErr(w, core.ErrForbidden)
+		if err := need(p, "process"); err != nil {
+			writeErr(w, err)
 			return
 		}
 		var spec core.AppSpec
@@ -304,10 +327,18 @@ func (s *Server) routes() {
 		writeJSON(w, 201, pr)
 	}))
 	m.HandleFunc("GET /v1/workspaces/{id}/processes", s.ws(func(w http.ResponseWriter, r *http.Request, p *Principal, id string) {
+		if err := need(p, "process"); err != nil {
+			writeErr(w, err)
+			return
+		}
 		writeJSON(w, 200, s.m.Processes(id))
 	}))
 	m.HandleFunc("DELETE /v1/workspaces/{id}/processes/{pid}", s.ws(func(w http.ResponseWriter, r *http.Request, p *Principal, id string) {
 		pid, _ := strconv.Atoi(r.PathValue("pid"))
+		if err := s.canKill(p, id, pid); err != nil {
+			writeErr(w, err)
+			return
+		}
 		if err := s.m.KillProcess(id, pid); err != nil {
 			writeErr(w, err)
 			return
@@ -315,6 +346,10 @@ func (s *Server) routes() {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	}))
 	m.HandleFunc("GET /v1/workspaces/{id}/clipboard", s.ws(func(w http.ResponseWriter, r *http.Request, p *Principal, id string) {
+		if err := need(p, "desktop"); err != nil {
+			writeErr(w, err)
+			return
+		}
 		t, err := s.m.Clipboard(r.Context(), id, nil)
 		if err != nil {
 			writeErr(w, err)
@@ -323,6 +358,10 @@ func (s *Server) routes() {
 		writeJSON(w, 200, map[string]any{"text": t})
 	}))
 	m.HandleFunc("GET /v1/workspaces/{id}/tabs", s.ws(func(w http.ResponseWriter, r *http.Request, p *Principal, id string) {
+		if err := need(p, "browser"); err != nil {
+			writeErr(w, err)
+			return
+		}
 		t, err := s.m.ListTabs(r.Context(), id)
 		if err != nil {
 			writeErr(w, err)
@@ -382,6 +421,10 @@ func (s *Server) routes() {
 			writeErr(w, core.ErrForbidden)
 			return
 		}
+		if err := need(p, "message"); err != nil {
+			writeErr(w, err)
+			return
+		}
 		var req struct {
 			Kind  string `json:"kind"`
 			Topic string `json:"topic"`
@@ -412,7 +455,7 @@ func (s *Server) routes() {
 		all := s.m.ListCursors(cq)
 		out := []*core.Cursor{}
 		for _, c := range all {
-			if p.Admin || (p.Cursor != nil && (c.Workspace == p.Cursor.Workspace || s.m.IsAncestor(p.Cursor.ID, c.ID))) {
+			if p.Admin || (p.Cursor != nil && (c.Workspace != "" && c.Workspace == p.Cursor.Workspace || s.m.IsAncestor(p.Cursor.ID, c.ID))) {
 				out = append(out, c.Public())
 			}
 		}
@@ -538,10 +581,24 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 		writeErr(w, err)
 		return
 	}
-	adminOnly := map[string]bool{"suspend": true, "freeze": true, "fork": true, "control-take": true, "control-return": true}
-	if adminOnly[op] && !p.Admin && !(p.Cursor != nil && p.Cursor.Can("workspace")) {
-		writeErr(w, core.ErrForbidden)
-		return
+	privileged := map[string]bool{"suspend": true, "freeze": true, "checkpoint": true, "fork": true, "resize": true, "layout": true, "browser-restart": true, "control-take": true, "control-return": true}
+	if privileged[op] {
+		if err := need(p, "workspace"); err != nil {
+			writeErr(w, err)
+			return
+		}
+	}
+	if op == "clipboard" {
+		if err := need(p, "desktop"); err != nil {
+			writeErr(w, err)
+			return
+		}
+	}
+	if op == "acquire" {
+		if err := acquireAllowed(p, body.Surface); err != nil {
+			writeErr(w, err)
+			return
+		}
 	}
 	var err error
 	var res any = map[string]any{"ok": true}
@@ -549,7 +606,7 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 	case "start":
 		err = s.m.Start(ctx, id)
 	case "suspend":
-		err = s.m.Suspend(ctx, id, defStr(body.Reason, "api"))
+		err = s.m.Suspend(ctx, id, cmp.Or(body.Reason, "api"))
 	case "resume":
 		err = s.m.Resume(ctx, id)
 	case "freeze":
@@ -557,7 +614,7 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 	case "thaw":
 		err = s.m.Thaw(ctx, id)
 	case "checkpoint":
-		res, err = s.m.Checkpoint(ctx, id, defStr(body.Reason, "api"), body.Snapshot)
+		res, err = s.m.Checkpoint(ctx, id, cmp.Or(body.Reason, "api"), body.Snapshot)
 	case "fork":
 		res, err = s.m.Fork(ctx, id, body.Name)
 	case "resize":
@@ -600,13 +657,6 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 	writeJSON(w, 200, res)
 }
 
-func defStr(s, d string) string {
-	if s == "" {
-		return d
-	}
-	return s
-}
-
 func (s *Server) createCursor(w http.ResponseWriter, r *http.Request, p *Principal) {
 	var req core.CreateCursorReq
 	if err := decode(r, &req); err != nil {
@@ -625,8 +675,20 @@ func (s *Server) createCursor(w http.ResponseWriter, r *http.Request, p *Princip
 			writeErr(w, fmt.Errorf("%w: cannot place subagent in a workspace you did not create", core.ErrForbidden))
 			return
 		}
-		if req.Launch != nil && (req.Launch.Adapter == "command" || req.Launch.Adapter == "" || len(req.Launch.Command) > 0 || len(req.Launch.Env) > 0) {
-			writeErr(w, fmt.Errorf("%w: subagents may only be launched with the claude or codex adapter, without command or env", core.ErrForbidden))
+		if req.Launch != nil && req.Launch.Adapter == "codex" {
+			writeErr(w, fmt.Errorf("%w: codex subagents keep their built-in shell, so only the admin can launch them; use the claude adapter", core.ErrForbidden))
+			return
+		}
+		if req.Launch != nil && (req.Launch.Adapter != "claude" && req.Launch.Adapter != "claude-code" || len(req.Launch.Command) > 0 || len(req.Launch.Env) > 0) {
+			writeErr(w, fmt.Errorf("%w: subagents may only be launched with the claude adapter, without command or env", core.ErrForbidden))
+			return
+		}
+		if req.Launch != nil && req.Launch.Profile == "full" {
+			writeErr(w, fmt.Errorf("%w: only the admin can launch subagents with the full profile", core.ErrForbidden))
+			return
+		}
+		if req.Worktree != nil && !p.Cursor.Can("process") {
+			writeErr(w, fmt.Errorf("%w: a worktree needs process permission", core.ErrForbidden))
 			return
 		}
 	}
@@ -651,6 +713,10 @@ func (s *Server) cursorOp(w http.ResponseWriter, r *http.Request, p *Principal) 
 	isSelf := p.Cursor != nil && p.Cursor.ID == id
 	ancestor := p.Cursor != nil && s.m.IsAncestor(p.Cursor.ID, id)
 	if op == "message" {
+		if err := need(p, "message"); err != nil {
+			writeErr(w, err)
+			return
+		}
 		if !p.Admin && !s.canMessage(p, id) {
 			writeErr(w, fmt.Errorf("%w: cursor %s is outside your workspace and tree", core.ErrForbidden, id))
 			return
@@ -689,20 +755,20 @@ func (s *Server) cursorOp(w http.ResponseWriter, r *http.Request, p *Principal) 
 		}
 		err = s.m.Complete(id, body.Result)
 	case "fail":
-		err = s.m.Fail(id, defStr(body.Error, body.Message))
+		err = s.m.Fail(id, cmp.Or(body.Error, body.Message))
 	case "cancel":
 		cascade := body.Cascade == nil || *body.Cascade
 		if isSelf && !p.Admin {
-			err = s.m.CancelCursor(id, defStr(body.Reason, "self-cancel"), cascade)
+			err = s.m.CancelCursor(id, cmp.Or(body.Reason, "self-cancel"), cascade)
 		} else {
-			err = s.m.CancelCursor(id, defStr(body.Reason, "cancelled by "+defStr(p.CursorID(), "admin")), cascade)
+			err = s.m.CancelCursor(id, cmp.Or(body.Reason, "cancelled by "+cmp.Or(p.CursorID(), "admin")), cascade)
 		}
 	case "pause":
 		err = s.m.Pause(id)
 	case "resume":
 		err = s.m.ResumeCursor(id)
 	case "message":
-		from := defStr(p.CursorID(), "admin")
+		from := cmp.Or(p.CursorID(), "admin")
 		res, err = s.m.SendMessage(from, id, body.Body)
 	case "transfer":
 		if !p.Admin {
@@ -742,6 +808,96 @@ func (s *Server) ownsWorkspace(p *Principal, ws string) bool {
 	}
 	w, err := s.m.GetWorkspace(ws)
 	return err == nil && w.Owner != "" && s.m.IsAncestor(p.Cursor.ID, w.Owner)
+}
+
+func need(p *Principal, perm string) error {
+	if p.limited() && !p.Cursor.Can(perm) {
+		return fmt.Errorf("%w: needs %s permission", core.ErrForbidden, perm)
+	}
+	return nil
+}
+
+func acquireAllowed(p *Principal, surface string) error {
+	if !p.limited() {
+		return nil
+	}
+	if surface == "workspace" {
+		return fmt.Errorf("%w: cursors cannot lock the whole workspace; call human_request to hand over to a person", core.ErrForbidden)
+	}
+	if strings.HasPrefix(surface, "tab:") {
+		return need(p, "browser")
+	}
+	return need(p, "desktop")
+}
+
+const maxCursorWorkspaces = 5
+
+func (s *Server) createCursorWorkspace(ctx context.Context, c *core.Cursor, req core.CreateWorkspaceReq) (*core.Workspace, error) {
+	if c.Workspace != "" {
+		if parent, err := s.m.GetWorkspace(c.Workspace); err == nil {
+			inheritLimits(&req.Config, parent.Config)
+		}
+	}
+	start := req.Start
+	req.Start = false
+	s.wsMu.Lock()
+	n := 0
+	for _, v := range s.m.ListWorkspaces() {
+		if v.State == core.StateDestroyed || v.Owner == "" {
+			continue
+		}
+		if o, err := s.m.GetCursor(v.Owner); err == nil && o.Root == c.Root {
+			n++
+		}
+	}
+	if n >= maxCursorWorkspaces {
+		s.wsMu.Unlock()
+		return nil, fmt.Errorf("%w: cursor tree already has %d live workspaces (limit %d)", core.ErrForbidden, n, maxCursorWorkspaces)
+	}
+	ws, err := s.m.CreateWorkspace(ctx, req)
+	s.wsMu.Unlock()
+	if err != nil || !start {
+		return ws, err
+	}
+	if err := s.m.Start(ctx, ws.ID); err != nil {
+		return ws, err
+	}
+	return s.m.GetWorkspace(ws.ID)
+}
+
+func inheritLimits(cfg *core.WorkspaceConfig, parent core.WorkspaceConfig) {
+	if parent.Sandbox {
+		cfg.Sandbox = true
+	}
+	limit := func(v *int, max int) {
+		if max > 0 && (*v <= 0 || *v > max) {
+			*v = max
+		}
+	}
+	limit(&cfg.Budget.MemoryMB, parent.Budget.MemoryMB)
+	limit(&cfg.Budget.CPUPercent, parent.Budget.CPUPercent)
+	limit(&cfg.Budget.MaxCursors, parent.Budget.MaxCursors)
+	limit(&cfg.Budget.MaxTabs, parent.Budget.MaxTabs)
+}
+
+func (s *Server) canKill(p *Principal, ws string, pid int) error {
+	if !p.limited() {
+		return nil
+	}
+	if err := need(p, "process"); err != nil {
+		return err
+	}
+	if p.Cursor.Can("workspace") {
+		return nil
+	}
+	owner, err := s.m.ProcessOwner(ws, pid)
+	if err != nil {
+		return err
+	}
+	if owner == "" || !s.m.IsAncestor(p.Cursor.ID, owner) {
+		return fmt.Errorf("%w: process %d was not launched by you or your subagents", core.ErrForbidden, pid)
+	}
+	return nil
 }
 
 func (s *Server) canMessage(p *Principal, id string) bool {

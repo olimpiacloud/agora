@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"github.com/olimpiacloud/agora/internal/browser"
+	"github.com/olimpiacloud/agora/internal/safefs"
 	"github.com/olimpiacloud/agora/internal/sandbox"
 	"github.com/olimpiacloud/agora/internal/stream"
 	"github.com/olimpiacloud/agora/internal/x11"
+	"golang.org/x/sys/unix"
 )
 
 type Proc struct {
@@ -34,33 +36,34 @@ type seatLease struct {
 }
 
 type Runtime struct {
-	m         *Manager
-	id        string
-	mu        sync.Mutex
-	display   *x11.Display
-	wm        *x11.WM
-	clip      *x11.Clipboard
-	brMu      sync.Mutex
-	browser   *browser.Browser
-	brCrashes int
-	noTabs    time.Time
-	human     time.Time
-	reaping   bool
-	engine    *stream.Engine
-	core      *x11.Seat
-	seats     map[string]*seatLease
-	procs     map[int]*Proc
-	frozen    bool
-	viewers   map[string]*Viewer
-	activity  time.Time
-	started   time.Time
-	tabOwner  map[string]string
-	lastTabs  []TabRecord
-	idle      bool
-	closing   bool
-	restored  bool
-	lastObs   map[string]string
-	offsets   map[string][3]int
+	m          *Manager
+	id         string
+	mu         sync.Mutex
+	display    *x11.Display
+	wm         *x11.WM
+	clip       *x11.Clipboard
+	brMu       sync.Mutex
+	browser    *browser.Browser
+	brCrashes  int
+	noTabs     time.Time
+	human      time.Time
+	reaping    bool
+	engine     *stream.Engine
+	core       *x11.Seat
+	seats      map[string]*seatLease
+	procs      map[int]*Proc
+	frozen     bool
+	viewers    map[string]*Viewer
+	activity   time.Time
+	started    time.Time
+	tabOwner   map[string]string
+	lastTabs   []TabRecord
+	idle       bool
+	closing    bool
+	suspending bool
+	restored   bool
+	lastObs    map[string]string
+	offsets    map[string][3]int
 }
 
 func (m *Manager) runtime(id string) *Runtime {
@@ -83,7 +86,7 @@ func (r *Runtime) touch() {
 func (m *Manager) setState(id string, st WSState, reason string) {
 	m.mu.Lock()
 	w := m.ws[id]
-	if w == nil || w.State == st {
+	if w == nil || w.State == st || w.State == StateDestroyed {
 		m.mu.Unlock()
 		return
 	}
@@ -116,12 +119,8 @@ func (m *Manager) ensureRuntimeLocked(ctx context.Context, id string, display bo
 	m.mu.Unlock()
 	if r == nil {
 		r = &Runtime{m: m, id: id, seats: map[string]*seatLease{}, procs: map[int]*Proc{}, viewers: map[string]*Viewer{}, activity: time.Now(), started: time.Now(), tabOwner: map[string]string{}, offsets: map[string][3]int{}}
-		home := m.wsDir(id)
-		os.MkdirAll(filepath.Join(home, "home", "Downloads"), 0700)
-		os.MkdirAll(filepath.Join(home, "run"), 0711)
-		os.MkdirAll(filepath.Join(home, "home", ".xdg-run"), 0700)
-		for _, p := range []string{home, filepath.Join(home, "home"), filepath.Join(home, "home", "Downloads"), filepath.Join(home, "home", ".xdg-run")} {
-			m.chownApps(p)
+		if err := m.prepareWSDir(id); err != nil {
+			return nil, fmt.Errorf("workspace dir: %w", err)
 		}
 		if m.cg != nil {
 			m.cg.Ensure(id, cfg.Budget)
@@ -133,17 +132,21 @@ func (m *Manager) ensureRuntimeLocked(ctx context.Context, id string, display bo
 			r.lastTabs = w.Checkpoint.Tabs
 		}
 	}
-	if r.frozen {
-		if err := r.thaw(); err != nil {
-			return nil, err
-		}
+	if err := r.thaw(); err != nil {
+		return nil, err
 	}
-	if display && !cfg.Headless && r.display == nil {
+	r.mu.Lock()
+	d := r.display
+	r.mu.Unlock()
+	if display && !cfg.Headless && d == nil {
 		if err := r.startDisplay(ctx, cfg); err != nil {
 			return nil, err
 		}
+		r.mu.Lock()
+		d = r.display
+		r.mu.Unlock()
 	}
-	if !r.restored && (r.display != nil || cfg.Headless) {
+	if !r.restored && (d != nil || cfg.Headless) {
 		r.restored = true
 		m.mu.Lock()
 		cp := w.Checkpoint
@@ -163,6 +166,81 @@ func (m *Manager) ensureRuntimeLocked(ctx context.Context, id string, display bo
 	}
 	m.setState(id, StateActive, "runtime")
 	return r, nil
+}
+
+func (m *Manager) prepareWSDir(id string) error {
+	dir := m.wsDir(id)
+	if err := os.MkdirAll(dir, 0711); err != nil {
+		return err
+	}
+	if m.uid != 0 {
+		d, err := safefs.OpenBeneath(dir, ".", syscall.O_RDONLY|syscall.O_DIRECTORY, 0)
+		if err != nil {
+			return err
+		}
+		err = d.Chown(0, 0)
+		if err == nil {
+			err = d.Chmod(0711)
+		}
+		d.Close()
+		if err != nil {
+			return err
+		}
+		for _, n := range []string{"home", "run"} {
+			p := filepath.Join(dir, n)
+			st, err := os.Lstat(p)
+			if err != nil {
+				continue
+			}
+			if !st.IsDir() || (n == "run" && st.Sys().(*syscall.Stat_t).Uid != 0) {
+				if err := os.RemoveAll(p); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if err := safefs.MkdirBeneath(dir, "run", 0711); err != nil {
+		return err
+	}
+	if err := safefs.MkdirBeneath(dir, "home", 0700); err != nil {
+		return err
+	}
+	for _, n := range []string{"Downloads", ".xdg-run"} {
+		if err := mkdirLeaf(dir, "home", n); err != nil {
+			return err
+		}
+	}
+	if m.uid != 0 {
+		for _, rel := range []string{"home", "home/Downloads", "home/.xdg-run"} {
+			if err := safefs.ChownBeneath(dir, rel, m.uid, m.gid); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func mkdirLeaf(base, parent, name string) error {
+	var err error
+	for range 3 {
+		var d *os.File
+		d, err = safefs.OpenBeneath(base, parent, syscall.O_RDONLY|syscall.O_DIRECTORY, 0)
+		if err != nil {
+			return err
+		}
+		var st unix.Stat_t
+		if unix.Fstatat(int(d.Fd()), name, &st, unix.AT_SYMLINK_NOFOLLOW) == nil && st.Mode&unix.S_IFMT != unix.S_IFDIR {
+			if e := unix.Unlinkat(int(d.Fd()), name, 0); e != nil && e != unix.ENOENT {
+				d.Close()
+				return &os.PathError{Op: "unlink", Path: filepath.Join(base, parent, name), Err: e}
+			}
+		}
+		d.Close()
+		if err = safefs.MkdirBeneath(base, filepath.Join(parent, name), 0700); err == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 func (r *Runtime) startDisplay(ctx context.Context, cfg WorkspaceConfig) error {
@@ -249,8 +327,11 @@ func (r *Runtime) appEnv() []string {
 		"XDG_RUNTIME_DIR=" + filepath.Join(home, ".xdg-run"),
 		"AGORA_WORKSPACE=" + r.id,
 	}
-	if r.display != nil {
-		env = append(env, r.display.Env()...)
+	r.mu.Lock()
+	d := r.display
+	r.mu.Unlock()
+	if d != nil {
+		env = append(env, d.Env()...)
 	}
 	return env
 }
@@ -266,21 +347,35 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 			return r.browser, nil
 		}
 	}
+	r.mu.Lock()
+	closing := r.closing
+	d := r.display
+	r.mu.Unlock()
+	if closing {
+		return nil, fmt.Errorf("%w: workspace is stopping", ErrState)
+	}
 	m := r.m
 	m.mu.Lock()
 	w := m.ws[r.id]
 	cfg := w.Config
 	m.mu.Unlock()
-	if !cfg.Headless && r.display == nil {
+	if !cfg.Headless && d == nil {
 		return nil, errors.New("workspace display not running")
 	}
 	profile := cfg.Profile
 	if profile == "" {
 		profile = r.id
 	}
-	if other := m.profileHolder(profile, r.id); other != "" {
+	lease, other := m.reserveProfile(profile, r.id)
+	if other != "" {
 		return nil, fmt.Errorf("profile %q is open in workspace %s; fork the workspace or suspend it first", profile, other)
 	}
+	launched := false
+	defer func() {
+		if !launched {
+			m.releaseProfile(profile, lease)
+		}
+	}()
 	pdir := m.profileDir(profile)
 	dl := filepath.Join(m.wsDir(r.id), "home", "Downloads")
 	sw, sh := cfg.Width, cfg.Height
@@ -290,6 +385,9 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 	restore := r.lastTabs
 	if len(restore) == 0 && len(cfg.AutostartURLs) > 0 {
 		for _, u := range cfg.AutostartURLs {
+			if browser.AllowedURL(u) != nil {
+				continue
+			}
 			restore = append(restore, TabRecord{URL: u})
 		}
 	}
@@ -302,11 +400,7 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 			return nil, err
 		}
 	}
-	b, err := browser.Launch(ctx, browser.LaunchOptions{Wrap: wrap, CgroupFD: cgfd, Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: cfg.BrowserArgs, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log")})
-	if err != nil {
-		return nil, err
-	}
-	b.OnEvent = func(kind string, data map[string]any) {
+	onEvent := func(kind string, data map[string]any) {
 		cur := ""
 		if t, ok := data["target"].(string); ok {
 			r.mu.Lock()
@@ -328,9 +422,17 @@ func (r *Runtime) Browser(ctx context.Context) (*browser.Browser, error) {
 		}
 		m.Bus.Publish(kind, r.id, cur, data)
 	}
+	b, err := browser.Launch(ctx, browser.LaunchOptions{Wrap: wrap, CgroupFD: cgfd, Binary: m.cfg.ChromeBinary, UserDataDir: pdir, Env: r.appEnv(), Uid: uint32(m.uid), Gid: uint32(m.gid), Headless: cfg.Headless, Width: sw, Height: sh, ExtraArgs: cfg.BrowserArgs, DownloadDir: dl, LogPath: filepath.Join(m.wsDir(r.id), "run", "browser.log"), OnEvent: onEvent})
+	if err != nil {
+		return nil, err
+	}
+	launched = true
+	m.mu.Lock()
+	lease.b = b
+	m.mu.Unlock()
 	r.browser = b
 	m.Bus.Publish("browser.started", r.id, "", map[string]any{"pid": b.Pid(), "profile": profile})
-	go r.watchBrowser(b)
+	go r.watchBrowser(b, profile, lease)
 	if len(restore) > 0 {
 		go r.restoreTabs(b, restore)
 	}
@@ -404,8 +506,9 @@ func (r *Runtime) restoreTabs(b *browser.Browser, tabs []TabRecord) {
 	r.mu.Unlock()
 }
 
-func (r *Runtime) watchBrowser(b *browser.Browser) {
+func (r *Runtime) watchBrowser(b *browser.Browser, profile string, lease *profileLease) {
 	<-b.Exited()
+	r.m.releaseProfile(profile, lease)
 	r.brMu.Lock()
 	current := r.browser == b
 	if current {
@@ -427,6 +530,30 @@ func (r *Runtime) tabRecordsFrom(b *browser.Browser) []TabRecord {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	b.Refresh(ctx)
 	cancel()
+	return r.cachedTabRecords(b)
+}
+
+var liveTabRecords = (*Runtime).tabRecordsFrom
+
+func (r *Runtime) currentTabs() []TabRecord {
+	r.mu.Lock()
+	frozen := r.frozen
+	last := append([]TabRecord{}, r.lastTabs...)
+	r.mu.Unlock()
+	r.brMu.Lock()
+	b := r.browser
+	r.brMu.Unlock()
+	switch {
+	case b == nil:
+		return last
+	case frozen:
+		return r.cachedTabRecords(b)
+	default:
+		return liveTabRecords(r, b)
+	}
+}
+
+func (r *Runtime) cachedTabRecords(b *browser.Browser) []TabRecord {
 	out := []TabRecord{}
 	for _, t := range b.Targets() {
 		r.mu.Lock()
@@ -438,28 +565,38 @@ func (r *Runtime) tabRecordsFrom(b *browser.Browser) []TabRecord {
 	return out
 }
 
-func (m *Manager) profileHolder(profile, except string) string {
+type profileLease struct {
+	ws string
+	b  *browser.Browser
+}
+
+func (m *Manager) reserveProfile(profile, ws string) (*profileLease, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for id, r := range m.rt {
-		if id == except {
-			continue
-		}
-		w := m.ws[id]
-		p := w.Config.Profile
-		if p == "" {
-			p = id
-		}
-		if p == profile {
-			r.brMu.Lock()
-			running := r.browser != nil
-			r.brMu.Unlock()
-			if running {
-				return id
+	if l := m.profiles[profile]; l != nil && l.ws != ws {
+		running := l.b == nil
+		if l.b != nil {
+			select {
+			case <-l.b.Exited():
+			default:
+				running = true
 			}
 		}
+		if running {
+			return nil, l.ws
+		}
 	}
-	return ""
+	l := &profileLease{ws: ws}
+	m.profiles[profile] = l
+	return l, ""
+}
+
+func (m *Manager) releaseProfile(profile string, l *profileLease) {
+	m.mu.Lock()
+	if m.profiles[profile] == l {
+		delete(m.profiles, profile)
+	}
+	m.mu.Unlock()
 }
 
 func (r *Runtime) cgroupFD() (int, func()) {

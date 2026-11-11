@@ -100,6 +100,16 @@ func (s *Server) setShot(key string, m *shotMap) {
 	s.shots[key] = *m
 }
 
+func (s *Server) clearShots(prefix string) {
+	s.shotMu.Lock()
+	defer s.shotMu.Unlock()
+	for k := range s.shots {
+		if strings.HasPrefix(k, prefix) {
+			delete(s.shots, k)
+		}
+	}
+}
+
 func (s *Server) mapPoints(key string, src Args, dst map[string]any) {
 	s.shotMu.Lock()
 	m, ok := s.shots[key]

@@ -18,7 +18,7 @@ Agora controla una computadora real con sesiones de navegador logueadas. Tratá 
 
 ## Tokens
 
-Toda llamada a la API necesita `Authorization: Bearer <token>`. Los endpoints de streaming también aceptan `?token=`, porque los navegadores no pueden definir headers en pedidos de WebSocket ni de `<img>`.
+Toda llamada a la API necesita `Authorization: Bearer <token>`. Los endpoints de streaming también aceptan un token de viewer como `?token=`, porque los navegadores no pueden definir headers en pedidos de WebSocket ni de `<img>`. Los tokens de admin y de cursor se rechazan en la query para que nunca queden en logs de proxies ni en el historial del navegador.
 
 | Token | Alcance | De dónde sale |
 | --- | --- | --- |

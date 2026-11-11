@@ -28,6 +28,26 @@ function saveState(s: State) {
   writeFileSync(STATE_FILE, JSON.stringify(s, null, 2), { mode: 0o600 });
 }
 
+function updateState(f: (s: State) => void) {
+  const s = loadState();
+  f(s);
+  saveState(s);
+}
+
+const REQUEST_TIMEOUT_MS = 10_000;
+
+const chains = new Map<string, Promise<unknown>>();
+
+function serialize<T>(key: string, f: () => Promise<T>): Promise<T> {
+  const run = (chains.get(key) ?? Promise.resolve()).then(f);
+  const tail = run.catch(() => {});
+  chains.set(key, tail);
+  tail.then(() => {
+    if (chains.get(key) === tail) chains.delete(key);
+  });
+  return run;
+}
+
 export function adminToken(): string {
   return readFileSync(join(HOME, "admin.token"), "utf8").trim();
 }
@@ -40,9 +60,21 @@ export class AgoraError extends Error {
   }
 }
 
+async function timed(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (e) {
+    if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) {
+      throw new AgoraError(504, `agora daemon did not respond within ${REQUEST_TIMEOUT_MS / 1000}s`);
+    }
+    throw e;
+  }
+}
+
 export async function call<T = any>(method: string, path: string, body?: unknown, token = adminToken()): Promise<T> {
-  const r = await fetch(URL_BASE + path, {
+  const r = await timed(URL_BASE + path, {
     method,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     headers: { Authorization: `Bearer ${token}`, ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -58,7 +90,7 @@ export async function call<T = any>(method: string, path: string, body?: unknown
 }
 
 export async function bytes(path: string): Promise<{ mime: string; data: Buffer }> {
-  const r = await fetch(URL_BASE + path, { headers: { Authorization: `Bearer ${adminToken()}` } });
+  const r = await timed(URL_BASE + path, { headers: { Authorization: `Bearer ${adminToken()}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   if (!r.ok) throw new AgoraError(r.status, await r.text());
   return { mime: r.headers.get("content-type") || "image/jpeg", data: Buffer.from(await r.arrayBuffer()) };
 }
@@ -67,9 +99,12 @@ export function wsURL(path: string): string {
   return URL_BASE.replace(/^http/, "ws") + path;
 }
 
-export async function linkedWorkspace(paseoWorkspaceId: string, name: string, create: boolean): Promise<string | null> {
-  const st = loadState();
-  const known = st.workspaces[paseoWorkspaceId];
+export function linkedWorkspace(paseoWorkspaceId: string, name: string, create: boolean): Promise<string | null> {
+  return serialize(`workspace:${paseoWorkspaceId}`, () => linkWorkspace(paseoWorkspaceId, name, create));
+}
+
+async function linkWorkspace(paseoWorkspaceId: string, name: string, create: boolean): Promise<string | null> {
+  const known = loadState().workspaces[paseoWorkspaceId];
   if (known) {
     try {
       const w = await call("GET", `/v1/workspaces/${known}`);
@@ -79,20 +114,25 @@ export async function linkedWorkspace(paseoWorkspaceId: string, name: string, cr
   const all: any[] = await call("GET", "/v1/workspaces");
   const found = all.find((w) => w.labels?.paseo_workspace === paseoWorkspaceId && w.state !== "destroyed");
   if (found) {
-    st.workspaces[paseoWorkspaceId] = found.id;
-    saveState(st);
+    updateState((st) => {
+      st.workspaces[paseoWorkspaceId] = found.id;
+    });
     return found.id;
   }
   if (!create) return null;
   const w = await call("POST", "/v1/workspaces", { name: name || paseoWorkspaceId, labels: { paseo_workspace: paseoWorkspaceId } });
-  st.workspaces[paseoWorkspaceId] = w.id;
-  saveState(st);
+  updateState((st) => {
+    st.workspaces[paseoWorkspaceId] = w.id;
+  });
   return w.id;
 }
 
-export async function agentCursor(agentId: string, title: string | null, workspace: string): Promise<{ cursor: string; token: string }> {
-  const st = loadState();
-  const known = st.agents[agentId];
+export function agentCursor(agentId: string, title: string | null, workspace: string): Promise<{ cursor: string; token: string }> {
+  return serialize(`agent:${agentId}`, () => ensureAgentCursor(agentId, title, workspace));
+}
+
+async function ensureAgentCursor(agentId: string, title: string | null, workspace: string): Promise<{ cursor: string; token: string }> {
+  const known = loadState().agents[agentId];
   if (known && known.workspace === workspace) {
     try {
       await call("GET", "/v1/me", undefined, known.token);
@@ -107,23 +147,27 @@ export async function agentCursor(agentId: string, title: string | null, workspa
     labels: { paseo_agent: agentId, keep_tabs: "true" },
   });
   const rec = { cursor: r.cursor.id, token: r.token, workspace };
-  st.agents[agentId] = rec;
-  saveState(st);
+  updateState((st) => {
+    st.agents[agentId] = rec;
+  });
   return rec;
 }
 
-export async function releaseAgentCursor(agentId: string): Promise<void> {
-  const st = loadState();
-  const known = st.agents[agentId];
+export function releaseAgentCursor(agentId: string): Promise<void> {
+  return serialize(`agent:${agentId}`, () => dropAgentCursor(agentId));
+}
+
+async function dropAgentCursor(agentId: string): Promise<void> {
+  const known = loadState().agents[agentId];
   if (!known) return;
   try {
     await call("DELETE", `/v1/cursors/${encodeURIComponent(known.cursor)}`);
   } catch (e) {
     if (!(e instanceof AgoraError && e.status === 404)) throw e;
   }
-  const fresh = loadState();
-  delete fresh.agents[agentId];
-  saveState(fresh);
+  updateState((st) => {
+    delete st.agents[agentId];
+  });
 }
 
 export function nameFromCwd(cwd: string): string {

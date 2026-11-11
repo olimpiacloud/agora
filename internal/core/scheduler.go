@@ -86,7 +86,7 @@ func (m *Manager) lifecycleTick() {
 		}
 		if frozen {
 			if suspendAfter > 0 && idleFor > suspendAfter {
-				go m.Suspend(context.Background(), it.w.ID, "idle")
+				m.suspendIdle(it.w.ID, r, suspendAfter, "idle")
 			}
 			continue
 		}
@@ -94,28 +94,51 @@ func (m *Manager) lifecycleTick() {
 		m.reap(it.w.ID, r)
 		if viewers > 0 {
 			if suspendAfter > 0 && idleFor > suspendAfter {
-				go m.Suspend(context.Background(), it.w.ID, "idle")
+				m.suspendIdle(it.w.ID, r, suspendAfter, "idle")
 			}
 			continue
 		}
 		if m.hasActiveAgents(it.w.ID) && idleFor < 30*time.Minute {
 			continue
 		}
-		if !idle && it.w.Config.IdleAfter.Duration > 0 && idleFor > it.w.Config.IdleAfter.Duration {
-			r.mu.Lock()
-			r.idle = true
-			r.mu.Unlock()
-			r.releaseSeats(0)
-			m.setState(it.w.ID, StateIdle, "no activity")
-			if it.w.Config.FreezeOnIdle {
-				go m.Freeze(context.Background(), it.w.ID)
+		if idleAfter := it.w.Config.IdleAfter.Duration; !idle && idleAfter > 0 && idleFor > idleAfter {
+			if m.markIdle(it.w.ID, r, idleAfter) && it.w.Config.FreezeOnIdle {
+				go m.freezeIfIdle(it.w.ID, r, idleAfter)
 			}
 			continue
 		}
 		if suspendAfter > 0 && idleFor > suspendAfter {
-			go m.Suspend(context.Background(), it.w.ID, "idle")
+			m.suspendIdle(it.w.ID, r, suspendAfter, "idle")
 		}
 	}
+}
+
+func (m *Manager) markIdle(id string, r *Runtime, threshold time.Duration) bool {
+	r.mu.Lock()
+	flip := !r.idle && !r.closing && time.Since(r.activity) > threshold
+	if flip {
+		r.idle = true
+	}
+	r.mu.Unlock()
+	if !flip {
+		return false
+	}
+	r.releaseSeats(0)
+	m.setState(id, StateIdle, "no activity")
+	r.mu.Lock()
+	still := r.idle
+	r.mu.Unlock()
+	if !still {
+		m.setState(id, StateActive, "activity")
+	}
+	return still
+}
+
+func (m *Manager) suspendIdle(id string, r *Runtime, threshold time.Duration, reason string) {
+	if !r.claimSuspend() {
+		return
+	}
+	go m.suspendIfIdle(context.Background(), id, r, threshold, reason)
 }
 
 func (m *Manager) reap(id string, r *Runtime) {
@@ -244,6 +267,69 @@ func (m *Manager) reapCursors() {
 	for _, id := range stale {
 		m.CancelCursor(id, "never started", false)
 	}
+	m.pruneCursors(m.cfg.CursorRetention)
+}
+
+func (m *Manager) pruneCursors(retention time.Duration) {
+	if retention <= 0 {
+		return
+	}
+	old := map[string]string{}
+	m.mu.Lock()
+	group := map[string]string{}
+	find := func(id string) string {
+		root := id
+		for group[root] != "" {
+			root = group[root]
+		}
+		for id != root {
+			next := group[id]
+			group[id] = root
+			id = next
+		}
+		return root
+	}
+	for id, c := range m.cursors {
+		if _, ok := m.cursors[c.Parent]; ok && c.Parent != id {
+			a, b := find(id), find(c.Parent)
+			if a != b {
+				group[a] = b
+			}
+		}
+	}
+	keep := map[string]bool{}
+	for id, c := range m.cursors {
+		last := c.Updated
+		if c.Ended != nil && c.Ended.After(last) {
+			last = *c.Ended
+		}
+		if !c.Status.Terminal() || time.Since(last) <= retention {
+			keep[find(id)] = true
+		}
+	}
+	for id, c := range m.cursors {
+		if !keep[find(id)] {
+			old[id] = c.Workspace
+		}
+	}
+	m.mu.Unlock()
+	touched := map[string]bool{}
+	for id, ws := range old {
+		if m.DeleteCursor(id) == nil && ws != "" {
+			touched[ws] = true
+		}
+	}
+	for ws := range touched {
+		m.mu.Lock()
+		_, known := m.ws[ws]
+		running := m.rt[ws] != nil
+		m.mu.Unlock()
+		if !known {
+			m.Bus.RemoveLog(ws)
+		} else if !running {
+			m.Bus.CloseLog(ws)
+		}
+	}
 }
 
 func (m *Manager) Asleep(ws string) bool {
@@ -307,7 +393,7 @@ func (m *Manager) usageTick() {
 		if prev := m.usage[id]; prev != nil && prev.Detailed && time.Since(prev.Time) < time.Minute {
 			prev.CPU, prev.CgroupMB, prev.RSSMB, prev.Procs = u.CPU, u.CgroupMB, u.RSSMB, u.Procs
 			u = prev
-		} else {
+		} else if m.rt[id] == r {
 			m.usage[id] = u
 		}
 		w := m.ws[id]
@@ -339,7 +425,9 @@ func (m *Manager) measureLight(id string, r *Runtime) *WorkspaceUsage {
 		u.Procs = len(m.cg.Pids(id))
 		m.mu.Lock()
 		prev, ok := m.cpuPrev[id]
-		m.cpuPrev[id] = cpuSample{t: time.Now(), usec: usec}
+		if m.rt[id] == r {
+			m.cpuPrev[id] = cpuSample{t: time.Now(), usec: usec}
+		}
 		m.mu.Unlock()
 		if ok && usec >= prev.usec {
 			u.CPU = float64(usec-prev.usec) / 1e6 / time.Since(prev.t).Seconds() * 100
@@ -359,7 +447,9 @@ func (m *Manager) measureLight(id string, r *Runtime) *WorkspaceUsage {
 	}
 	m.mu.Lock()
 	prev, ok := m.cpuPrev[id]
-	m.cpuPrev[id] = cpuSample{t: time.Now(), ticks: ticks}
+	if m.rt[id] == r {
+		m.cpuPrev[id] = cpuSample{t: time.Now(), ticks: ticks}
+	}
 	m.mu.Unlock()
 	if ok {
 		el := time.Since(prev.t).Seconds()
@@ -481,9 +571,9 @@ func (m *Manager) relieve(id string, r *Runtime, hard bool) {
 			}
 		}
 	}
-	if hard {
+	if hard && r.claimSuspend() {
 		m.Bus.Publish("scheduler.suspend", id, "", map[string]any{"reason": "memory budget exceeded by >25%"})
-		m.Suspend(context.Background(), id, "memory budget")
+		m.suspendIfIdle(context.Background(), id, r, 0, "memory budget")
 	}
 }
 

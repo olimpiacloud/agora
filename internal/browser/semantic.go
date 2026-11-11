@@ -12,11 +12,18 @@ import (
 
 const snapshotJS = `(() => {
 const VO = %t;
+const MAXE = %d;
 const R = window.__agora || (window.__agora = {n: 0, m: new Map(), w: new WeakMap()});
+for (const [k, w] of R.m) if (!w.deref()) R.m.delete(k);
 const out = [];
 const vw = innerWidth, vh = innerHeight;
 const interactiveRoles = new Set(['button','link','textbox','checkbox','radio','combobox','listbox','option','menuitem','menuitemcheckbox','menuitemradio','tab','switch','slider','searchbox','spinbutton','treeitem','gridcell']);
 const sel = 'a[href],button,input,select,textarea,summary,[role],[contenteditable=""],[contenteditable="true"],[tabindex]:not([tabindex="-1"]),iframe,[onclick]';
+function secret(el) {
+  if (el.tagName !== 'INPUT') return false;
+  if ((el.type || '').toLowerCase() === 'password') return true;
+  return (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).includes('one-time-code');
+}
 function name(el) {
   const l = el.getAttribute('aria-label'); if (l) return l;
   const lb = el.getAttribute('aria-labelledby');
@@ -24,7 +31,7 @@ function name(el) {
   if (el.labels && el.labels.length) return Array.from(el.labels).map(l => l.innerText).join(' ');
   if (el.tagName === 'IMG') return el.alt || '';
   if (el.tagName === 'IFRAME') return el.title || el.src || '';
-  const t = (el.innerText || el.value || el.placeholder || el.title || el.alt || '').trim();
+  const t = (el.innerText || (secret(el) ? '' : el.value) || el.placeholder || el.title || el.alt || '').trim();
   return t;
 }
 function role(el) {
@@ -46,8 +53,8 @@ function visible(el, r) {
   return true;
 }
 function walk(root, ox, oy, depth) {
-  const els = root.querySelectorAll(sel);
-  for (const el of els) {
+  for (const el of root.querySelectorAll(sel)) {
+    if (out.length >= MAXE) return;
     const r = el.getBoundingClientRect();
     if (!visible(el, r)) continue;
     const rl = role(el);
@@ -56,23 +63,28 @@ function walk(root, ox, oy, depth) {
     if (!id) { id = 'e' + (++R.n); R.w.set(el, id); R.m.set(id, new WeakRef(el)); }
     const x = Math.round(r.x + ox), y = Math.round(r.y + oy);
     const inView = x < vw && y < vh && x + r.width > 0 && y + r.height > 0;
-    if (VO && !inView) { if (el.tagName === 'IFRAME') { try { const d = el.contentDocument; if (d && depth < 3) walk(d, x, y, depth + 1); } catch (e) {} } continue; }
+    if (el.tagName === 'IFRAME') { try { const d = el.contentDocument; if (d && depth < 3) walk(d, x, y, depth + 1); } catch (e) {} }
+    if (VO && !inView) continue;
+    if (out.length >= MAXE) return;
     const it = {ref: id, role: rl, name: name(el).replace(/\s+/g, ' ').slice(0, 80), box: [x, y, Math.round(r.width), Math.round(r.height)]};
     if (!inView) it.offscreen = true;
-    if (el.disabled) it.disabled = true;
-    if (el.checked) it.checked = true;
-    if (rl === 'textbox' || rl === 'combobox' || rl === 'searchbox') { it.value = (el.value || el.innerText || '').slice(0, 80); if (el.type === 'password') it.value = it.value ? '••••' : ''; }
-    if (el.tagName === 'IFRAME') { try { const d = el.contentDocument; if (d && depth < 3) walk(d, x, y, depth + 1); } catch (e) {} }
+    if (el.disabled || el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true') it.disabled = true;
+    if (el.checked || el.getAttribute('aria-checked') === 'true' || el.getAttribute('aria-pressed') === 'true') it.checked = true;
+    if (el.getAttribute('aria-selected') === 'true' || (el.tagName === 'OPTION' && el.selected)) it.selected = true;
+    const ex = el.getAttribute('aria-expanded'); if (ex === 'true') it.expanded = true; else if (ex === 'false') it.expanded = false;
+    if (rl === 'textbox' || rl === 'combobox' || rl === 'searchbox') { it.value = (el.value || el.innerText || '').slice(0, 80); if (secret(el)) it.value = it.value ? '••••' : ''; }
     out.push(it);
   }
-  for (const h of root.querySelectorAll('*')) { if (h.shadowRoot && depth < 4) walk(h.shadowRoot, ox, oy, depth + 1); }
+  if (depth >= 4) return;
+  const tw = (root.ownerDocument || root).createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+  for (let h = tw.nextNode(); h && out.length < MAXE; h = tw.nextNode()) if (h.shadowRoot) walk(h.shadowRoot, ox, oy, depth + 1);
 }
 walk(document, 0, 0, 0);
 const MAXT = %d;
 let text = '';
 if (VO) { const parts = []; let len = 0; const tw = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT); let n; while ((n = tw.nextNode()) && len < MAXT) { const t = n.textContent.replace(/\s+/g, ' ').trim(); if (!t) continue; const p = n.parentElement; if (!p) continue; const r = p.getBoundingClientRect(); if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw || r.width === 0) continue; parts.push(t); len += t.length + 1; } text = parts.join(' ').slice(0, MAXT); }
 else text = (document.body ? document.body.innerText : '').replace(/\n{3,}/g, '\n\n').slice(0, MAXT);
-return {url: location.href, title: document.title, viewport: [vw, vh], scroll: [scrollX, scrollY, (document.documentElement || {}).scrollHeight || 0], elements: out.slice(0, %d), text};
+return {url: location.href, title: document.title, viewport: [vw, vh], scroll: [scrollX, scrollY, (document.documentElement || {}).scrollHeight || 0], elements: out, text};
 })()`
 
 type Element struct {
@@ -84,6 +96,8 @@ type Element struct {
 	Offscreen bool   `json:"offscreen,omitempty"`
 	Disabled  bool   `json:"disabled,omitempty"`
 	Checked   bool   `json:"checked,omitempty"`
+	Selected  bool   `json:"selected,omitempty"`
+	Expanded  *bool  `json:"expanded,omitempty"`
 }
 
 type Snapshot struct {
@@ -105,6 +119,16 @@ func (s *Snapshot) Compact(boxes bool) string {
 		}
 		if e.Checked {
 			b.WriteString(" checked")
+		}
+		if e.Selected {
+			b.WriteString(" selected")
+		}
+		if e.Expanded != nil {
+			if *e.Expanded {
+				b.WriteString(" expanded")
+			} else {
+				b.WriteString(" collapsed")
+			}
 		}
 		if e.Disabled {
 			b.WriteString(" disabled")
@@ -139,7 +163,7 @@ func (t *Tab) snapshot(ctx context.Context, maxText, maxElements int, viewportOn
 	var s Snapshot
 	var err error
 	for i := 0; i < 3; i++ {
-		if err = t.Eval(ctx, fmt.Sprintf(snapshotJS, viewportOnly, maxText, maxElements), &s); err == nil {
+		if err = t.Eval(ctx, fmt.Sprintf(snapshotJS, viewportOnly, maxElements, maxText), &s); err == nil {
 			return &s, nil
 		}
 		t.waitReady(ctx, 5*time.Second, "interactive")

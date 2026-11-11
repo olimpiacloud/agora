@@ -2,7 +2,11 @@ package browser
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"strconv"
 	"strings"
@@ -26,6 +30,7 @@ func appUser(t *testing.T) (uint32, uint32) {
 }
 
 func TestBrowserSemantic(t *testing.T) {
+	requireXvfb(t)
 	uid, gid := appUser(t)
 	dir, _ := os.MkdirTemp("/tmp", "agora-bt-")
 	defer os.RemoveAll(dir)
@@ -51,7 +56,7 @@ func TestBrowserSemantic(t *testing.T) {
 	}
 	defer b.Close(ctx)
 	t.Logf("launch %v", time.Since(t0))
-	page := `data:text/html,<title>T</title><input id=a placeholder=first><textarea id=b placeholder=second></textarea><button onclick="document.title='clicked:'+a.value+'|'+b.value">Go</button>`
+	page := `data:text/html,<title>T</title><input id=a placeholder=first><textarea id=b placeholder=second></textarea><button onclick="document.title='clicked:'+a.value+'|'+b.value">Go</button><input type=password value=hunter2><input autocomplete=one-time-code value=123456><div role=tab tabindex=0 aria-selected=true>Tab1</div><button aria-expanded=false>Menu</button><button aria-disabled=true>Off</button><div role=checkbox tabindex=0 aria-checked=true>Box</div><button onclick="document.title=confirm('Delete?')?'yes':'no'">Del</button>`
 	tab, err := b.NewTab(ctx, NewTabOptions{URL: page, NewWindow: true})
 	if err != nil {
 		t.Fatal(err)
@@ -62,15 +67,27 @@ func TestBrowserSemantic(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log(s.Compact(true))
-	var in, ta, btn string
+	var in, ta, btn, del string
 	for _, e := range s.Elements {
 		switch {
 		case e.Name == "first":
 			in = e.Ref
 		case e.Name == "second":
 			ta = e.Ref
-		case e.Role == "button":
+		case e.Role == "button" && e.Name == "Go":
 			btn = e.Ref
+		case e.Role == "button" && e.Name == "Del":
+			del = e.Ref
+		}
+	}
+	compact := s.Compact(false)
+	compact = compact[strings.Index(compact, "\ntitle:"):]
+	if strings.Contains(compact, "hunter2") || strings.Contains(compact, "123456") {
+		t.Fatalf("secret leaked: %s", compact)
+	}
+	for _, want := range []string{`tab "Tab1" selected`, `button "Menu" collapsed`, `button "Off" disabled`, `checkbox "Box" checked`} {
+		if !strings.Contains(compact, want) {
+			t.Fatalf("missing %q in %s", want, compact)
 		}
 	}
 	if err := tab.FillRef(ctx, in, "hola", false); err != nil {
@@ -86,6 +103,33 @@ func TestBrowserSemantic(t *testing.T) {
 	tab.Eval(ctx, "document.title", &title)
 	if title != "clicked:hola|mundo" {
 		t.Fatalf("title=%q", title)
+	}
+	dctx, dcancel := tab.DialogContext(ctx)
+	t1 := time.Now()
+	err = tab.ClickRef(dctx, del, "", 1)
+	if err == nil {
+		err = tab.Eval(dctx, "1", nil)
+	}
+	dcancel()
+	if !errors.Is(context.Cause(dctx), ErrDialogOpen) || err == nil || time.Since(t1) > 5*time.Second {
+		t.Fatalf("dialog did not cancel the call: %v %v after %v", err, context.Cause(dctx), time.Since(t1))
+	}
+	if d := tab.Dialog(); d == nil || d["message"] != "Delete?" || d["type"] != "confirm" {
+		t.Fatalf("dialog %v", d)
+	}
+	if err := tab.HandleDialog(ctx, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	tab.Eval(ctx, "document.title", &title)
+	if title != "yes" || tab.Dialog() != nil {
+		t.Fatalf("after accept title=%q dialog=%v", title, tab.Dialog())
+	}
+	t1 = time.Now()
+	if err := tab.Navigate(ctx, page+"#frag", "", 10*time.Second); err != nil || time.Since(t1) > 3*time.Second {
+		t.Fatalf("same-document navigate: %v after %v", err, time.Since(t1))
+	}
+	if err := tab.Navigate(ctx, "file:///etc/passwd", "", time.Second); err == nil {
+		t.Fatal("file URL navigated")
 	}
 	tab2, err := b.NewTab(ctx, NewTabOptions{URL: page, NewWindow: true, Isolated: true})
 	if err != nil {
@@ -117,4 +161,24 @@ func TestBrowserSemantic(t *testing.T) {
 	if !found {
 		t.Fatal("marker window not found")
 	}
+}
+
+func requireXvfb(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("Xvfb"); err != nil {
+		t.Skip("Xvfb missing")
+	}
+}
+
+func (t *Tab) WindowTitleMarker(ctx context.Context, marker string) (func(), error) {
+	var prev string
+	if err := t.Eval(ctx, fmt.Sprintf("(()=>{const p=document.title;document.title=%q;return p})()", marker), &prev); err != nil {
+		return nil, err
+	}
+	return func() {
+		c, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		b, _ := json.Marshal(prev)
+		t.Eval(c, fmt.Sprintf("document.title=%s", b), nil)
+	}, nil
 }

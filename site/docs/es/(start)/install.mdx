@@ -89,6 +89,8 @@ agora serve --listen 127.0.0.1:7788 --home ~/.agora
 | `--rtc-interfaces` | todas | Interfaces separadas por comas para los candidatos de WebRTC. |
 | `--rtc-loopback` | `true` | Ofrece candidatos ICE de loopback. |
 | `--idle-after` | `5m` | Marca un workspace como inactivo después de este tiempo sin actividad. |
-| `--suspend-after` | `0` | Suspende los workspaces inactivos después de este tiempo (`0` significa nunca, por defecto). |
+| `--suspend-after` | `30m` | Suspende un workspace después de este tiempo sin actividad de agentes ni input humano, aunque alguien lo esté mirando (`0` los deja corriendo). |
+| `--tab-idle` | `15m` | Cierra las pestañas sin uso durante este tiempo y detiene las apps de cursores que ya terminaron (`0` nunca las cierra). |
+| `--cursor-retention` | `168h` | Borra los cursores terminados sin descendientes vivos después de este tiempo (`0` los guarda para siempre). |
 
 Siguiente: el [inicio rápido](/quickstart).
