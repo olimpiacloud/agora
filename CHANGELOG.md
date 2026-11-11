@@ -45,6 +45,8 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - The Paseo panel sends input over its viewer socket (held buttons and keys are released when the panel goes away, and non-finite coordinates are dropped), the agent wall shares one cursor-metadata poll and only polls visible tiles, and toolbar chips no longer remount on every frame.
 - Screenshots are kept per workspace (64 shots or 24 MB each, 256 MB in total) and dropped when the workspace suspends or is destroyed.
 - MCP tool calls are cancelled on `notifications/cancelled`; after stdin closes, running calls get up to 30 s to finish.
+- `make check` and CI run unit tests for the dashboard (`bun test` in `web/`) and typecheck the test files of the dashboard and the Paseo plugin.
+- The dashboard ignores pointer and stream-statistics events, refetches only the list an event can have changed (active cursors for progress and status, workspaces for workspace events), reads `/v1/system` and the full cursor list on its 5-second timer, and loads the tab list only while the Tabs pane is open.
 
 ### Security
 
@@ -114,6 +116,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - The Paseo plugin removes the Agora workspace of a Paseo workspace when it is archived, and its periodic reconcile removes workspaces whose Paseo workspace no longer exists (never-started ones are purged; ones that ran keep their profile on disk). Busy workspaces and workspaces without a Paseo label are left alone. Scheduled Paseo runs no longer pile up workspaces.
 - Paseo chat cards and agent-wall tiles no longer resume a suspended workspace just by being shown; they connect with `wake=0` and fall back to the stored screenshot or a "suspended" note. A Paseo view that was told the workspace is suspended now checks again every 10 seconds and comes back when an agent resumed it, and a card no longer shows "Live" on a stale frame.
 - The Paseo plugin's cleanup could delete the cursor it had just created for an agent that was being resumed, retire workspaces after a truncated Paseo workspace listing, and retire a workspace that an agent had started using again. It now skips agents opened in the last minute, aborts on an incomplete listing and re-checks each workspace right before retiring it.
+- The web viewer shows Resume after the daemon ends a session (it showed "session ended" forever, on both WebRTC and WebSocket) and no longer thaws a frozen workspace by reconnecting on its own. Pointer positions follow a desktop resize over WebRTC, and keys and mouse buttons held when the viewer loses focus, is hidden or closes are released instead of staying pressed on the desktop.
 
 ## [0.1.0] - 2026-11-06
 

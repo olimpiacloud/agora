@@ -124,17 +124,21 @@ export class DesktopSession {
       return
     }
     if (m.type === 'hello') this.connected = true
-    if (m.type === 'bye') {
-      if (m.reason === 'suspended') this.asleep = true
-      if (this.pc) {
-        this.cleanupRTC()
-        if (!this.closed) this.scheduleRetry()
-      }
-    }
     if (m.type === 'hello' && m.width) {
       this.cb.onSize(m.width as number, m.height as number)
     }
     this.cb.onMessage(m)
+    if (m.type === 'bye') this.onBye(m.reason)
+  }
+
+  private onBye(reason: unknown) {
+    if (reason === 'suspended' || reason === 'workspace frozen') this.asleep = true
+    if (this.pc) {
+      this.cleanupRTC()
+      if (!this.closed) this.scheduleRetry()
+    } else if (this.ws && this.ws.readyState <= WebSocket.OPEN) {
+      this.ws.close()
+    }
   }
 
   private tick(n: number, decoded: boolean) {
@@ -363,7 +367,9 @@ const codeMap: Record<string, string> = {
   Comma: ',', Period: '.', Slash: '/', Backquote: '`', Space: 'space', IntlBackslash: '<',
 }
 
-export function keyName(e: KeyboardEvent): { key?: string; text?: string } {
+export type KeyLike = Pick<KeyboardEvent, 'code' | 'key' | 'ctrlKey' | 'metaKey'>
+
+export function keyName(e: KeyLike): { key?: string; text?: string } {
   const c = e.code
   if (c.startsWith('Key') && c.length === 4) return { key: c.slice(3).toLowerCase() }
   if (c.startsWith('Digit')) return { key: c.slice(5) }

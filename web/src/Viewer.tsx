@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, getToken, mintViewer, type Cursor, type Lock } from './api'
 import { useSmoothPoint } from './smooth'
-import { DesktopSession, keyName, type Mode, type Transport } from './transport'
+import { DesktopSession, type Mode, type Transport } from './transport'
+import { createSeat } from './seat'
+import { deskPoint, resizedTo } from './desk'
 
 interface Overlay {
   id: string
@@ -39,6 +41,7 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
   const [focused, setFocused] = useState(false)
   const lastMove = useRef(0)
   const wheelAcc = useRef(0)
+  const seat = useRef(createSeat()).current
   const onEventRef = useRef(onEvent)
   onEventRef.current = onEvent
 
@@ -60,6 +63,8 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
         } else if (m.type === 'event') {
           const e = m.event as { type: string; cursor?: string; data?: Record<string, unknown> }
           onEventRef.current?.(e)
+          const next = resizedTo(e)
+          if (next) setSize(next)
           const d = e.data || {}
           if (e.type === 'cursor.pointer' && e.cursor && typeof d.x === 'number' && (d.x as number) >= 0) {
             setOverlays((o) => ({ ...o, [e.cursor!]: { ...(o[e.cursor!] || {}), id: e.cursor!, name: d.name as string, color: d.color as string, x: d.x as number, y: d.y as number, action: d.action as string, t: Date.now() } }))
@@ -95,6 +100,7 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
     const t = setInterval(() => setStats({ ...s.stats }), 1000)
     return () => {
       clearInterval(t)
+      if (control) for (const m of seat.releaseAll()) s.send(m)
       s.close()
       sess.current = null
     }
@@ -103,10 +109,7 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
   const toDesk = (e: { clientX: number; clientY: number }) => {
     const el = (video.current?.style.display === 'block' ? video.current : canvas.current)!
     const r = el.getBoundingClientRect()
-    const scale = Math.min(r.width / size.w, r.height / size.h)
-    const ox = r.left + (r.width - size.w * scale) / 2
-    const oy = r.top + (r.height - size.h * scale) / 2
-    return { x: Math.round((e.clientX - ox) / scale), y: Math.round((e.clientY - oy) / scale), scale, ox: ox - r.left, oy: oy - r.top }
+    return deskPoint(r, size, e.clientX, e.clientY)
   }
 
   const geo = () => {
@@ -118,6 +121,15 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
   }
 
   const send = (m: Record<string, unknown>) => control && sess.current?.send(m)
+  const sendAll = (ms: Record<string, unknown>[]) => ms.forEach((m) => send(m))
+
+  useEffect(() => {
+    const release = () => {
+      if (document.hidden) sendAll(seat.releaseAll())
+    }
+    document.addEventListener('visibilitychange', release)
+    return () => document.removeEventListener('visibilitychange', release)
+  }, [control])
 
   const iHold = locks.some((l) => l.surface === 'workspace' && l.holder === 'human:' + viewerId && !l.expires)
   const otherHold = locks.find((l) => l.surface === 'workspace' && l.holder !== 'human:' + viewerId && !l.expires)
@@ -188,29 +200,30 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
         className={'screen' + (focused ? ' focused' : '')}
         tabIndex={0}
         onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onBlur={() => {
+          setFocused(false)
+          sendAll(seat.releaseAll())
+        }}
         onContextMenu={(e) => e.preventDefault()}
         onPointerMove={(e) => {
           const now = performance.now()
           if (now - lastMove.current < 12) return
           lastMove.current = now
           const p = toDesk(e)
-          send({ t: 'move', x: p.x, y: p.y })
+          sendAll(seat.move(p.x, p.y))
         }}
         onPointerDown={(e) => {
           wrap.current?.focus()
           ;(e.target as Element).setPointerCapture?.(e.pointerId)
           const p = toDesk(e)
-          send({ t: 'down', x: p.x, y: p.y, b: e.button })
+          sendAll(seat.down(p.x, p.y, e.button))
         }}
         onPointerUp={(e) => {
           const p = toDesk(e)
-          send({ t: 'up', x: p.x, y: p.y, b: e.button })
+          sendAll(seat.up(p.x, p.y, e.button))
         }}
-        onPointerCancel={(e) => {
-          const p = toDesk(e)
-          send({ t: 'up', x: p.x, y: p.y, b: e.button < 0 ? 0 : e.button })
-        }}
+        onPointerCancel={() => sendAll(seat.releaseButtons())}
+        onLostPointerCapture={() => sendAll(seat.releaseButtons())}
         onWheel={(e) => {
           wheelAcc.current += e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY
           const p = toDesk(e)
@@ -223,7 +236,6 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
         }}
         onKeyDown={(e) => {
           if (!control) return
-          const k = keyName(e.nativeEvent)
           if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV') {
             e.preventDefault()
             navigator.clipboard?.readText().then((t) => {
@@ -238,14 +250,12 @@ export function Viewer({ ws, token, control, onEvent, compact }: Props) {
             return
           }
           e.preventDefault()
-          if (k.text) send({ t: 'text', s: k.text })
-          else send({ t: 'key', key: k.key, down: true })
+          sendAll(seat.key(e.nativeEvent, true))
         }}
         onKeyUp={(e) => {
           if (!control) return
           e.preventDefault()
-          const k = keyName(e.nativeEvent)
-          if (k.key) send({ t: 'key', key: k.key, down: false })
+          sendAll(seat.key(e.nativeEvent, false))
         }}
       >
         <canvas ref={canvas} />

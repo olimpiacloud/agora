@@ -25,5 +25,5 @@ check:
 	@out=$$(gofmt -l cmd internal e2e web); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 	go vet ./...
 	go test ./internal/... -count=1
-	cd web && bun install --frozen-lockfile && npx tsc --noEmit -p tsconfig.json
+	cd web && bun install --frozen-lockfile && bun run typecheck && bun test
 	cd paseo-plugin && bun install --frozen-lockfile && bun run typecheck && bun test

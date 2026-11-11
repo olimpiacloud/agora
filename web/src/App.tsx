@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ago, api, ApiError, getToken, mintViewer, setToken, subscribe, type AgoraEvent, type Cursor, type SystemInfo, type Tab, type Workspace } from './api'
 import { Viewer } from './Viewer'
+import { affectsTabs, createRefresher, FULL, mergeCursors, quiet, type Need } from './refresh'
 
 function useRoute() {
   const [path, setPath] = useState(location.pathname)
@@ -74,13 +75,26 @@ function Dashboard({ path, go }: { path: string; go: (p: string) => void }) {
   const [sys, setSys] = useState<SystemInfo | null>(null)
   const [events, setEvents] = useState<AgoraEvent[]>([])
   const [err, setErr] = useState('')
+  const seq = useRef(0)
+  const applied = useRef({ w: 0, c: 0 })
 
-  const refresh = useCallback(async () => {
+  const load = useCallback(async (need: Need, system: boolean) => {
+    const g = ++seq.current
     try {
-      const [w, c, s] = await Promise.all([api<Workspace[]>('GET', '/v1/workspaces'), api<Cursor[]>('GET', '/v1/cursors'), api<SystemInfo>('GET', '/v1/system')])
-      setWss(w)
-      setCursors(c)
-      setSys(s)
+      const [w, c, s] = await Promise.all([
+        need.workspaces ? api<Workspace[]>('GET', '/v1/workspaces') : undefined,
+        need.cursors === 'none' ? undefined : api<Cursor[]>('GET', need.cursors === 'active' ? '/v1/cursors?active=1' : '/v1/cursors'),
+        system ? api<SystemInfo>('GET', '/v1/system') : undefined,
+      ])
+      if (w && g > applied.current.w) {
+        applied.current.w = g
+        setWss(w)
+      }
+      if (c && g > applied.current.c) {
+        applied.current.c = g
+        setCursors((prev) => (need.cursors === 'active' ? mergeCursors(prev, c) : c))
+      }
+      if (s) setSys(s)
       setErr('')
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
@@ -90,26 +104,24 @@ function Dashboard({ path, go }: { path: string; go: (p: string) => void }) {
     }
   }, [])
 
+  const refresh = useCallback(() => load(FULL, true), [load])
+
   useEffect(() => {
     if (!authed) return
     refresh()
     const t = setInterval(refresh, 5000)
-    let pending = false
+    const onEvents = createRefresher((need) => load(need, false))
     const unsub = subscribe({}, (e) => {
+      if (quiet(e.type)) return
       setEvents((ev) => [e, ...ev].slice(0, 300))
-      if (!pending && !e.type.startsWith('cursor.action') && e.type !== 'cursor.pointer' && e.type !== 'stream.stats') {
-        pending = true
-        setTimeout(() => {
-          pending = false
-          refresh()
-        }, 400)
-      }
+      onEvents.push(e.type)
     })
     return () => {
       clearInterval(t)
+      onEvents.cancel()
       unsub()
     }
-  }, [authed, refresh])
+  }, [authed, refresh, load])
 
   if (!authed) return <Login onOk={() => setAuthed(true)} />
 
@@ -221,12 +233,6 @@ function WorkspaceList({ wss, go, refresh }: { wss: Workspace[]; go: (p: string)
 
 const statusClass = (s: string) => (['done'].includes(s) ? 'ok' : ['failed', 'cancelled'].includes(s) ? 'bad' : ['needs_human', 'blocked'].includes(s) ? 'warn' : s === 'paused' ? 'muted' : 'run')
 
-const affectsTabs = (e: AgoraEvent) => {
-  if (e.type === 'cursor.action') return String(e.data?.action ?? '').startsWith('tab.')
-  if (e.type === 'cursor.pointer') return false
-  return e.type.startsWith('browser.tab') || e.type.startsWith('cursor.') || e.type === 'scheduler.tab_closed' || e.type === 'scheduler.browser_stopped'
-}
-
 function WorkspaceView({ ws, id, cursors, events, refresh, go }: { ws?: Workspace; id: string; cursors: Cursor[]; events: AgoraEvent[]; refresh: () => void; go: (p: string) => void }) {
   const [vt, setVt] = useState('')
   const [tabs, setTabs] = useState<Tab[]>([])
@@ -239,8 +245,9 @@ function WorkspaceView({ ws, id, cursors, events, refresh, go }: { ws?: Workspac
   }, [id])
   const tabSeq = events.find(affectsTabs)?.seq
   useEffect(() => {
+    if (tab !== 'tabs') return
     api<Tab[]>('GET', `/v1/workspaces/${id}/tabs`).then(setTabs).catch(() => {})
-  }, [id, tabSeq])
+  }, [id, tabSeq, tab])
   const op = async (o: string, body?: unknown) => {
     try {
       const r = await api<{ id?: string }>('POST', `/v1/workspaces/${id}/${o}`, body ?? {})
