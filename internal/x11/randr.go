@@ -27,7 +27,7 @@ func (d *Display) storeSize(w, h int) {
 func (d *Display) setSize(w, h int) error {
 	c := d.conn
 	if !d.randr {
-		if err := extInit(randr.Init, c); err != nil {
+		if err := extInit("RANDR", c); err != nil {
 			return err
 		}
 		if _, err := randr.QueryVersion(c, 1, 5).Reply(); err != nil {

@@ -18,7 +18,13 @@ import (
 	"time"
 
 	"github.com/jezek/xgb"
+	"github.com/jezek/xgb/composite"
+	"github.com/jezek/xgb/damage"
+	"github.com/jezek/xgb/randr"
+	"github.com/jezek/xgb/shm"
+	"github.com/jezek/xgb/xfixes"
 	"github.com/jezek/xgb/xproto"
+	"github.com/jezek/xgb/xtest"
 	"github.com/olimpiacloud/agora/internal/safefs"
 )
 
@@ -230,6 +236,13 @@ func StartDisplay(ctx context.Context, o DisplayOptions) (*Display, error) {
 }
 
 func (d *Display) Dial() (*xgb.Conn, error) {
+	if err := d.registerExts(); err != nil {
+		return nil, err
+	}
+	return d.dial()
+}
+
+func (d *Display) dial() (*xgb.Conn, error) {
 	nc, err := net.DialTimeout("unix", socketPath(d.Num), time.Second)
 	if err != nil {
 		return nil, err
@@ -279,10 +292,60 @@ func (d *Display) Close() {
 	os.Remove(d.AuthFile)
 }
 
-var extMu sync.Mutex
+var xExts = []struct {
+	name string
+	init func(*xgb.Conn) error
+}{
+	{"MIT-SHM", shm.Init},
+	{"Composite", composite.Init},
+	{"DAMAGE", damage.Init},
+	{"XFIXES", xfixes.Init},
+	{"XTEST", xtest.Init},
+	{"RANDR", randr.Init},
+}
 
-func extInit(f func(*xgb.Conn) error, c *xgb.Conn) error {
+var (
+	extMu    sync.Mutex
+	extsDone bool
+	extReady = map[string]bool{}
+)
+
+func (d *Display) registerExts() error {
 	extMu.Lock()
 	defer extMu.Unlock()
-	return f(c)
+	if extsDone {
+		return nil
+	}
+	c, err := d.dial()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for _, x := range xExts {
+		if x.init(c) == nil {
+			extReady[x.name] = true
+		}
+	}
+	extsDone = true
+	return nil
+}
+
+func extInit(name string, c *xgb.Conn) error {
+	extMu.Lock()
+	ready := extReady[name]
+	extMu.Unlock()
+	if !ready {
+		return fmt.Errorf("X extension %s is not registered", name)
+	}
+	r, err := xproto.QueryExtension(c, uint16(len(name)), name).Reply()
+	if err != nil {
+		return err
+	}
+	if !r.Present {
+		return fmt.Errorf("X extension %s missing", name)
+	}
+	c.ExtLock.Lock()
+	c.Extensions[name] = r.MajorOpcode
+	c.ExtLock.Unlock()
+	return nil
 }
