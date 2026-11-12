@@ -12,3 +12,6 @@ public/uninstall.sh
 !.dev.vars.example
 .env*
 !.env.example
+
+art-src
+.blume-verify/
