@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="#9c4a2b" aria-label="Agora">
-  <style>@media (prefers-color-scheme: dark){svg{fill:#d0784f}}</style>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="#1d63d8" aria-label="Agora">
+  <style>@media (prefers-color-scheme: dark){svg{fill:#6aa8ff}}</style>
   <path d="M6 12h52v7H6zM10 20h9v29h-9zM27 20h9v29h-9zM6 50h32v6H6z"/>
   <path d="M41 23v29l6-7 5 10 6-3-5-10 9-1z"/>
 </svg>

@@ -19,13 +19,11 @@ export const home = {
     title: "Agora by Olimpia: a real desktop for your agents",
     description:
       "Agora is an agent-native desktop runtime: one Linux desktop and one Chromium per workspace, shared by many AI agents with their own cursors, input seats and tabs. Open source, by Olimpia.",
-    og: { image: "/og.jpg", alt: "Agora by Olimpia: a watercolor agora where agents share one desktop" },
+    og: { image: "/arte/og.png", alt: "Agora by Olimpia: an illustrated agora where agents share one desktop" },
     eyebrow: "Documentation · Open source",
     heading: "One desktop. Many agents.",
     lede: "Agora gives your AI agents a real Linux desktop and Chromium, shared by many cursors that each have their own input seat, tabs and token. These docs have two doors: one for your agent and one for you.",
-    tablist: "Choose who the docs are for",
-    agentsTab: "For agents",
-    humansTab: "For humans",
+    doors: { agents: "Let your agent do it", humans: "Do it yourself" },
     agents: {
       intro:
         "Agora ships an MCP server. Install the daemon, connect your agent once, and it browses, clicks, types and spawns subagents on its own desktop, handing control to you for CAPTCHAs and logins.",
@@ -56,19 +54,13 @@ export const home = {
       cta: { href: "/introduction", label: "Read the introduction" },
     },
     art: {
-      mobile: "/art/banner.webp",
-      position: "object-center",
+      mobile: "/arte/banner.webp",
+      
       agents: {
-        src: "/art/banner.webp",
-        alt: "Watercolor: a colonnaded agora with market stalls, browser windows and cursors",
+        src: "/arte/home.webp",
+        alt: "Illustration: a colonnaded agora with market stalls, browser windows and cursors",
         quote: "Many cursors, one desktop.",
         caption: "MCP server · 52 tools",
-      },
-      humans: {
-        src: "/art/banner.webp",
-        alt: "Watercolor: a colonnaded agora with market stalls, browser windows and cursors",
-        quote: "What is built on stone, lasts.",
-        caption: "Open source · by Olimpia",
       },
     },
     features: {
@@ -89,13 +81,11 @@ export const home = {
     title: "Agora by Olimpia: un escritorio de verdad para tus agentes",
     description:
       "Agora es un runtime de escritorio hecho para agentes: un escritorio Linux y un Chromium por workspace, compartidos por muchos agentes de IA con su propio cursor, sus entradas y sus pestañas. Open source, de Olimpia.",
-    og: { image: "/og.jpg", alt: "Agora by Olimpia: un ágora en acuarela donde los agentes comparten un escritorio" },
+    og: { image: "/arte/og.png", alt: "Agora by Olimpia: un ágora ilustrada donde los agentes comparten un escritorio" },
     eyebrow: "Documentación · Open source",
     heading: "Un escritorio. Muchos agentes.",
     lede: "Agora les da a tus agentes de IA un escritorio Linux de verdad y Chromium, compartidos por muchos cursores, cada uno con su teclado y mouse, sus pestañas y su token. Esta documentación tiene dos puertas: una para tu agente y otra para vos.",
-    tablist: "Elegí para quién es la documentación",
-    agentsTab: "Para agentes",
-    humansTab: "Para humanos",
+    doors: { agents: "Que lo haga tu agente", humans: "Hacelo vos" },
     agents: {
       intro:
         "Agora trae un servidor MCP. Instalá el daemon, conectá tu agente una vez y navega, hace clic, escribe y lanza subagentes en su propio escritorio, y te pasa el control para los CAPTCHAs y los logins.",
@@ -126,19 +116,13 @@ export const home = {
       cta: { href: "/es/introduction", label: "Leer la introducción" },
     },
     art: {
-      mobile: "/art/banner.webp",
-      position: "object-center",
+      mobile: "/arte/banner.webp",
+      
       agents: {
-        src: "/art/banner.webp",
-        alt: "Acuarela: un ágora con columnas, puestos de mercado, ventanas de navegador y cursores",
+        src: "/arte/home.webp",
+        alt: "Ilustración: un ágora con columnas, puestos de mercado, ventanas de navegador y cursores",
         quote: "Muchos cursores, un escritorio.",
         caption: "Servidor MCP · 52 herramientas",
-      },
-      humans: {
-        src: "/art/banner.webp",
-        alt: "Acuarela: un ágora con columnas, puestos de mercado, ventanas de navegador y cursores",
-        quote: "Lo que se construye sobre piedra, dura.",
-        caption: "Open source · de Olimpia",
       },
     },
     features: {
