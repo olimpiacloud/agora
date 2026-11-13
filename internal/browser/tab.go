@@ -31,6 +31,7 @@ type Tab struct {
 	dragCh      chan json.RawMessage
 	emulated    bool
 	toolbar     int
+	refs        int
 }
 
 func (t *Tab) touch() {

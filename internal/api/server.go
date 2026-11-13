@@ -67,13 +67,25 @@ func writeErr(w http.ResponseWriter, err error) {
 	writeJSON(w, code, map[string]any{"error": err.Error()})
 }
 
+const (
+	maxBody       = 8 << 20
+	maxCursorBody = 512 << 10
+)
+
 func decode(r *http.Request, vs ...any) error {
+	return decodeLimit(r, maxBody, vs...)
+}
+
+func decodeLimit(r *http.Request, limit int64, vs ...any) error {
 	if r.Body == nil {
 		return nil
 	}
-	b, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	b, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
 		return err
+	}
+	if int64(len(b)) > limit {
+		return fmt.Errorf("request body is limited to %d bytes", limit)
 	}
 	if len(strings.TrimSpace(string(b))) == 0 {
 		return nil
@@ -197,7 +209,7 @@ func (s *Server) routes() {
 				Sandbox *bool `json:"sandbox"`
 			} `json:"config"`
 		}
-		if err := decode(r, &req, &opt); err != nil {
+		if err := decodeLimit(r, maxCursorBody, &req, &opt); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -208,8 +220,12 @@ func (s *Server) routes() {
 		var ws *core.Workspace
 		var err error
 		if p.limited() {
-			if len(req.Config.BrowserArgs) > 0 || req.Config.Profile != "" {
-				writeErr(w, fmt.Errorf("%w: only the admin can set browser_args or profile", core.ErrForbidden))
+			if len(req.Config.BrowserArgs) > 0 || req.Config.Profile != "" || req.Config.WebGL != "" {
+				writeErr(w, fmt.Errorf("%w: only the admin can set browser_args, profile or webgl", core.ErrForbidden))
+				return
+			}
+			if err := reservedLabels(req.Labels); err != nil {
+				writeErr(w, err)
 				return
 			}
 			ws, err = s.createCursorWorkspace(r.Context(), p.Cursor, req)
@@ -446,7 +462,7 @@ func (s *Server) routes() {
 			Topic string `json:"topic"`
 			Text  string `json:"text"`
 		}
-		if err := decode(r, &req); err != nil {
+		if err := decodeLimit(r, maxCursorBody, &req); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -508,7 +524,7 @@ func (s *Server) routes() {
 			All       *bool    `json:"all"`
 			TimeoutMs int      `json:"timeout_ms"`
 		}
-		if err := decode(r, &req); err != nil {
+		if err := decodeLimit(r, maxCursorBody, &req); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -626,6 +642,10 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 			return
 		}
 	}
+	if op == "checkpoint" && body.Snapshot && p.limited() && s.m.Snapshots(id) >= maxCursorSnapshots {
+		writeErr(w, fmt.Errorf("%w: workspace already has %d profile snapshots (limit %d for cursors)", core.ErrForbidden, s.m.Snapshots(id), maxCursorSnapshots))
+		return
+	}
 	var err error
 	var res any = map[string]any{"ok": true}
 	switch op {
@@ -642,7 +662,11 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 	case "checkpoint":
 		res, err = s.m.Checkpoint(ctx, id, cmp.Or(body.Reason, "api"), body.Snapshot)
 	case "fork":
-		res, err = s.m.Fork(ctx, id, body.Name)
+		if p.limited() {
+			res, err = s.forkCursorWorkspace(ctx, p.Cursor, id, body.Name)
+		} else {
+			res, err = s.m.Fork(ctx, id, body.Name)
+		}
 	case "resize":
 		err = s.m.Resize(ctx, id, body.Width, body.Height)
 	case "layout":
@@ -683,15 +707,28 @@ func (s *Server) workspaceOp(w http.ResponseWriter, r *http.Request, p *Principa
 	writeJSON(w, 200, res)
 }
 
+func clampLaunchRuntime(l *core.LaunchSpec, daemon time.Duration) {
+	if l == nil || daemon <= 0 {
+		return
+	}
+	if l.MaxRuntime.Duration <= 0 || l.MaxRuntime.Duration > daemon {
+		l.MaxRuntime.Duration = daemon
+	}
+}
+
 func (s *Server) createCursor(w http.ResponseWriter, r *http.Request, p *Principal) {
 	var req core.CreateCursorReq
-	if err := decode(r, &req); err != nil {
+	if err := decodeLimit(r, maxCursorBody, &req); err != nil {
 		writeErr(w, err)
 		return
 	}
 	if !p.Admin {
 		if p.Cursor == nil || !p.Cursor.Can("spawn") {
 			writeErr(w, fmt.Errorf("%w: needs spawn permission", core.ErrForbidden))
+			return
+		}
+		if err := reservedLabels(req.Labels); err != nil {
+			writeErr(w, err)
 			return
 		}
 		if req.Parent == "" || !s.m.IsAncestor(p.Cursor.ID, req.Parent) {
@@ -717,6 +754,7 @@ func (s *Server) createCursor(w http.ResponseWriter, r *http.Request, p *Princip
 			writeErr(w, fmt.Errorf("%w: a worktree needs process permission", core.ErrForbidden))
 			return
 		}
+		clampLaunchRuntime(req.Launch, s.m.Config().AgentMaxRuntime)
 	}
 	if req.Worktree != nil {
 		req.Worktree.Trusted = p.Admin
@@ -767,7 +805,7 @@ func (s *Server) cursorOp(w http.ResponseWriter, r *http.Request, p *Principal) 
 		TimeoutMs int               `json:"timeout_ms"`
 		core.TransferReq
 	}
-	if err := decode(r, &body); err != nil {
+	if err := decodeLimit(r, maxCursorBody, &body); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -839,6 +877,15 @@ func (s *Server) ownsWorkspace(p *Principal, ws string) bool {
 	return err == nil && w.Owner != "" && s.m.IsAncestor(p.Cursor.ID, w.Owner)
 }
 
+func reservedLabels(l map[string]string) error {
+	for k := range l {
+		if strings.HasPrefix(k, "paseo_") {
+			return fmt.Errorf("%w: labels starting with paseo_ are reserved for the admin", core.ErrForbidden)
+		}
+	}
+	return nil
+}
+
 func need(p *Principal, perm string) error {
 	if p.limited() && !p.Cursor.Can(perm) {
 		return fmt.Errorf("%w: needs %s permission", core.ErrForbidden, perm)
@@ -859,7 +906,41 @@ func acquireAllowed(p *Principal, surface string) error {
 	return need(p, "desktop")
 }
 
-const maxCursorWorkspaces = 5
+const (
+	maxCursorWorkspaces = 5
+	maxCursorSnapshots  = 3
+)
+
+func (s *Server) treeWorkspaces(c *core.Cursor) int {
+	n := 0
+	for _, v := range s.m.ListWorkspaces() {
+		if v.State == core.StateDestroyed {
+			continue
+		}
+		if v.OwnerRoot != "" {
+			if v.OwnerRoot == c.Root {
+				n++
+			}
+			continue
+		}
+		if v.Owner == "" {
+			continue
+		}
+		if o, err := s.m.GetCursor(v.Owner); err == nil && o.Root == c.Root {
+			n++
+		}
+	}
+	return n
+}
+
+func (s *Server) forkCursorWorkspace(ctx context.Context, c *core.Cursor, id, name string) (*core.Workspace, error) {
+	s.wsMu.Lock()
+	defer s.wsMu.Unlock()
+	if n := s.treeWorkspaces(c); n >= maxCursorWorkspaces {
+		return nil, fmt.Errorf("%w: cursor tree already has %d live workspaces (limit %d)", core.ErrForbidden, n, maxCursorWorkspaces)
+	}
+	return s.m.ForkAs(ctx, id, name, c.ID, c.Root)
+}
 
 func (s *Server) createCursorWorkspace(ctx context.Context, c *core.Cursor, req core.CreateWorkspaceReq) (*core.Workspace, error) {
 	if c.Workspace != "" {
@@ -867,18 +948,14 @@ func (s *Server) createCursorWorkspace(ctx context.Context, c *core.Cursor, req 
 			inheritLimits(&req.Config, parent.Config)
 		}
 	}
+	if max := s.m.Config().SuspendAfter; max > 0 && req.Config.SuspendAfter.Duration > max {
+		req.Config.SuspendAfter.Duration = max
+	}
+	req.OwnerRoot = c.Root
 	start := req.Start
 	req.Start = false
 	s.wsMu.Lock()
-	n := 0
-	for _, v := range s.m.ListWorkspaces() {
-		if v.State == core.StateDestroyed || v.Owner == "" {
-			continue
-		}
-		if o, err := s.m.GetCursor(v.Owner); err == nil && o.Root == c.Root {
-			n++
-		}
-	}
+	n := s.treeWorkspaces(c)
 	if n >= maxCursorWorkspaces {
 		s.wsMu.Unlock()
 		return nil, fmt.Errorf("%w: cursor tree already has %d live workspaces (limit %d)", core.ErrForbidden, n, maxCursorWorkspaces)

@@ -41,9 +41,12 @@ func (m *Manager) AttachViewer(ctx context.Context, ws, id string, mode stream.M
 		return nil, ErrState
 	}
 	v := &Viewer{ID: id, Workspace: ws, Control: control, Mode: mode, sink: sink, send: send, r: r, m: m, held: map[uint32]bool{}, buttons: map[int]bool{}}
+	ch, unsub := m.Bus.Subscribe(Filter{Workspace: ws, Types: []string{"cursor.*", "control.*", "desktop.*", "browser.challenge.*", "human.*", "workspace.state", "stream.state"}}, 256)
+	v.unsub = unsub
 	r.mu.Lock()
 	if r.closing || r.engine != eng {
 		r.mu.Unlock()
+		unsub()
 		return nil, fmt.Errorf("%w: workspace is stopping", ErrState)
 	}
 	r.viewers[id] = v
@@ -52,8 +55,6 @@ func (m *Manager) AttachViewer(ctx context.Context, ws, id string, mode stream.M
 	if sink != nil {
 		eng.AddSink(sink)
 	}
-	ch, unsub := m.Bus.Subscribe(Filter{Workspace: ws, Types: []string{"cursor.*", "control.*", "desktop.*", "browser.challenge.*", "human.*", "workspace.state", "stream.state"}}, 256)
-	v.unsub = unsub
 	go func() {
 		for e := range ch {
 			b, _ := json.Marshal(map[string]any{"type": "event", "event": e})
@@ -92,7 +93,7 @@ func (v *Viewer) sendHello() {
 		w, h = v.r.display.Size()
 	}
 	v.r.mu.Unlock()
-	b, _ := json.Marshal(map[string]any{"type": "hello", "viewer": v.ID, "width": w, "height": h, "cursors": cs, "locks": m.Arb.List(v.Workspace), "control": v.Control})
+	b, _ := json.Marshal(map[string]any{"type": "hello", "viewer": v.ID, "width": w, "height": h, "cursors": PublicCursors(cs), "locks": m.Arb.List(v.Workspace), "control": v.Control})
 	v.emit(b)
 }
 
@@ -213,13 +214,6 @@ func (v *Viewer) Input(raw []byte) {
 	if !v.Control {
 		return
 	}
-	v.r.touch()
-	v.r.mu.Lock()
-	v.r.human = time.Now()
-	if eng := v.r.engine; eng != nil {
-		eng.Interact()
-	}
-	v.r.mu.Unlock()
 	gone := func() bool {
 		v.mu.Lock()
 		closed := v.closed
@@ -229,6 +223,16 @@ func (v *Viewer) Input(raw []byte) {
 		v.r.mu.Unlock()
 		return closed || !attached
 	}
+	if gone() {
+		return
+	}
+	v.r.touch()
+	v.r.mu.Lock()
+	v.r.human = time.Now()
+	if eng := v.r.engine; eng != nil {
+		eng.Interact()
+	}
+	v.r.mu.Unlock()
 	switch msg.T {
 	case "take":
 		if gone() {
@@ -296,12 +300,16 @@ func (v *Viewer) Input(raw []byte) {
 				wm.Raise(w)
 			}
 		}
-		core.Button(btn(msg.B), true)
-		v.buttons[btn(msg.B)] = true
+		if b := btn(msg.B); b != 0 {
+			core.Button(b, true)
+			v.buttons[b] = true
+		}
 	case "up":
 		core.Move(x, y)
-		core.Button(btn(msg.B), false)
-		delete(v.buttons, btn(msg.B))
+		if b := btn(msg.B); b != 0 {
+			core.Button(b, false)
+			delete(v.buttons, b)
+		}
 	case "wheel":
 		core.Scroll(x, y, sign(msg.DX), sign(msg.DY))
 	case "key":
@@ -328,8 +336,12 @@ func btn(b int) int {
 		return 2
 	case 2:
 		return 3
+	case 3:
+		return 8
+	case 4:
+		return 9
 	}
-	return b + 1
+	return 0
 }
 
 func sign(f float64) int {
@@ -351,6 +363,7 @@ func (m *Manager) resumeNeedsHuman(ws string) {
 }
 
 func (m *Manager) RequestHuman(ws, cursorID, reason string) error {
+	reason = clip(reason, maxDetailRunes)
 	if cursorID != "" {
 		if err := m.setCursorStatus(cursorID, CursorNeedHuman, reason, false); err != nil {
 			return err

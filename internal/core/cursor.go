@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"syscall"
 	"time"
@@ -27,6 +29,18 @@ type CreateCursorReq struct {
 var DefaultPermissions = []string{"desktop", "browser", "process", "spawn", "message"}
 
 func (m *Manager) CreateCursor(ctx context.Context, req CreateCursorReq) (*Cursor, string, error) {
+	if len(req.Name) > maxNameBytes || len(req.Kind) > maxNameBytes || len(req.Agent) > maxNameBytes {
+		return nil, "", fmt.Errorf("name, kind and agent are limited to %d bytes", maxNameBytes)
+	}
+	if len(req.Goal) > maxGoalBytes || (req.Launch != nil && len(req.Launch.Prompt) > maxGoalBytes) {
+		return nil, "", fmt.Errorf("goal and launch.prompt are limited to %d bytes", maxGoalBytes)
+	}
+	if err := checkLabels(req.Labels); err != nil {
+		return nil, "", err
+	}
+	if req.Launch != nil && req.Launch.MaxRuntime.Duration < 0 {
+		return nil, "", fmt.Errorf("launch.max_runtime must not be negative")
+	}
 	if req.Kind == "" {
 		req.Kind = "agent"
 	}
@@ -80,6 +94,9 @@ func (m *Manager) CreateCursor(ctx context.Context, req CreateCursorReq) (*Curso
 				req.Budget.MaxDepth = -1
 			}
 		}
+		if parent.Budget.MaxCursors > 0 && (req.Budget.MaxCursors <= 0 || req.Budget.MaxCursors > parent.Budget.MaxCursors) {
+			req.Budget.MaxCursors = parent.Budget.MaxCursors
+		}
 	}
 	if req.Workspace != "" {
 		w := m.ws[req.Workspace]
@@ -98,6 +115,18 @@ func (m *Manager) CreateCursor(ctx context.Context, req CreateCursorReq) (*Curso
 				m.mu.Unlock()
 				return nil, "", fmt.Errorf("workspace cursor limit reached (%d)", n)
 			}
+		}
+	}
+	if req.Launch != nil && m.cfg.MaxAgents > 0 {
+		n := 0
+		for _, c := range m.cursors {
+			if c.Launch != nil && !c.Status.Terminal() {
+				n++
+			}
+		}
+		if n >= m.cfg.MaxAgents {
+			m.mu.Unlock()
+			return nil, "", fmt.Errorf("launched agent limit reached (%d); the admin can raise agora serve --max-agents", n)
 		}
 	}
 	if parent == nil && len(req.Permissions) == 0 {
@@ -138,7 +167,7 @@ func (m *Manager) CreateCursor(ctx context.Context, req CreateCursorReq) (*Curso
 	m.saveCursor(c)
 	cp := *c
 	m.mu.Unlock()
-	m.Bus.Publish("cursor.created", c.Workspace, id, map[string]any{"name": c.Name, "parent": c.Parent, "goal": c.Goal, "kind": c.Kind, "color": c.Color, "depth": depth})
+	m.Bus.Publish("cursor.created", c.Workspace, id, map[string]any{"name": c.Name, "parent": c.Parent, "goal": clip(c.Goal, eventGoalRunes), "kind": c.Kind, "color": c.Color, "depth": depth})
 	if req.Launch != nil {
 		if err := m.launchAgent(c.ID, tok); err != nil {
 			m.setCursorStatus(c.ID, CursorFailed, err.Error(), true)
@@ -238,6 +267,7 @@ func (m *Manager) setCursorStatus(id string, st CursorStatus, detail string, for
 }
 
 func (m *Manager) setCursorStatusWith(id string, st CursorStatus, detail string, force bool, set func(*Cursor)) error {
+	detail = clip(detail, maxDetailRunes)
 	m.mu.Lock()
 	c := m.cursors[id]
 	if c == nil {
@@ -261,6 +291,9 @@ func (m *Manager) setCursorStatusWith(id string, st CursorStatus, detail string,
 	m.saveCursor(c)
 	ws := c.Workspace
 	m.mu.Unlock()
+	if prev == CursorPaused && st != CursorPaused {
+		m.signalLaunch(id, false)
+	}
 	m.Bus.Publish("cursor.status", ws, id, map[string]any{"from": string(prev), "to": string(st), "detail": detail})
 	if st.Terminal() {
 		m.Bus.Publish("cursor.ended", ws, id, map[string]any{"status": string(st)})
@@ -279,6 +312,7 @@ func (m *Manager) SetStatus(id string, st CursorStatus, detail string) error {
 }
 
 func (m *Manager) Report(id, msg string, pct int) error {
+	msg = clip(msg, maxDetailRunes)
 	m.mu.Lock()
 	c := m.cursors[id]
 	if c == nil {
@@ -300,20 +334,25 @@ func (m *Manager) Report(id, msg string, pct int) error {
 }
 
 func (m *Manager) Complete(id string, result json.RawMessage) error {
+	if len(result) > maxResultBytes {
+		return fmt.Errorf("result is limited to %d bytes", maxResultBytes)
+	}
 	return m.setCursorStatusWith(id, CursorDone, "", false, func(c *Cursor) { c.Result = result })
 }
 
 func (m *Manager) Fail(id, msg string) error {
+	msg = clip(msg, maxDetailRunes)
 	return m.setCursorStatusWith(id, CursorFailed, msg, false, func(c *Cursor) { c.Error = msg })
 }
 
 func (m *Manager) CancelCursor(id, reason string, cascade bool) error {
+	err := m.setCursorStatus(id, CursorCancelled, reason, false)
 	if cascade {
 		for _, ch := range m.ListCursors(CursorQuery{Parent: id, Active: true}) {
 			m.CancelCursor(ch.ID, "parent cancelled", true)
 		}
 	}
-	return m.setCursorStatus(id, CursorCancelled, reason, false)
+	return err
 }
 
 func (m *Manager) Pause(id string) error {
@@ -352,6 +391,8 @@ func (m *Manager) DeleteCursor(id string) error {
 	delete(m.mail, id)
 	m.mu.Unlock()
 	m.store.Delete("cursors", id)
+	os.RemoveAll(filepath.Join(m.cfg.Home, "agents", id))
+	m.reclaimWorktrees(id, c.Workspace)
 	m.Bus.Publish("cursor.deleted", c.Workspace, id, nil)
 	return nil
 }
@@ -363,6 +404,9 @@ type TransferReq struct {
 }
 
 func (m *Manager) Transfer(id string, t TransferReq) (*Cursor, error) {
+	if t.Agent != nil && len(*t.Agent) > maxNameBytes {
+		return nil, fmt.Errorf("agent is limited to %d bytes", maxNameBytes)
+	}
 	m.mu.Lock()
 	c := m.cursors[id]
 	if c == nil {
@@ -394,6 +438,7 @@ func (m *Manager) Transfer(id string, t TransferReq) (*Cursor, error) {
 			c.Root = c.ID
 			c.Depth = 0
 		}
+		m.rerootLocked(c, 0)
 	}
 	if t.Agent != nil {
 		c.Agent = *t.Agent
@@ -406,6 +451,20 @@ func (m *Manager) Transfer(id string, t TransferReq) (*Cursor, error) {
 	}
 	m.Bus.Publish("cursor.transferred", cp.Workspace, id, map[string]any{"from_workspace": oldWS, "parent": cp.Parent, "agent": cp.Agent})
 	return &cp, nil
+}
+
+func (m *Manager) rerootLocked(c *Cursor, level int) {
+	if level > 32 {
+		return
+	}
+	for _, ch := range m.cursors {
+		if ch.Parent == c.ID && ch.ID != c.ID {
+			ch.Root = c.Root
+			ch.Depth = c.Depth + 1
+			m.saveCursor(ch)
+			m.rerootLocked(ch, level+1)
+		}
+	}
 }
 
 func (m *Manager) releaseCursorIn(ws, id string) {
@@ -498,6 +557,9 @@ func (m *Manager) closeOwned(ws, id string, apps bool) {
 }
 
 func (m *Manager) SendMessage(from, to string, body json.RawMessage) (*Message, error) {
+	if len(body) > maxMessageBytes {
+		return nil, fmt.Errorf("message body is limited to %d bytes", maxMessageBytes)
+	}
 	m.mu.Lock()
 	tc := m.cursors[to]
 	if tc == nil {

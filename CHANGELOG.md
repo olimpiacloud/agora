@@ -19,6 +19,9 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Deleting a cursor closes its tabs and stops its apps, and tabs owned by cursors that already ended can be used by others.
 - The Paseo live panel takes pointer, wheel and keyboard input.
 - `AGORA_TOKEN_FILE` for the CLI and MCP server.
+- `agora serve --workspace-retention` (7 days by default, `0` keeps them): destroyed workspaces are purged after that time, together with their browser profile (unless a live workspace shares it), home and checkpoints. They used to stay on disk forever. On the first start after upgrading, workspaces destroyed more than 7 days ago are purged within a minute. Deleting a cursor also removes its `agents/<id>` directory and log.
+- Launched agents can have a maximum runtime: `launch.max_runtime` (for example `"10m"`) per launch and `agora serve --agent-max-runtime` for the daemon (off by default). When it passes, the cursor fails with "agent exceeded its maximum runtime" and the process is stopped. Cursors cannot ask for more than the daemon value.
+- `config.webgl: "software"` (admin only) starts the workspace's Chromium with a CPU WebGL renderer, so pages with 3D content can be tested with the normal browser tools.
 
 ### Changed
 
@@ -37,6 +40,8 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - The dashboard no longer refetches cursors, workspaces and tabs on every pointer move.
 - The Paseo plugin wakes live views at most every 100 ms per workspace.
 - CI fails when the committed `web/dist` does not match `web/src`.
+- CI and `make check` run the Go unit tests with the race detector (`make race` runs only that).
+- CI runs the sandbox, X-user and ownership tests as root, with the `agora` and `agora-x` users, and fails if any of them is skipped.
 - Snapshots stop collecting at the element cap and compute names only for the elements they return, and tabs no longer enable the CDP `Runtime` domain.
 - MCP coordinates are mapped from the last screenshot only until `browser_snapshot boxes=true`, `desktop_windows` or a resize; tool descriptions say which coordinate space applies. `browser_eval` results over 64 KB are truncated in MCP.
 - Tab actions on a tab with an open JavaScript dialog fail at once with the dialog text instead of waiting for the timeout, and an action that opens a dialog returns it.
@@ -45,6 +50,9 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - The Paseo panel sends input over its viewer socket (held buttons and keys are released when the panel goes away, and non-finite coordinates are dropped), the agent wall shares one cursor-metadata poll and only polls visible tiles, and toolbar chips no longer remount on every frame.
 - Screenshots are kept per workspace (64 shots or 24 MB each, 256 MB in total) and dropped when the workspace suspends or is destroyed.
 - MCP tool calls are cancelled on `notifications/cancelled`; after stdin closes, running calls get up to 30 s to finish.
+- `make check` and CI run unit tests for the dashboard (`bun test` in `web/`) and typecheck the test files of the dashboard and the Paseo plugin.
+- The dashboard ignores pointer and stream-statistics events, refetches only the list an event can have changed (active cursors for progress and status, workspaces for workspace events), reads `/v1/system` and the full cursor list on its 5-second timer, and loads the tab list only while the Tabs pane is open.
+- Deleting a cursor (also when the daemon prunes a finished one) removes its git worktrees when they have no modified or untracked files, and frees their port block; the branch and its commits stay. A worktree with changes is kept and reported with a `worktree.kept` event. One cursor tree can hold at most 10 worktrees; the admin is not limited.
 
 ### Security
 
@@ -73,6 +81,14 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Cursors only get worktrees of repositories owned by the daemon user, inside `--worktree-roots` when set.
 - The installer writes the agents' token to a `0600` file and registers it as `AGORA_TOKEN_FILE` instead of passing it in argv and storing it in agent configs (existing inline entries are migrated), and aborts instead of building `main` when no release is found. The uninstaller removes that file as its owner.
 - Read-only tab actions no longer claim a tab, and claims are atomic, so a cursor that only looked at a tab cannot close it when it ends.
+- The Paseo plugin gives each agent's MCP server its cursor token through a `0600` file (`AGORA_TOKEN_FILE`) instead of an inline `AGORA_TOKEN`, which Paseo passed on the agent's command line where every local user could read it.
+- The stream `hello` message no longer includes `token_hash` or `launch.env` of the workspace's cursors, which every viewer (including read-only viewer links) could read.
+- Cursor progress messages, status details, errors and human-request reasons are cut to 2000 characters; results over 256 KB, message bodies over 64 KB, goals and prompts over 64 KB, names over 200 bytes and more than 32 labels are refused; cursor, board and workspace-creation requests are limited to 512 KB. A cursor could previously make the daemon keep gigabytes in memory.
+- `agora serve --max-agents` (16 by default, `0` removes the limit): the daemon refuses to launch another agent while that many launched agents are alive, so one cursor can no longer fan out an unbounded number of agent processes. A subagent's `budget.max_cursors` can no longer exceed its parent's.
+- The limit of 5 live workspaces per cursor tree now counts forks and the workspaces of deleted cursors. A workspace forked by a cursor belongs to that cursor (it could not use its own fork before). Cursors cannot set `suspend_after` above the daemon default, negative `idle_after`, `suspend_after` and `ttl` are refused, and a cursor cannot add a profile snapshot to a workspace that already has 3.
+- Label keys starting with `paseo_` can only be set with the admin token. A cursor could mark its own cursors and workspaces with the labels the Paseo plugin uses to recognise its agents and workspaces.
+- Built with Go 1.27.4, which fixes a `net/http` server crash (GO-2026-6859).
+- The sandbox helper now empties the capability bounding set and sets `no_new_privs` before it starts a workspace's Chrome or apps, as `docs/SANDBOX.md` already described.
 
 ### Fixed
 
@@ -111,6 +127,17 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - Shutdown waits for launched agents to record their result before the final state flush.
 - Detailed usage of a suspending workspace, and the set of purged workspace logs, no longer grow without bound.
 - The Paseo plugin removes the Agora workspace of a Paseo workspace when it is archived, and its periodic reconcile removes workspaces whose Paseo workspace no longer exists (never-started ones are purged; ones that ran keep their profile on disk). Busy workspaces and workspaces without a Paseo label are left alone. Scheduled Paseo runs no longer pile up workspaces.
+- Paseo chat cards and agent-wall tiles no longer resume a suspended workspace just by being shown; they connect with `wake=0` and fall back to the stored screenshot or a "suspended" note. A Paseo view that was told the workspace is suspended now checks again every 10 seconds and comes back when an agent resumed it, and a card no longer shows "Live" on a stale frame.
+- The Paseo plugin's cleanup could delete the cursor it had just created for an agent that was being resumed, retire workspaces after a truncated Paseo workspace listing, and retire a workspace that an agent had started using again. It now skips agents opened in the last minute, aborts on an incomplete listing and re-checks each workspace right before retiring it.
+- The web viewer shows Resume after the daemon ends a session (it showed "session ended" forever, on both WebRTC and WebSocket) and no longer thaws a frozen workspace by reconnecting on its own. Pointer positions follow a desktop resize over WebRTC, and keys and mouse buttons held when the viewer loses focus, is hidden or closes are released instead of staying pressed on the desktop.
+- X connections of the display, the input seats and the screen capturers now read their event queue; they used to stop answering for good after 5000 queued events or errors, which froze input, the window list or the stream of a workspace. Desktop input refuses button numbers outside 1-9, more than 10 clicks and more than 100 scroll notches per call, a key combination that fails halfway releases the keys it pressed, and the back and forward mouse buttons of a viewer reach the desktop as buttons 8 and 9 instead of wheel scrolls.
+- Element refs are never reused inside a tab: after a navigation an old ref fails with "take a new snapshot" instead of acting on a different element of the new page. `fill`, `select` and `upload` on an element that was removed from the page now fail too; `fill` used to type into whatever field had focus and report success.
+- A paused agent whose status changed without `resume` (a CAPTCHA followed by a human returning control, or a `status` call) stayed stopped while shown as running; its process is now resumed whenever the cursor leaves `paused`, and cancelling a paused agent no longer waits 5 seconds.
+- A cascading cancel marks the cursor cancelled before its children, so a subagent spawned during the cancel can no longer survive it.
+- An expired workspace is destroyed once: `workspace.expired` and `workspace.destroyed` are no longer published again every two seconds while the destroy runs, and destroying an already destroyed workspace does nothing.
+- Input from a viewer that was already detached no longer marks a suspended or frozen workspace active or restarts it, a call that arrives while an idle suspend is queued keeps its runtime, the list of tabs to restore survives a restore that restored nothing, and a browser crash is recorded (with its tabs and a `browser.crashed` event) even when an API call notices it before the watcher does.
+- `budget.max_tabs` holds when several cursors open tabs at the same time. An app whose owner cursor ended gets SIGTERM once and SIGKILL 10 seconds later, with a single `scheduler.app_stopped` event instead of one every 2 seconds. Transferring a cursor updates the root and depth of its whole subtree. A desktop created larger than 1920x1200 can be resized up to its own size again. Per-tab observation caches are dropped when the tab closes, and usage figures are no longer modified while being served.
+- A viewer reconnecting with `wake=0` no longer thaws a frozen workspace; it gets `bye: suspended` like on a suspended one.
 
 ## [0.1.0] - 2026-11-06
 

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -40,6 +41,7 @@ type Spec struct {
 	Uid, Gid int
 	Binds    []string
 	Hide     []string
+	NetNS    string
 }
 
 func Wrap(self string, s Spec) []string {
@@ -49,6 +51,9 @@ func Wrap(self string, s Spec) []string {
 	}
 	for _, h := range s.Hide {
 		args = append(args, "-hide", h)
+	}
+	if s.NetNS != "" {
+		args = append(args, "-netns", s.NetNS)
 	}
 	return append(args, "--")
 }
@@ -107,13 +112,16 @@ func Main(args []string) {
 }
 
 func run(args []string) error {
+	runtime.LockOSThread()
 	fs := flag.NewFlagSet(Cmd, flag.ContinueOnError)
 	var s Spec
 	var binds, hide list
+	var netns string
 	fs.IntVar(&s.Uid, "uid", 0, "")
 	fs.IntVar(&s.Gid, "gid", 0, "")
 	fs.Var(&binds, "bind", "")
 	fs.Var(&hide, "hide", "")
+	fs.StringVar(&netns, "netns", "", "")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -124,6 +132,11 @@ func run(args []string) error {
 	if os.Getpid() != 1 {
 		return errors.New("must run as pid 1 of a new pid namespace")
 	}
+	if netns != "" {
+		if err := joinNetNS(netns); err != nil {
+			return fmt.Errorf("join network namespace %s: %w", netns, err)
+		}
+	}
 	s.Binds, s.Hide = binds, hide
 	cwd, _ := os.Getwd()
 	if err := setupRoot(s); err != nil {
@@ -131,6 +144,9 @@ func run(args []string) error {
 	}
 	if err := os.Chdir(cwd); err != nil {
 		os.Chdir("/")
+	}
+	if err := dropBounding(); err != nil {
+		return err
 	}
 	if err := syscall.Setgroups(nil); err != nil {
 		return err
@@ -141,8 +157,53 @@ func run(args []string) error {
 	if err := syscall.Setresuid(s.Uid, s.Uid, s.Uid); err != nil {
 		return err
 	}
+	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
+		return fmt.Errorf("no_new_privs: %w", err)
+	}
 	unix.Prctl(unix.PR_SET_PDEATHSIG, uintptr(syscall.SIGKILL), 0, 0, 0)
 	return supervise(argv)
+}
+
+func joinNetNS(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	err = unix.Setns(int(f.Fd()), unix.CLONE_NEWNET)
+	f.Close()
+	if err != nil {
+		return err
+	}
+	return loopbackUp()
+}
+
+func loopbackUp() error {
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	ifr, err := unix.NewIfreq("lo")
+	if err != nil {
+		return err
+	}
+	if err := unix.IoctlIfreq(fd, unix.SIOCGIFFLAGS, ifr); err != nil {
+		return err
+	}
+	ifr.SetUint16(ifr.Uint16() | unix.IFF_UP)
+	return unix.IoctlIfreq(fd, unix.SIOCSIFFLAGS, ifr)
+}
+
+func dropBounding() error {
+	for c := uintptr(0); c < 64; c++ {
+		if err := unix.Prctl(unix.PR_CAPBSET_DROP, c, 0, 0, 0); err != nil {
+			if err == unix.EINVAL && c > 0 {
+				return nil
+			}
+			return fmt.Errorf("drop capability %d from the bounding set: %w", c, err)
+		}
+	}
+	return nil
 }
 
 func setupRoot(s Spec) error {

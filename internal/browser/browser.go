@@ -19,6 +19,18 @@ import (
 	"github.com/olimpiacloud/agora/internal/sandbox"
 )
 
+var softwareWebGL = []string{"--enable-unsafe-swiftshader"}
+
+func WebGLArgs(mode string) ([]string, error) {
+	switch mode {
+	case "":
+		return nil, nil
+	case "software":
+		return append([]string{}, softwareWebGL...), nil
+	}
+	return nil, fmt.Errorf("webgl must be empty or \"software\", got %q", mode)
+}
+
 type LaunchOptions struct {
 	Binary      string
 	UserDataDir string

@@ -48,6 +48,7 @@ type WorkspaceConfig struct {
 	BrowserArgs   []string `json:"browser_args,omitempty"`
 	AutostartURLs []string `json:"autostart_urls,omitempty"`
 	Sandbox       bool     `json:"sandbox,omitempty"`
+	WebGL         string   `json:"webgl,omitempty"`
 }
 
 type TabRecord struct {
@@ -78,6 +79,7 @@ type Workspace struct {
 	State      WSState           `json:"state"`
 	Config     WorkspaceConfig   `json:"config"`
 	Owner      string            `json:"owner,omitempty"`
+	OwnerRoot  string            `json:"owner_root,omitempty"`
 	ForkOf     string            `json:"fork_of,omitempty"`
 	Created    time.Time         `json:"created"`
 	Updated    time.Time         `json:"updated"`
@@ -132,14 +134,15 @@ type Usage struct {
 }
 
 type LaunchSpec struct {
-	Profile string            `json:"profile,omitempty"`
-	Effort  string            `json:"effort,omitempty"`
-	Tools   []string          `json:"tools,omitempty"`
-	Adapter string            `json:"adapter"`
-	Prompt  string            `json:"prompt,omitempty"`
-	Command []string          `json:"command,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	Model   string            `json:"model,omitempty"`
+	Profile    string            `json:"profile,omitempty"`
+	Effort     string            `json:"effort,omitempty"`
+	Tools      []string          `json:"tools,omitempty"`
+	Adapter    string            `json:"adapter"`
+	Prompt     string            `json:"prompt,omitempty"`
+	Command    []string          `json:"command,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+	Model      string            `json:"model,omitempty"`
+	MaxRuntime Duration          `json:"max_runtime,omitempty"`
 }
 
 type Cursor struct {
@@ -206,6 +209,7 @@ type Worktree struct {
 	Base      string    `json:"base"`
 	Cursor    string    `json:"cursor,omitempty"`
 	Workspace string    `json:"workspace,omitempty"`
+	Root      string    `json:"root,omitempty"`
 	PortBase  int       `json:"port_base"`
 	Ports     int       `json:"ports"`
 	Created   time.Time `json:"created"`

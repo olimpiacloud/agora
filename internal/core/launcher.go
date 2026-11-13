@@ -308,11 +308,22 @@ func (m *Manager) launchAgent(id, tok string) error {
 	} else {
 		m.Bus.Publish("agent.launched", c.Workspace, id, map[string]any{"adapter": c.Launch.Adapter, "pid": cmd.Process.Pid})
 	}
+	limit := c.Launch.MaxRuntime.Duration
+	if limit <= 0 {
+		limit = m.cfg.AgentMaxRuntime
+	}
+	var timer *time.Timer
+	if tracked && limit > 0 {
+		timer = time.AfterFunc(limit, func() { m.expireLaunch(id, limit) })
+	}
 	go func() {
 		if tracked {
 			defer m.agents.Done()
 		}
 		err := cmd.Wait()
+		if timer != nil {
+			timer.Stop()
+		}
 		if logf != nil {
 			logf.Close()
 		}
@@ -362,6 +373,13 @@ func (m *Manager) launchAgent(id, tok string) error {
 		}
 	}()
 	return nil
+}
+
+func (m *Manager) expireLaunch(id string, limit time.Duration) {
+	if m.Fail(id, fmt.Sprintf("agent exceeded its maximum runtime of %s", limit)) != nil {
+		return
+	}
+	m.killLaunch(id)
 }
 
 func (m *Manager) registerLaunch(id string, lp *launchProc) bool {

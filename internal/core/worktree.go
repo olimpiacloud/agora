@@ -74,6 +74,42 @@ func (m *Manager) releasePorts(base int) {
 	m.mu.Unlock()
 }
 
+const maxTreeWorktrees = 10
+
+func (m *Manager) reserveWorktree(root string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := m.wtPending[root]
+	for _, w := range m.worktrees {
+		r := w.Root
+		if r == "" {
+			if c := m.cursors[w.Cursor]; c != nil {
+				r = c.Root
+			}
+		}
+		if r == root {
+			n++
+		}
+	}
+	if n >= maxTreeWorktrees {
+		return fmt.Errorf("%w: cursor tree already has %d worktrees (limit %d); delete finished subagents or ask the admin to remove worktrees", ErrForbidden, n, maxTreeWorktrees)
+	}
+	if m.wtPending == nil {
+		m.wtPending = map[string]int{}
+	}
+	m.wtPending[root]++
+	return nil
+}
+
+func (m *Manager) unreserveWorktree(root string) {
+	m.mu.Lock()
+	m.wtPending[root]--
+	if m.wtPending[root] <= 0 {
+		delete(m.wtPending, root)
+	}
+	m.mu.Unlock()
+}
+
 func (m *Manager) CreateWorktree(ctx context.Context, req WorktreeReq, cursor, ws string) (*Worktree, error) {
 	if req.Ports < 0 || req.Ports > 20 {
 		return nil, fmt.Errorf("ports must be between 1 and 20 (0 keeps the default of 10)")
@@ -113,8 +149,23 @@ func (m *Manager) CreateWorktree(ctx context.Context, req WorktreeReq, cursor, w
 	if req.Ports == 0 {
 		req.Ports = 10
 	}
+	root := ""
+	m.mu.Lock()
+	if c := m.cursors[cursor]; c != nil {
+		root = c.Root
+	}
+	m.mu.Unlock()
+	limited := !req.Trusted && root != ""
+	if limited {
+		if err := m.reserveWorktree(root); err != nil {
+			return nil, err
+		}
+	}
 	base, err := m.allocPorts(req.Ports)
 	if err != nil {
+		if limited {
+			m.unreserveWorktree(root)
+		}
 		return nil, err
 	}
 	path := filepath.Join(m.cfg.Home, "worktrees", id)
@@ -124,12 +175,21 @@ func (m *Manager) CreateWorktree(ctx context.Context, req WorktreeReq, cursor, w
 	}
 	if out, err := gitCmd(ctx, args...).CombinedOutput(); err != nil {
 		m.releasePorts(base)
+		if limited {
+			m.unreserveWorktree(root)
+		}
 		return nil, fmt.Errorf("git worktree add: %v: %s", err, strings.TrimSpace(string(out)))
 	}
-	wt := &Worktree{ID: id, Repo: repo, Path: path, Branch: req.Branch, Base: req.Base, Cursor: cursor, Workspace: ws, PortBase: base, Ports: req.Ports, Created: time.Now().UTC()}
+	wt := &Worktree{ID: id, Repo: repo, Path: path, Branch: req.Branch, Base: req.Base, Cursor: cursor, Workspace: ws, Root: root, PortBase: base, Ports: req.Ports, Created: time.Now().UTC()}
 	m.mu.Lock()
 	m.worktrees[id] = wt
 	delete(m.portsHeld, base)
+	if limited {
+		m.wtPending[root]--
+		if m.wtPending[root] <= 0 {
+			delete(m.wtPending, root)
+		}
+	}
 	m.store.Put("worktrees", id, wt)
 	m.mu.Unlock()
 	m.Bus.Publish("worktree.created", ws, cursor, map[string]any{"id": id, "branch": wt.Branch, "path": path, "port_base": wt.PortBase})
@@ -200,6 +260,25 @@ func (m *Manager) ListWorktrees() []*Worktree {
 		out = append(out, &cp)
 	}
 	return out
+}
+
+func (m *Manager) reclaimWorktrees(cursor, ws string) {
+	var ids []string
+	m.mu.Lock()
+	for id, w := range m.worktrees {
+		if w.Cursor == cursor {
+			ids = append(ids, id)
+		}
+	}
+	m.mu.Unlock()
+	for _, id := range ids {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := m.RemoveWorktree(ctx, id, false)
+		cancel()
+		if err != nil {
+			m.Bus.Publish("worktree.kept", ws, cursor, map[string]any{"id": id, "reason": err.Error()})
+		}
+	}
 }
 
 func (m *Manager) RemoveWorktree(ctx context.Context, id string, force bool) error {

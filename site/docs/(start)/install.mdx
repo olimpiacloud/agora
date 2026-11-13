@@ -94,6 +94,9 @@ agora serve --listen 127.0.0.1:7788 --home ~/.agora
 | `--suspend-after` | `30m` | Suspend a workspace after this long without agent activity or human input, even if someone is watching (`0` keeps workspaces running). |
 | `--tab-idle` | `15m` | Close browser tabs unused for this long and stop apps of cursors that already ended (`0` never closes them). |
 | `--cursor-retention` | `168h` | Delete finished cursors with no live descendants after this long (`0` keeps them forever). |
+| `--workspace-retention` | `168h` | Purge a destroyed workspace (its record, browser profile, home and checkpoints) after this long (`0` keeps them forever). A profile shared with a live workspace is kept. |
+| `--agent-max-runtime` | `0` | Fail and stop a launched agent after this long (`0` sets no limit). A launch can ask for a shorter time with `launch.max_runtime`; only the admin can ask for a longer one. |
+| `--max-agents` | `16` | Launched agents (`launch.adapter`) that may be alive at once, across all workspaces. Spawning one more fails until another ends (`0` removes the limit). |
 | `--worktree-roots` | empty | Comma-separated absolute directories where cursors may create git worktrees. Empty allows any repository; either way, cursors only get worktrees of repositories whose top-level directory and `.git` are owned by root (the admin is not restricted). |
 
 Next: the [quickstart](/quickstart).
