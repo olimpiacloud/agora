@@ -445,7 +445,7 @@ func tools() []Tool {
 				}
 				return s.call(ctx, "POST", "/v1/workspaces/"+ws+"/"+a.S("op"), pick(a, "surface", "ttl_ms", "reason"))
 			}},
-		{Name: "human_request", Desc: "Ask a human to take over (CAPTCHA, MFA, approval). Marks you needs_human; the browser/session stays alive. Then call events_wait with types control.returned.", Props: with(map[string]any{"reason": str("What the human must do")}), Required: []string{"reason"},
+		{Name: "human_request", Desc: "Ask a human to take over (CAPTCHA you cannot pass, login, MFA, approval). Click Cloudflare Turnstile checkboxes yourself first. Marks you needs_human; the browser/session stays alive. Then call events_wait with types control.returned.", Props: with(map[string]any{"reason": str("What the human must do")}), Required: []string{"reason"},
 			Run: func(ctx context.Context, s *Server, a Args) ([]content, error) {
 				ws, err := s.wsArg(a)
 				if err != nil {

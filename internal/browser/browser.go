@@ -23,10 +23,8 @@ var softwareWebGL = []string{"--enable-unsafe-swiftshader"}
 
 func WebGLArgs(mode string) ([]string, error) {
 	switch mode {
-	case "":
+	case "", "software":
 		return nil, nil
-	case "software":
-		return append([]string{}, softwareWebGL...), nil
 	}
 	return nil, fmt.Errorf("webgl must be empty or \"software\", got %q", mode)
 }
@@ -145,9 +143,11 @@ func Launch(ctx context.Context, o LaunchOptions) (*Browser, error) {
 		"--disable-crash-reporter",
 		"--disable-breakpad",
 		"--hide-crash-restore-bubble",
+		"--disable-blink-features=AutomationControlled",
 		fmt.Sprintf("--window-size=%d,%d", o.Width, o.Height),
 		"--window-position=0,0",
 	}
+	args = append(args, softwareWebGL...)
 	if o.Headless {
 		args = append(args, "--headless=new")
 	} else {

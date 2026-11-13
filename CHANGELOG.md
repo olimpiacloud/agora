@@ -6,6 +6,7 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 
 ### Added
 
+- Chromium launches without the automation flag (`navigator.webdriver` is `false`) and with WebGL on SwiftShader in every workspace (`config.webgl` is still accepted but no longer needed), so Cloudflare Turnstile passes when an agent clicks its checkbox. Agents are told to click Turnstile themselves and to call `human_request` only when it keeps failing or for other CAPTCHAs, logins and MFA.
 - Idle reaping: tabs unused for `--tab-idle` (15 minutes by default) are closed unless their cursor is waiting for a human or the viewer was used in that time, Chromium stops after two minutes with no tabs, and apps of cursors that already ended are stopped. Events `scheduler.tab_closed`, `scheduler.browser_stopped` and `scheduler.app_stopped`.
 - Stream endpoints take `wake=0`: on a suspended workspace they answer `{"type":"bye","reason":"suspended"}` (WebRTC: `409`) instead of resuming it. The web viewer and the Paseo panel use it on reconnects and show a Resume button.
 - Pending cursors without a launch and without a Paseo agent are cancelled after 24 hours, and the Paseo plugin deletes cursors of Paseo agents that no longer exist, are closed or are archived.
@@ -21,7 +22,6 @@ All notable changes to Agora. The format follows [Keep a Changelog](https://keep
 - `AGORA_TOKEN_FILE` for the CLI and MCP server.
 - `agora serve --workspace-retention` (7 days by default, `0` keeps them): destroyed workspaces are purged after that time, together with their browser profile (unless a live workspace shares it), home and checkpoints. They used to stay on disk forever. On the first start after upgrading, workspaces destroyed more than 7 days ago are purged within a minute. Deleting a cursor also removes its `agents/<id>` directory and log.
 - Launched agents can have a maximum runtime: `launch.max_runtime` (for example `"10m"`) per launch and `agora serve --agent-max-runtime` for the daemon (off by default). When it passes, the cursor fails with "agent exceeded its maximum runtime" and the process is stopped. Cursors cannot ask for more than the daemon value.
-- `config.webgl: "software"` (admin only) starts the workspace's Chromium with a CPU WebGL renderer, so pages with 3D content can be tested with the normal browser tools.
 
 ### Changed
 

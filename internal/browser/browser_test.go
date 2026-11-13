@@ -62,6 +62,16 @@ func TestBrowserSemantic(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(500 * time.Millisecond)
+	var fp struct {
+		Webdriver bool `json:"webdriver"`
+		WebGL     bool `json:"webgl"`
+	}
+	if err := tab.Eval(ctx, `({webdriver: navigator.webdriver, webgl: !!document.createElement('canvas').getContext('webgl')})`, &fp); err != nil {
+		t.Fatal(err)
+	}
+	if fp.Webdriver || !fp.WebGL {
+		t.Fatalf("fingerprint %+v, want webdriver false and webgl true", fp)
+	}
 	s, err := tab.Snapshot(ctx, 200, 0)
 	if err != nil {
 		t.Fatal(err)
