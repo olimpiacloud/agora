@@ -40,7 +40,7 @@ Pasá estos campos dentro de `config` al crear un workspace:
 | `freeze_on_idle` | Congelar en vez de solo marcar como idle. |
 | `budget` | `memory_mb`, `cpu_percent`, `max_cursors`, `max_tabs`, `max_depth`. |
 | `browser_args` | Flags extra de Chromium. |
-| `webgl` | `"software"` habilita WebGL con un renderizador por CPU. Solo admin. Más lento que una GPU; pensado para probar páginas con contenido 3D. |
+| `webgl` | Se acepta por compatibilidad (`"software"`, solo admin); WebGL siempre está activo con un renderizador por CPU. |
 | `autostart_urls` | Pestañas a abrir cuando arranca el navegador. |
 | `sandbox` | Corre el Chrome y las apps del workspace en una vista restringida del host. Requiere que el daemon corra como root. Mirá [workspaces en sandbox](/security#sandboxed-workspaces). |
 

@@ -348,7 +348,7 @@ func (s *Server) handle(ctx context.Context, req rpcReq) (any, map[string]any) {
 			"protocolVersion": pv,
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
 			"serverInfo":      map[string]any{"name": "agora", "version": "0.1.0"},
-			"instructions":    "Agora gives you a real Linux desktop with Chromium. Prefer browser_* tools (semantic, refs from browser_snapshot) for web pages; use desktop_* tools (pixels + real mouse/keyboard on your own input seat) for anything else. Spawn subagents with cursor_spawn, wait with cursor_wait, and report with cursor_report/cursor_complete. If a CAPTCHA or login needs a person, call human_request and then events_wait for control.returned.",
+			"instructions":    "Agora gives you a real Linux desktop with Chromium. Prefer browser_* tools (semantic, refs from browser_snapshot) for web pages; use desktop_* tools (pixels + real mouse/keyboard on your own input seat) for anything else. Spawn subagents with cursor_spawn, wait with cursor_wait, and report with cursor_report/cursor_complete. For a Cloudflare Turnstile \"Verify you are human\" checkbox, click it yourself (browser_screenshot, then browser_click at the checkbox x,y), wait a few seconds and call cursor_status running once the page loads. If another CAPTCHA, a login or MFA needs a person, or Turnstile keeps failing, call human_request, then events_wait with types control.returned.",
 		}, nil
 	case "ping":
 		return map[string]any{}, nil
