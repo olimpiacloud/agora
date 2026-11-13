@@ -1,6 +1,6 @@
 # Agora
 
-![Agora: a market square with stalls under a colonnade, each with its own browser windows and a cursor moving between them](docs/assets/agora-banner.jpg)
+![Agora: a market square with stalls under a colonnade, each with its own browser windows and a cursor moving between them](docs/assets/agora-banner.png)
 
 [![CI](https://github.com/olimpiacloud/agora/actions/workflows/ci.yml/badge.svg)](https://github.com/olimpiacloud/agora/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/olimpiacloud/agora)](https://github.com/olimpiacloud/agora/releases/latest)
